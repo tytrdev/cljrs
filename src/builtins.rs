@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::env::Env;
 use crate::error::{Error, Result};
+use crate::eval;
 use crate::value::{Builtin, Value};
 
 pub fn install(env: &Env) {
@@ -40,6 +41,17 @@ fn core_fns() -> Vec<(&'static str, fn(&[Value]) -> Result<Value>)> {
         ("empty?", empty_q),
         ("inc", inc_fn),
         ("dec", dec_fn),
+        ("map", map_fn),
+        ("filter", filter_fn),
+        ("reduce", reduce_fn),
+        ("range", range_fn),
+        ("take", take_fn),
+        ("drop", drop_fn),
+        ("even?", even_q),
+        ("odd?", odd_q),
+        ("pos?", pos_q),
+        ("neg?", neg_q),
+        ("identity", identity_fn),
     ]
 }
 
@@ -474,4 +486,172 @@ fn dec_fn(args: &[Value]) -> Result<Value> {
         Num::I(i) => Ok(i.checked_sub(1).map(Value::Int).unwrap_or_else(|| Value::Float(i as f64 - 1.0))),
         Num::F(f) => Ok(Value::Float(f - 1.0)),
     }
+}
+
+fn as_seq<'a>(v: &'a Value) -> Result<&'a [Value]> {
+    match v {
+        Value::Nil => Ok(&[]),
+        Value::List(v) | Value::Vector(v) => Ok(v.as_slice()),
+        _ => Err(Error::Type(format!(
+            "expected sequence, got {}",
+            v.type_name()
+        ))),
+    }
+}
+
+fn map_fn(args: &[Value]) -> Result<Value> {
+    if args.len() < 2 {
+        return Err(Error::Arity {
+            expected: ">= 2".into(),
+            got: args.len(),
+        });
+    }
+    let f = &args[0];
+    let coll = as_seq(&args[1])?;
+    let mut out = Vec::with_capacity(coll.len());
+    for item in coll {
+        out.push(eval::apply(f, std::slice::from_ref(item))?);
+    }
+    Ok(Value::List(Arc::new(out)))
+}
+
+fn filter_fn(args: &[Value]) -> Result<Value> {
+    if args.len() != 2 {
+        return Err(Error::Arity {
+            expected: "2".into(),
+            got: args.len(),
+        });
+    }
+    let pred = &args[0];
+    let coll = as_seq(&args[1])?;
+    let mut out = Vec::new();
+    for item in coll {
+        let keep = eval::apply(pred, std::slice::from_ref(item))?;
+        if keep.truthy() {
+            out.push(item.clone());
+        }
+    }
+    Ok(Value::List(Arc::new(out)))
+}
+
+fn reduce_fn(args: &[Value]) -> Result<Value> {
+    match args.len() {
+        2 => {
+            let f = &args[0];
+            let coll = as_seq(&args[1])?;
+            if coll.is_empty() {
+                // Clojure's reduce with no init on empty coll: call f with no args
+                return eval::apply(f, &[]);
+            }
+            let mut acc = coll[0].clone();
+            for item in &coll[1..] {
+                acc = eval::apply(f, &[acc, item.clone()])?;
+            }
+            Ok(acc)
+        }
+        3 => {
+            let f = &args[0];
+            let mut acc = args[1].clone();
+            let coll = as_seq(&args[2])?;
+            for item in coll {
+                acc = eval::apply(f, &[acc, item.clone()])?;
+            }
+            Ok(acc)
+        }
+        n => Err(Error::Arity {
+            expected: "2 or 3".into(),
+            got: n,
+        }),
+    }
+}
+
+fn range_fn(args: &[Value]) -> Result<Value> {
+    let (start, end, step) = match args.len() {
+        1 => (0i64, to_i64(&args[0])?, 1i64),
+        2 => (to_i64(&args[0])?, to_i64(&args[1])?, 1i64),
+        3 => (to_i64(&args[0])?, to_i64(&args[1])?, to_i64(&args[2])?),
+        n => {
+            return Err(Error::Arity {
+                expected: "1, 2, or 3".into(),
+                got: n,
+            });
+        }
+    };
+    if step == 0 {
+        return Err(Error::Eval("range: step cannot be zero".into()));
+    }
+    let mut out = Vec::new();
+    let mut i = start;
+    if step > 0 {
+        while i < end {
+            out.push(Value::Int(i));
+            i += step;
+        }
+    } else {
+        while i > end {
+            out.push(Value::Int(i));
+            i += step;
+        }
+    }
+    Ok(Value::List(Arc::new(out)))
+}
+
+fn to_i64(v: &Value) -> Result<i64> {
+    match v {
+        Value::Int(n) => Ok(*n),
+        Value::Float(f) => Ok(*f as i64),
+        _ => Err(Error::Type(format!(
+            "expected integer, got {}",
+            v.type_name()
+        ))),
+    }
+}
+
+fn take_fn(args: &[Value]) -> Result<Value> {
+    if args.len() != 2 {
+        return Err(Error::Arity {
+            expected: "2".into(),
+            got: args.len(),
+        });
+    }
+    let n = to_i64(&args[0])?.max(0) as usize;
+    let coll = as_seq(&args[1])?;
+    let taken: Vec<Value> = coll.iter().take(n).cloned().collect();
+    Ok(Value::List(Arc::new(taken)))
+}
+
+fn drop_fn(args: &[Value]) -> Result<Value> {
+    if args.len() != 2 {
+        return Err(Error::Arity {
+            expected: "2".into(),
+            got: args.len(),
+        });
+    }
+    let n = to_i64(&args[0])?.max(0) as usize;
+    let coll = as_seq(&args[1])?;
+    let dropped: Vec<Value> = coll.iter().skip(n).cloned().collect();
+    Ok(Value::List(Arc::new(dropped)))
+}
+
+fn even_q(args: &[Value]) -> Result<Value> {
+    Ok(Value::Bool(to_i64(&args[0])? % 2 == 0))
+}
+fn odd_q(args: &[Value]) -> Result<Value> {
+    Ok(Value::Bool(to_i64(&args[0])? % 2 != 0))
+}
+fn pos_q(args: &[Value]) -> Result<Value> {
+    Ok(Value::Bool(to_i64(&args[0])? > 0))
+}
+fn neg_q(args: &[Value]) -> Result<Value> {
+    Ok(Value::Bool(to_i64(&args[0])? < 0))
+}
+
+fn identity_fn(args: &[Value]) -> Result<Value> {
+    if args.len() != 1 {
+        return Err(Error::Arity {
+            expected: "1".into(),
+            got: args.len(),
+        });
+    }
+    Ok(args[0].clone())
 }
