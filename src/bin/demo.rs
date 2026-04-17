@@ -22,7 +22,7 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 use std::process;
-use std::time::{Instant, SystemTime};
+use std::time::{Duration, Instant};
 
 use cljrs::{builtins, env::Env, eval, reader, value::Value};
 use eframe::egui;
@@ -46,7 +46,11 @@ fn main() {
 
     let env = Env::new();
     builtins::install(&env);
-    let last_mtime = load_file(&env, &path);
+    let initial_source = fs::read_to_string(&path).unwrap_or_default();
+    // Seed the env from the initial source so the very first frame renders.
+    if let Err(e) = eval_source(&env, &initial_source) {
+        eprintln!("[demo] initial eval: {e}");
+    }
 
     if let Some(frames) = headless_frames {
         run_headless(&env, frames);
@@ -56,7 +60,6 @@ fn main() {
     let app = DemoApp {
         env,
         path,
-        last_mtime,
         frame: 0,
         started: Instant::now(),
         sliders: [500, 500, 500, 500],
@@ -70,11 +73,15 @@ fn main() {
         texture: None,
         last_frame_ms: 0.0,
         last_error: None,
+        source: initial_source.clone(),
+        last_evaled_source: initial_source,
+        last_edit_at: Instant::now(),
+        save_flash: None,
     };
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([WIDTH as f32 + 280.0, HEIGHT as f32 + 60.0])
+            .with_inner_size([WIDTH as f32 + 720.0, HEIGHT as f32 + 60.0])
             .with_title("cljrs — live-coded CPU kernel"),
         ..Default::default()
     };
@@ -90,7 +97,6 @@ fn main() {
 struct DemoApp {
     env: Env,
     path: PathBuf,
-    last_mtime: Option<SystemTime>,
     frame: u64,
     started: Instant,
     sliders: [i64; 4],
@@ -99,26 +105,102 @@ struct DemoApp {
     texture: Option<egui::TextureHandle>,
     last_frame_ms: f64,
     last_error: Option<String>,
+    /// Current editor buffer. Mutated by the TextEdit.
+    source: String,
+    /// Last buffer content that was fed to the evaluator. We re-evaluate
+    /// when `source != last_evaled_source` AND the user has paused typing.
+    last_evaled_source: String,
+    /// Most recent edit time — used to debounce re-evaluation so we don't
+    /// try to compile after every keystroke.
+    last_edit_at: Instant,
+    /// Transient "saved!" toast shown next to the save button.
+    save_flash: Option<Instant>,
 }
 
 impl eframe::App for DemoApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Hot-reload on file mtime change.
-        let current_mtime = mtime(&self.path);
-        if current_mtime != self.last_mtime {
-            self.last_mtime = load_file(&self.env, &self.path);
-            self.last_error = None;
+        // Debounced re-eval of the editor buffer. We rebuild the env from
+        // scratch each time so stale defn-native JIT'd fns are released
+        // and the new kernel takes over cleanly.
+        let debounce_elapsed = self.last_edit_at.elapsed() > Duration::from_millis(300);
+        if self.source != self.last_evaled_source && debounce_elapsed {
+            let fresh = Env::new();
+            builtins::install(&fresh);
+            match eval_source(&fresh, &self.source) {
+                Ok(()) => {
+                    self.env = fresh;
+                    self.last_error = None;
+                    self.last_evaled_source = self.source.clone();
+                }
+                Err(msg) => {
+                    // Keep the old env running so the render doesn't flash.
+                    self.last_error = Some(msg);
+                    self.last_evaled_source = self.source.clone();
+                }
+            }
+        }
+
+        // Ctrl+S / Cmd+S saves the editor buffer to the file on disk.
+        let save_pressed = ctx.input(|i| {
+            i.key_pressed(egui::Key::S)
+                && (i.modifiers.command || i.modifiers.ctrl)
+        });
+        if save_pressed {
+            if fs::write(&self.path, &self.source).is_ok() {
+                self.save_flash = Some(Instant::now());
+            }
         }
 
         // Read slider-name hints from env globals if the kernel exported them.
-        // Convention: if (def slider-N-label "...") exists, use that. Otherwise
-        // fall back to "sN (param N)".
         for i in 0..4 {
             let key = format!("slider-{i}-label");
             if let Ok(Value::Str(s)) = self.env.lookup(&key) {
                 self.slider_names[i] = s.to_string();
             }
         }
+
+        // Left-side panel: the code editor.
+        egui::SidePanel::left("editor")
+            .default_width(460.0)
+            .resizable(true)
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.heading("editor");
+                    ui.separator();
+                    if ui.button("save to disk").clicked() {
+                        if fs::write(&self.path, &self.source).is_ok() {
+                            self.save_flash = Some(Instant::now());
+                        }
+                    }
+                    if let Some(when) = self.save_flash {
+                        if when.elapsed() < Duration::from_millis(1500) {
+                            ui.colored_label(egui::Color32::LIGHT_GREEN, "✓ saved");
+                        } else {
+                            self.save_flash = None;
+                        }
+                    }
+                });
+                ui.label(format!("file: {}", self.path.display()));
+                ui.label(egui::RichText::new(
+                    "edits re-eval 300ms after last keystroke. Cmd/Ctrl-S saves.",
+                ).small().weak());
+                ui.separator();
+
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        let response = ui.add_sized(
+                            [ui.available_width(), ui.available_height()],
+                            egui::TextEdit::multiline(&mut self.source)
+                                .code_editor()
+                                .desired_rows(40)
+                                .desired_width(f32::MAX),
+                        );
+                        if response.changed() {
+                            self.last_edit_at = Instant::now();
+                        }
+                    });
+            });
 
         // Right-side panel: sliders + perf HUD.
         egui::SidePanel::right("params")
@@ -277,25 +359,15 @@ impl eframe::App for DemoApp {
     }
 }
 
-fn mtime(path: &std::path::Path) -> Option<SystemTime> {
-    fs::metadata(path).and_then(|m| m.modified()).ok()
-}
-
-fn load_file(env: &Env, path: &std::path::Path) -> Option<SystemTime> {
-    match fs::read_to_string(path) {
-        Ok(src) => match reader::read_all(&src) {
-            Ok(forms) => {
-                for f in forms {
-                    if let Err(e) = eval::eval(&f, env) {
-                        eprintln!("[demo] eval error: {e}");
-                    }
-                }
-            }
-            Err(e) => eprintln!("[demo] parse error: {e}"),
-        },
-        Err(e) => eprintln!("[demo] read error: {e}"),
+/// Parse + evaluate a full source string into the given env. Returns
+/// Ok(()) on full success, or Err(message) with the first parse/eval
+/// error — the error is surfaced to the UI.
+fn eval_source(env: &Env, src: &str) -> std::result::Result<(), String> {
+    let forms = reader::read_all(src).map_err(|e| format!("parse: {e}"))?;
+    for f in forms {
+        eval::eval(&f, env).map_err(|e| format!("eval: {e}"))?;
     }
-    mtime(path)
+    Ok(())
 }
 
 fn run_headless(env: &Env, frames: u64) {
