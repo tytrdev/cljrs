@@ -21,27 +21,48 @@
 
 ;; Raymarch from origin `(ox oy oz)` in direction `(dx dy dz)`.
 ;; Returns: distance travelled when we hit, or 100.0 if we missed.
+;; 256-step budget + a looser hit threshold (0.002 instead of 0.001) kills
+;; the silhouette halo. Grazing rays take many tiny steps along the sphere
+;; tangent; 96 was running out right before they hit, producing a ring of
+;; "miss" pixels that showed as sky.
 (defn-native march ^f64 [^f64 ox ^f64 oy ^f64 oz ^f64 dx ^f64 dy ^f64 dz ^f64 sy]
   (loop [step 0 t 0.0]
-    (if (>= step 96)
+    (if (>= step 256)
       100.0
       (let [px (+ ox (* t dx))
             py (+ oy (* t dy))
             pz (+ oz (* t dz))
             d  (scene-sdf px py pz sy)]
-        (if (< d 0.001)
+        (if (< d 0.002)
           t
           (if (> t 50.0)
             100.0
             (recur (+ step 1) (+ t d))))))))
 
-;; Render one pixel. (px, py) in screen space; (frame, t-ms) drive animation.
-(defn-native render-pixel ^i64 [^i64 px ^i64 py ^i64 frame ^i64 t-ms]
+;; Slider labels shown in the demo's UI panel.
+(def slider-0-label "sphere bob speed")
+(def slider-1-label "sphere bob height")
+(def slider-2-label "light angle")
+(def slider-3-label "checker scale")
+
+;; Render one pixel. (px, py) in screen space; (frame, t-ms) drive animation;
+;; (s0..s3) are UI sliders, i64 values in 0..1000.
+(defn-native render-pixel ^i64
+  [^i64 px ^i64 py ^i64 frame ^i64 t-ms
+   ^i64 s0 ^i64 s1 ^i64 s2 ^i64 s3]
   (let [width   960.0
         height  540.0
-        ;; Sphere bobs up and down.
+        ;; Slider 0: bob speed (0..4 Hz)
+        bob-speed (* 4.0 (/ (float s0) 1000.0))
+        ;; Slider 1: bob height (0..1)
+        bob-height (/ (float s1) 1000.0)
+        ;; Slider 2: light angle (0..2π)
+        light-angle (* 6.2831853 (/ (float s2) 1000.0))
+        ;; Slider 3: checker scale (1..20)
+        check-scale (+ 1.0 (* 19.0 (/ (float s3) 1000.0)))
+        ;; Sphere bobs up and down, clipped above the ground.
         time    (/ (float t-ms) 1000.0)
-        sy      (+ 1.3 (* 0.5 (sin (* time 2.0))))
+        sy      (+ 2.0 (* bob-height (sin (* time bob-speed))))
         ;; Camera at (0, 1.5, -4), looking toward origin.
         ;; Ray direction from camera through pixel.
         aspect  (/ width height)
@@ -83,17 +104,20 @@
             nx2 (/ gx glen)
             ny2 (/ gy glen)
             nz2 (/ gz glen)
-            ;; Light direction: upper-right, normalized.
-            lx  0.577
-            ly  0.577
-            lz -0.577
-            lambert (max 0.0 (+ (+ (* nx2 lx) (* ny2 ly)) (* nz2 lz)))
+            ;; Light direction driven by slider 2; rotates around the scene.
+            lx  (cos light-angle)
+            ly  0.6
+            lz  (sin light-angle)
+            lnorm (sqrt (+ (+ (* lx lx) (* ly ly)) (* lz lz)))
+            nlx (/ lx lnorm)
+            nly (/ ly lnorm)
+            nlz (/ lz lnorm)
+            lambert (max 0.0 (+ (+ (* nx2 nlx) (* ny2 nly)) (* nz2 nlz)))
             ;; Ground gets a checker pattern; sphere gets a base color.
-            ;; Detect "ground" by y-coordinate of hit point.
             py-hit (+ oy (* t dy))
-            is-ground (if (< py-hit 0.01) 1 0)
-            check-x (int (+ px3 100.0))
-            check-z (int (+ pz3 100.0))
+            is-ground (if (< py-hit 0.02) 1 0)
+            check-x (int (* check-scale (+ px3 100.0)))
+            check-z (int (* check-scale (+ pz3 100.0)))
             check (mod (+ check-x check-z) 2)
             base-r (if (= is-ground 1)
                      (if (= check 0) 200 80)

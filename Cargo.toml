@@ -10,7 +10,7 @@ default = []
 mlir = ["dep:melior"]
 # Windowed live-coded demo (src/bin/demo.rs). Off by default so CI
 # without a display can still build cleanly.
-demo = ["mlir", "dep:minifb", "dep:rayon"]
+demo = ["mlir", "dep:eframe", "dep:rayon"]
 
 [dependencies]
 # imbl = maintained fork of im. Production-quality persistent HAMT
@@ -19,9 +19,10 @@ demo = ["mlir", "dep:minifb", "dep:rayon"]
 # tested, dependency-light, and matches Clojure's semantics closely.
 imbl = "3"
 melior = { version = "0.27", optional = true }
-minifb = { version = "0.27", optional = true }
-# Data-parallelism for the demo's pixel loop. Not default — only the
-# `demo` feature pulls it in.
+# Demo window + UI: eframe bundles egui + winit + a renderer; gives us
+# real sliders for live-coded params without hand-rolling widgets.
+eframe = { version = "0.31", optional = true, default-features = false, features = ["default_fonts", "glow"] }
+# Data-parallelism for the demo's pixel loop.
 rayon = { version = "1", optional = true }
 
 [[bin]]
