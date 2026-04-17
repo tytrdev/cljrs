@@ -1,0 +1,12 @@
+# mlir-sys locates LLVM via an env var named for the LLVM version (×10 since
+# LLVM 21). We target LLVM 22, so `MLIR_SYS_220_PREFIX` points at the brew
+# keg. Both cargo and rust-analyzer read [env] from here, so IDE builds also
+# find MLIR without per-user shell setup.
+[env]
+MLIR_SYS_220_PREFIX = "/opt/homebrew/opt/llvm"
+LLVM_SYS_220_PREFIX = "/opt/homebrew/opt/llvm"
+# tblgen's build script (transitive dep of melior) shells out to llvm-config
+# and honors LLVM_CONFIG_PATH as an override.
+LLVM_CONFIG_PATH = "/opt/homebrew/opt/llvm/bin/llvm-config"
+# Some build scripts instead look at TABLEGEN_220_PREFIX.
+TABLEGEN_220_PREFIX = "/opt/homebrew/opt/llvm"

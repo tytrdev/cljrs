@@ -1,0 +1,48 @@
+# Rust build output
+/target
+
+# Cargo.lock is committed — this crate produces binaries, not a library.
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+\#*\#
+.\#*
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+
+# Env files — explicit allowlist only, never commit secrets
+.env
+.env.local
+.env.*.local
+
+# Native artifacts (if compile pipelines ever dump them here)
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+
+# MLIR dumps (when --dump passes are enabled during debug)
+*.mlir.dump
+*.ll
+
+# Profiling output
+*.profraw
+*.profdata
+
+# Temp work
+/tmp/
+*.tmp
+*.bak

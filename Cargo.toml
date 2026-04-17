@@ -1,0 +1,17 @@
+[package]
+name = "cljrs"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = []
+# Opt-in native codegen via MLIR + LLVM 22. Not default until stable.
+# Build/test with `cargo build --features mlir` / `cargo test --features mlir`.
+mlir = ["dep:melior"]
+
+[dependencies]
+melior = { version = "0.27", optional = true }
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
