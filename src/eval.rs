@@ -66,6 +66,10 @@ fn eval_list(xs: &[Value], env: &Env) -> Result<Value> {
             "loop" => return sf_loop(&xs[1..], env),
             "recur" => return sf_recur(&xs[1..], env),
             "__tagged__" => return sf_tagged(&xs[1..], env),
+            "ns" => return sf_ns(&xs[1..], env),
+            "in-ns" => return sf_ns(&xs[1..], env),
+            "load-file" => return sf_load_file(&xs[1..], env),
+            "require" => return sf_require(&xs[1..], env),
             _ => {}
         }
     }
@@ -102,6 +106,10 @@ const SPECIAL_FORMS: &[&str] = &[
     "loop",
     "recur",
     "__tagged__",
+    "ns",
+    "in-ns",
+    "load-file",
+    "require",
 ];
 
 fn try_macro_expand_once(form: &Value, env: &Env) -> Result<Option<Value>> {
@@ -409,6 +417,70 @@ fn sf_defn(args: &[Value], env: &Env) -> Result<Value> {
     let fn_val = sf_fn(&args[1..], env, Some(name.clone()))?;
     env.define_global(&name, fn_val.clone());
     Ok(fn_val)
+}
+
+/// `(ns name)` / `(in-ns name)` — Arc-1 namespaces are cosmetic. Real
+/// namespace isolation (each ns with its own bindings, :refer/:as) is
+/// Arc 2 work. For now we accept the form so existing Clojure code with
+/// `(ns my.ns)` headers parses and runs; all vars share a single flat
+/// global map.
+fn sf_ns(_args: &[Value], _env: &Env) -> Result<Value> {
+    Ok(Value::Nil)
+}
+
+/// `(load-file "path")` — read the given cljrs source file and evaluate
+/// every form in the current env. Minimum viable multi-file support.
+/// Path is resolved relative to the process's current working directory.
+fn sf_load_file(args: &[Value], env: &Env) -> Result<Value> {
+    if args.len() != 1 {
+        return Err(Error::Arity {
+            expected: "1".into(),
+            got: args.len(),
+        });
+    }
+    let path = eval(&args[0], env)?;
+    let path_str = match &path {
+        Value::Str(s) => s.clone(),
+        _ => {
+            return Err(Error::Type(format!(
+                "load-file: path must be a string, got {}",
+                path.type_name()
+            )));
+        }
+    };
+    let src = std::fs::read_to_string(path_str.as_ref()).map_err(|e| {
+        Error::Eval(format!("load-file: failed to read `{path_str}`: {e}"))
+    })?;
+    let forms = crate::reader::read_all(&src)?;
+    let mut last = Value::Nil;
+    for f in forms {
+        last = eval(&f, env)?;
+    }
+    Ok(last)
+}
+
+/// `(require 'some.ns)` — Arc-1 interprets this as "load the file
+/// whose path is derived from the ns name". We look up cljrs source
+/// at `some/ns.clj` relative to CWD. Real namespace semantics (with
+/// :as aliases, refer lists, isolation) are Arc 2.
+fn sf_require(args: &[Value], env: &Env) -> Result<Value> {
+    for a in args {
+        // Accept (require 'ns) — a quoted symbol — or a string path.
+        let evaluated = eval(a, env)?;
+        let name: String = match &evaluated {
+            Value::Symbol(s) => s.to_string(),
+            Value::Str(s) => s.to_string(),
+            _ => {
+                return Err(Error::Type(format!(
+                    "require: expected symbol or string, got {}",
+                    evaluated.type_name()
+                )));
+            }
+        };
+        let path = name.replace('.', "/").replace('-', "_") + ".clj";
+        sf_load_file(&[Value::Str(Arc::from(path.as_str()))], env)?;
+    }
+    Ok(Value::Nil)
 }
 
 /// Transparent type-hint eval. `(__tagged__ Tag form)` evaluates `form`
