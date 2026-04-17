@@ -20,8 +20,8 @@ use cljrs::{builtins, env::Env, eval, reader, value::Value};
 use minifb::{Key, Window, WindowOptions};
 use rayon::prelude::*;
 
-const WIDTH: usize = 640;
-const HEIGHT: usize = 480;
+const WIDTH: usize = 960;
+const HEIGHT: usize = 540;
 
 fn main() {
     let args: Vec<String> = env::args().collect();

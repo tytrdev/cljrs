@@ -26,17 +26,17 @@
 ;; Map each pixel to a complex coordinate, count iterations, color from it.
 ;; Slow zoom driven by wall-clock time.
 (defn-native render-pixel ^i64 [^i64 px ^i64 py ^i64 frame ^i64 t-ms]
-  (let [width  640.0
-        height 480.0
-        zoom   (+ 1.0 (* 0.00015 (float t-ms)))
+  (let [width  960.0
+        height 540.0
+        zoom   (+ 5.0 (* 0.50515 (float t-ms)))
         cr-c   -0.743643887037151
         ci-c    0.131825904205330
         fx     (float px)
         fy     (float py)
         cr     (+ cr-c (/ (- (* 3.5 (/ fx width))  1.75) zoom))
         ci     (+ ci-c (/ (- (* 2.0 (/ fy height)) 1.0)  zoom))
-        iters  (mandel-iter cr ci 128)]
-    (if (= iters 128)
+        iters  (mandel-iter cr ci 96)]
+    (if (= iters 96)
       0
       ;; Simple RGB gradient indexed by iter count; cycled by frame.
       (let [shift (int (float (* frame 1)))
