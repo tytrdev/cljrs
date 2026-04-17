@@ -716,20 +716,31 @@ impl GpuPixelKernel {
     }
 }
 
-/// A compiled GPU kernel — holds its WGSL source and a lazily-built
-/// pipeline. The pipeline is cached after first dispatch.
+/// A compiled GPU kernel. Holds WGSL source, a lazily-built pipeline,
+/// and a per-size buffer cache so repeated dispatches at the same
+/// element count reuse allocation.
 pub struct GpuKernel {
     pub name: String,
     pub wgsl: String,
-    /// Lazily-initialized pipeline; cached per `Gpu` the kernel is
-    /// first dispatched against. Kept as a Mutex so dispatch can be
-    /// called through a shared reference.
     pipeline: std::sync::Mutex<Option<CachedPipeline>>,
+    /// Input/output/readback buffer trio keyed by element count. Grown
+    /// on demand. A benchmark or render loop avoids per-call allocation
+    /// after the first warmup, which matters a lot at small N (latency
+    /// bound) and a measurable amount at large N.
+    f32_cache: std::sync::Mutex<Option<F32BufferCache>>,
 }
 
 struct CachedPipeline {
     pipeline: wgpu::ComputePipeline,
     bgl: wgpu::BindGroupLayout,
+}
+
+struct F32BufferCache {
+    n: usize,
+    src: wgpu::Buffer,
+    dst: wgpu::Buffer,
+    readback: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
 }
 
 impl GpuKernel {
@@ -738,19 +749,83 @@ impl GpuKernel {
             name: name.into(),
             wgsl: wgsl.into(),
             pipeline: std::sync::Mutex::new(None),
+            f32_cache: std::sync::Mutex::new(None),
         }
     }
 
-    /// Run the kernel on an f32 slice; returns a fresh Vec<f32> of
-    /// equal length. Pipeline built + cached on first call.
+    /// Run the kernel on an f32 slice. Returns a fresh Vec<f32>.
+    /// Pipeline is compiled on first call. Buffers of matching size are
+    /// reused across calls.
     pub fn run_f32(&self, gpu: &Gpu, input: &[f32]) -> Result<Vec<f32>, String> {
-        // First call: compile + cache. Subsequent calls skip that cost,
-        // which is what makes GPU benchmarking meaningful — we amortize
-        // compile over many dispatches just like JAX/PyTorch do.
         self.ensure_pipeline(gpu)?;
-        let guard = self.pipeline.lock().unwrap();
-        let cached = guard.as_ref().expect("ensured");
-        run_cached(gpu, cached, input)
+        let pipe_guard = self.pipeline.lock().unwrap();
+        let cached = pipe_guard.as_ref().expect("ensured");
+        self.ensure_f32_buffers(gpu, cached, input.len())?;
+        let buf_guard = self.f32_cache.lock().unwrap();
+        let buf = buf_guard.as_ref().expect("ensured");
+        run_with_cache(gpu, cached, buf, Some(input))
+    }
+
+    /// Re-run the kernel using whatever input was last uploaded via
+    /// `run_f32`. Skips the CPU to GPU upload, which dominates at
+    /// repeated benchmarks where the input doesn't change. Panics if
+    /// called before `run_f32` has established a buffer cache.
+    pub fn run_f32_reuse_input(&self, gpu: &Gpu, n: usize) -> Result<Vec<f32>, String> {
+        let pipe_guard = self.pipeline.lock().unwrap();
+        let cached = pipe_guard
+            .as_ref()
+            .ok_or("run_f32 must be called at least once before run_f32_reuse_input")?;
+        let buf_guard = self.f32_cache.lock().unwrap();
+        let buf = buf_guard
+            .as_ref()
+            .ok_or("buffer cache not initialized; call run_f32 first")?;
+        if buf.n != n {
+            return Err(format!("cached buffer has size {}, requested {n}", buf.n));
+        }
+        run_with_cache(gpu, cached, buf, None)
+    }
+
+    fn ensure_f32_buffers(
+        &self,
+        gpu: &Gpu,
+        cached: &CachedPipeline,
+        n: usize,
+    ) -> Result<(), String> {
+        let mut guard = self.f32_cache.lock().unwrap();
+        if let Some(cache) = guard.as_ref()
+            && cache.n == n
+        {
+            return Ok(());
+        }
+        let bytes = (n.max(1) * std::mem::size_of::<f32>()) as u64;
+        let src = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("cljrs-gpu::src"),
+            size: bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let dst = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("cljrs-gpu::dst"),
+            size: bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let readback = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("cljrs-gpu::readback"),
+            size: bytes,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let bind_group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("cljrs-gpu::bg"),
+            layout: &cached.bgl,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: src.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: dst.as_entire_binding() },
+            ],
+        });
+        *guard = Some(F32BufferCache { n, src, dst, readback, bind_group });
+        Ok(())
     }
 
     fn ensure_pipeline(&self, gpu: &Gpu) -> Result<(), String> {
@@ -813,45 +888,23 @@ impl GpuKernel {
     }
 }
 
-fn run_cached(gpu: &Gpu, cached: &CachedPipeline, input: &[f32]) -> Result<Vec<f32>, String> {
-    let n = input.len();
+/// Dispatch using a cached buffer trio. Upload input, dispatch, copy
+/// dst into the mapped-readback buffer, map, copy out.
+fn run_with_cache(
+    gpu: &Gpu,
+    cached: &CachedPipeline,
+    buf: &F32BufferCache,
+    input: Option<&[f32]>,
+) -> Result<Vec<f32>, String> {
+    let n = input.map(|i| i.len()).unwrap_or(buf.n);
     if n == 0 {
         return Ok(Vec::new());
     }
     let bytes = (n * std::mem::size_of::<f32>()) as u64;
-    let src_buf = gpu
-        .device
-        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("cljrs-gpu::src"),
-            contents: bytemuck::cast_slice(input),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        });
-    let dst_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("cljrs-gpu::dst"),
-        size: bytes,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    });
-    let readback = gpu.device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("cljrs-gpu::readback"),
-        size: bytes,
-        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-    let bind_group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("cljrs-gpu::bg"),
-        layout: &cached.bgl,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: src_buf.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: dst_buf.as_entire_binding(),
-            },
-        ],
-    });
+    if let Some(data) = input {
+        gpu.queue.write_buffer(&buf.src, 0, bytemuck::cast_slice(data));
+    }
+
     let mut encoder = gpu
         .device
         .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
@@ -861,23 +914,18 @@ fn run_cached(gpu: &Gpu, cached: &CachedPipeline, input: &[f32]) -> Result<Vec<f
             timestamp_writes: None,
         });
         pass.set_pipeline(&cached.pipeline);
-        pass.set_bind_group(0, &bind_group, &[]);
-        // WebGPU caps workgroup count at 65535 per dimension. For
-        // buffers larger than ~4M elements (at workgroup_size 64) a
-        // single-dim dispatch can't cover everything, so we cap the
-        // dispatch and expect the kernel to use a grid-stride loop
-        // (each thread walks the array with stride = total threads).
-        // Kernels that don't grid-stride and process >4M elements
-        // will silently under-compute — fix them to stride if you hit
-        // this. 16384 workgroups × wg_size = plenty of parallelism.
+        pass.set_bind_group(0, &buf.bind_group, &[]);
+        // WebGPU caps workgroup count at 65535/dim. Kernels handling
+        // more elements than that at workgroup_size * 65535 must use a
+        // grid-stride loop (cap enforced here).
         let needed = ((n as u32) + 63) / 64;
         let groups = needed.min(16384);
         pass.dispatch_workgroups(groups, 1, 1);
     }
-    encoder.copy_buffer_to_buffer(&dst_buf, 0, &readback, 0, bytes);
+    encoder.copy_buffer_to_buffer(&buf.dst, 0, &buf.readback, 0, bytes);
     gpu.queue.submit(std::iter::once(encoder.finish()));
 
-    let slice = readback.slice(..);
+    let slice = buf.readback.slice(..bytes);
     let (tx, rx) = std::sync::mpsc::channel();
     slice.map_async(wgpu::MapMode::Read, move |res| {
         tx.send(res).ok();
@@ -889,7 +937,7 @@ fn run_cached(gpu: &Gpu, cached: &CachedPipeline, input: &[f32]) -> Result<Vec<f
     let mapped = slice.get_mapped_range();
     let out: Vec<f32> = bytemuck::cast_slice(&mapped).to_vec();
     drop(mapped);
-    readback.unmap();
+    buf.readback.unmap();
     Ok(out)
 }
 

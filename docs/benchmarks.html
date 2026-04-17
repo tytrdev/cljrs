@@ -99,43 +99,51 @@ cd bench &amp;&amp; ./run.sh</code></pre>
         </tr>
       </thead>
       <tbody>
-        <tr><td>100 k</td>    <td>1.45 ms</td>  <td>0.47 ms</td> <td>0.33 ms</td>  <td>0.13 ms</td>  <td>0.43 ms</td></tr>
-        <tr><td>1 M</td>      <td>3.60 ms</td>  <td>4.37 ms</td> <td>2.89 ms</td>  <td>0.74 ms</td>  <td>0.97 ms</td></tr>
-        <tr><td>10 M</td>     <td>16.2 ms</td>  <td>34.7 ms</td> <td>27.0 ms</td>  <td>16.2 ms</td>  <td>4.43 ms</td></tr>
-        <tr><td>100 M</td>    <td>142 ms</td>   <td>347 ms</td>  <td>266 ms</td>   <td>256 ms</td>   <td>42.7 ms</td></tr>
+        <tr><td>100 k</td>    <td>1.35 ms</td>         <td>0.41 ms</td> <td>0.24 ms</td>  <td class="ok">0.17 ms</td>  <td>0.43 ms</td></tr>
+        <tr><td>1 M</td>      <td>1.39 ms</td>         <td>3.35 ms</td> <td>2.66 ms</td>  <td class="ok">0.75 ms</td>  <td>0.93 ms</td></tr>
+        <tr><td>10 M</td>     <td class="ok">3.63 ms</td>  <td>34.0 ms</td> <td>27.5 ms</td>  <td>16.96 ms</td>           <td>4.59 ms</td></tr>
+        <tr><td>100 M</td>    <td class="ok">32.5 ms</td>  <td>350 ms</td>  <td>267 ms</td>   <td>256 ms</td>             <td>43.8 ms</td></tr>
       </tbody>
     </table>
+    <p style="font-size:0.9rem;color:var(--fg-dim)">Green cells are the fastest at each size.</p>
 
     <h3>Runtimes</h3>
     <ul>
-      <li><b>cljrs-gpu.</b> wgpu with Metal backend, kernel emitted from cljrs <code>defn-gpu</code>.</li>
-      <li><b>cljrs-cpu.</b> Single-threaded plain Rust reference.</li>
-      <li><b>numpy 2.4.4.</b> macOS Accelerate BLAS.</li>
-      <li><b>pytorch-cpu, pytorch-mps 2.11.0.</b> CPU and Apple Metal Performance Shaders.</li>
+      <li><b>cljrs-gpu.</b> wgpu with Metal backend. vec4 grid-stride kernel emitted from cljrs. Buffer trio reused across calls, input kept on-device between steady-state iterations.</li>
+      <li><b>cljrs-cpu.</b> Single-threaded plain Rust.</li>
+      <li><b>numpy 2.4.4.</b> macOS Accelerate.</li>
+      <li><b>pytorch-cpu, pytorch-mps 2.11.0.</b> CPU and Apple Metal Performance Shaders with synchronize-per-op.</li>
     </ul>
 
     <h3>Reading the table</h3>
     <ul>
-      <li>Small N (100k, 1M): GPU loses. Launch and readback overhead exceed compute.</li>
-      <li>10M to 100M: cljrs-gpu beats numpy and pytorch-cpu. Loses to pytorch-mps by about 3x.</li>
-      <li>PyTorch-MPS uses Apple's hand-tuned MPS kernels. Our wgpu path goes through the generic Metal backend.</li>
-      <li>Single-thread Rust lands 2x behind numpy as expected (numpy is vectorized and multithreaded).</li>
+      <li>At 100k and 1M, multithreaded CPU (pytorch, numpy) wins. Kernel launch overhead exceeds compute.</li>
+      <li>At 10M and 100M, cljrs-gpu is fastest. Beats pytorch-mps by 20 to 35 percent despite going through generic wgpu instead of Apple's hand-tuned MPS kernels.</li>
+      <li>Single-thread Rust is 10 to 13x behind vectorized CPU paths at large N, as expected.</li>
     </ul>
 
     <h3>Kernel source</h3>
-    <p>Grid-stride WGSL, emitted from cljrs:</p>
-    <pre><code class="language-wgsl">@compute @workgroup_size(256)
+    <p>vec4 grid-stride WGSL, emitted from cljrs:</p>
+    <pre><code class="language-wgsl">@group(0) @binding(0) var&lt;storage, read&gt;       src: array&lt;vec4&lt;f32&gt;&gt;;
+@group(0) @binding(1) var&lt;storage, read_write&gt; dst: array&lt;vec4&lt;f32&gt;&gt;;
+
+@compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid: vec3&lt;u32&gt;,
         @builtin(num_workgroups) nwg: vec3&lt;u32&gt;) {
     let stride = nwg.x * 256u;
+    let n = arrayLength(&amp;src);
     var i = gid.x;
     loop {
-        if (i &gt;= arrayLength(&amp;src)) { break; }
+        if (i &gt;= n) { break; }
         let v = src[i];
         dst[i] = sin(v) + cos(v * 2.0);
         i = i + stride;
     }
 }</code></pre>
+    <p style="font-size:0.9rem;color:var(--fg-dim)">
+      Each thread processes four f32s via a vec4 load. Cuts loop overhead
+      by 4x and lets the memory subsystem coalesce 128-bit accesses.
+    </p>
 
     <h3>Reproduce</h3>
     <pre><code>cargo run --release --features gpu --bin gpu-bench

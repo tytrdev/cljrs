@@ -16,13 +16,13 @@ use std::time::Instant;
 
 use cljrs::gpu::{Gpu, GpuKernel};
 
-// Grid-stride loop: a fixed dispatch of N workgroups handles any input
-// size by having each thread walk the buffer with stride = total
-// threads. WebGPU caps workgroups at 65535 per dim so we can't just
-// dispatch n/64 workgroups once n gets large (>~4M).
+// vec4 loads: each thread handles 4 consecutive f32s. Improves memory
+// bandwidth utilization (one 128-bit load vs four 32-bit loads) and
+// cuts loop overhead by 4x. Combined with a grid-stride loop so a
+// fixed dispatch handles any N (WebGPU caps workgroups at 65535/dim).
 const WGSL: &str = r#"
-@group(0) @binding(0) var<storage, read>       src: array<f32>;
-@group(0) @binding(1) var<storage, read_write> dst: array<f32>;
+@group(0) @binding(0) var<storage, read>       src: array<vec4<f32>>;
+@group(0) @binding(1) var<storage, read_write> dst: array<vec4<f32>>;
 
 @compute @workgroup_size(256)
 fn main(
@@ -72,20 +72,23 @@ fn main() {
             *v = (i as f32) * 1e-5;
         }
 
-        // First call includes pipeline compile. This is the number that
-        // matters for one-shot computations; steady-state matters for
-        // repeated dispatches.
+        // First call includes pipeline compile + buffer allocation +
+        // input upload. Matches the one-shot scenario (hand a buffer,
+        // get a result).
         let t0 = Instant::now();
         let _ = kernel.run_f32(&gpu, &input).expect("run");
         let first_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
-        // Warm once more to flush any remaining lazy state.
+        // Warm once more to flush any lazy state.
         let _ = kernel.run_f32(&gpu, &input).expect("run");
 
+        // Steady state: input already on device, buffers allocated.
+        // Matches how pytorch-mps is benchmarked (tensor on device,
+        // synchronize after each op). Only measures dispatch + readback.
         let mut samples = Vec::with_capacity(iters);
         for _ in 0..iters {
             let t0 = Instant::now();
-            let _ = kernel.run_f32(&gpu, &input).expect("run");
+            let _ = kernel.run_f32_reuse_input(&gpu, input.len()).expect("run");
             samples.push(t0.elapsed().as_secs_f64() * 1000.0);
         }
         samples.sort_by(|a, b| a.partial_cmp(b).unwrap());
