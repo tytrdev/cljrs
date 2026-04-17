@@ -69,6 +69,11 @@ name = "gpu-compile"
 path = "src/bin/gpu_compile.rs"
 required-features = ["gpu"]
 
+[[bin]]
+name = "gpu-bench"
+path = "src/bin/gpu_bench.rs"
+required-features = ["gpu"]
+
 [profile.release]
 lto = "fat"
 codegen-units = 1
