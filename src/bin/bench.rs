@@ -57,7 +57,7 @@ fn main() {
     // outside of what the function call itself does.
     let fn_form = Value::List(Arc::new(vec![
         Value::Symbol(Arc::from("fn")),
-        Value::Vector(Arc::new(Vec::new())),
+        Value::Vector(imbl::Vector::new()),
         bench_form.clone(),
     ]));
     let callable = eval::eval(&fn_form, &env).unwrap_or_else(|e| {

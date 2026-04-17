@@ -1,9 +1,34 @@
 use std::sync::Arc;
 
+use imbl::Vector as PVec;
+
 use crate::env::Env;
 use crate::error::{Error, Result};
 use crate::eval;
 use crate::value::{Builtin, Value};
+
+/// Flatten any sequence-like Value into a concrete `Vec<Value>` for
+/// uniform iteration. Clones are Arc bumps so this is cheap.
+fn seq_items(v: &Value) -> Result<Vec<Value>> {
+    match v {
+        Value::Nil => Ok(Vec::new()),
+        Value::List(xs) => Ok(xs.as_ref().clone()),
+        Value::Vector(xs) => Ok(xs.iter().cloned().collect()),
+        Value::Set(xs) => Ok(xs.iter().cloned().collect()),
+        Value::Map(m) => Ok(m
+            .iter()
+            .map(|(k, v)| Value::Vector(PVec::from_iter([k.clone(), v.clone()])))
+            .collect()),
+        Value::Str(s) => Ok(s
+            .chars()
+            .map(|c| Value::Str(Arc::from(c.to_string().as_str())))
+            .collect()),
+        _ => Err(Error::Type(format!(
+            "expected sequence, got {}",
+            v.type_name()
+        ))),
+    }
+}
 
 pub fn install(env: &Env) {
     for (name, f) in core_fns() {
@@ -252,8 +277,10 @@ fn count_fn(args: &[Value]) -> Result<Value> {
     }
     let n = match &args[0] {
         Value::Nil => 0,
-        Value::List(v) | Value::Vector(v) => v.len(),
+        Value::List(v) => v.len(),
+        Value::Vector(v) => v.len(),
         Value::Map(m) => m.len(),
+        Value::Set(s) => s.len(),
         Value::Str(s) => s.chars().count(),
         _ => {
             return Err(Error::Type(format!(
@@ -274,7 +301,9 @@ fn first_fn(args: &[Value]) -> Result<Value> {
     }
     match &args[0] {
         Value::Nil => Ok(Value::Nil),
-        Value::List(v) | Value::Vector(v) => Ok(v.first().cloned().unwrap_or(Value::Nil)),
+        Value::List(v) => Ok(v.first().cloned().unwrap_or(Value::Nil)),
+        Value::Vector(v) => Ok(v.front().cloned().unwrap_or(Value::Nil)),
+        Value::Set(s) => Ok(s.iter().next().cloned().unwrap_or(Value::Nil)),
         _ => Err(Error::Type(format!(
             "first on non-sequence: {}",
             args[0].type_name()
@@ -291,12 +320,14 @@ fn rest_fn(args: &[Value]) -> Result<Value> {
     }
     match &args[0] {
         Value::Nil => Ok(Value::List(Arc::new(Vec::new()))),
-        Value::List(v) | Value::Vector(v) => {
-            if v.is_empty() {
-                Ok(Value::List(Arc::new(Vec::new())))
-            } else {
-                Ok(Value::List(Arc::new(v[1..].to_vec())))
-            }
+        Value::List(v) => Ok(if v.is_empty() {
+            Value::List(Arc::new(Vec::new()))
+        } else {
+            Value::List(Arc::new(v[1..].to_vec()))
+        }),
+        Value::Vector(v) => {
+            let items: Vec<Value> = v.iter().skip(1).cloned().collect();
+            Ok(Value::List(Arc::new(items)))
         }
         _ => Err(Error::Type(format!(
             "rest on non-sequence: {}",
@@ -314,16 +345,7 @@ fn cons_fn(args: &[Value]) -> Result<Value> {
     }
     let mut out = Vec::new();
     out.push(args[0].clone());
-    match &args[1] {
-        Value::Nil => {}
-        Value::List(v) | Value::Vector(v) => out.extend(v.iter().cloned()),
-        _ => {
-            return Err(Error::Type(format!(
-                "cons onto non-sequence: {}",
-                args[1].type_name()
-            )));
-        }
-    }
+    out.extend(seq_items(&args[1])?);
     Ok(Value::List(Arc::new(out)))
 }
 
@@ -334,22 +356,13 @@ fn list_fn(args: &[Value]) -> Result<Value> {
 fn concat_fn(args: &[Value]) -> Result<Value> {
     let mut out: Vec<Value> = Vec::new();
     for a in args {
-        match a {
-            Value::Nil => {}
-            Value::List(v) | Value::Vector(v) => out.extend(v.iter().cloned()),
-            _ => {
-                return Err(Error::Type(format!(
-                    "concat: not a sequence: {}",
-                    a.type_name()
-                )));
-            }
-        }
+        out.extend(seq_items(a)?);
     }
     Ok(Value::List(Arc::new(out)))
 }
 
 fn vector_fn(args: &[Value]) -> Result<Value> {
-    Ok(Value::Vector(Arc::new(args.to_vec())))
+    Ok(Value::Vector(args.iter().cloned().collect()))
 }
 
 fn conj_fn(args: &[Value]) -> Result<Value> {
@@ -368,11 +381,11 @@ fn conj_fn(args: &[Value]) -> Result<Value> {
             Ok(Value::List(Arc::new(out)))
         }
         Value::Vector(v) => {
-            let mut out = (**v).clone();
+            let mut out = v.clone();
             for a in &args[1..] {
-                out.push(a.clone());
+                out.push_back(a.clone());
             }
-            Ok(Value::Vector(Arc::new(out)))
+            Ok(Value::Vector(out))
         }
         Value::List(v) => {
             let mut out = (**v).clone();
@@ -380,6 +393,35 @@ fn conj_fn(args: &[Value]) -> Result<Value> {
                 out.insert(0, a.clone());
             }
             Ok(Value::List(Arc::new(out)))
+        }
+        Value::Set(s) => {
+            let mut out = s.clone();
+            for a in &args[1..] {
+                out.insert(a.clone());
+            }
+            Ok(Value::Set(out))
+        }
+        Value::Map(m) => {
+            // conj onto a map: each extra arg must be a 2-vector [k v] or a map-entry-like.
+            let mut out = m.clone();
+            for a in &args[1..] {
+                match a {
+                    Value::Vector(pair) if pair.len() == 2 => {
+                        out.insert(pair[0].clone(), pair[1].clone());
+                    }
+                    Value::Map(sub) => {
+                        for (k, v) in sub.iter() {
+                            out.insert(k.clone(), v.clone());
+                        }
+                    }
+                    _ => {
+                        return Err(Error::Type(
+                            "conj onto map expects [k v] vectors or maps".into(),
+                        ));
+                    }
+                }
+            }
+            Ok(Value::Map(out))
         }
         _ => Err(Error::Type(format!("conj onto {}", args[0].type_name()))),
     }
@@ -399,9 +441,14 @@ fn nth_fn(args: &[Value]) -> Result<Value> {
     if idx < 0 {
         return Err(Error::Eval("nth: negative index".into()));
     }
+    let i = idx as usize;
     match &args[0] {
-        Value::List(v) | Value::Vector(v) => v
-            .get(idx as usize)
+        Value::List(v) => v
+            .get(i)
+            .cloned()
+            .ok_or_else(|| Error::Eval(format!("nth: index {idx} out of range"))),
+        Value::Vector(v) => v
+            .get(i)
             .cloned()
             .ok_or_else(|| Error::Eval(format!("nth: index {idx} out of range"))),
         _ => Err(Error::Type("nth on non-sequence".into())),
@@ -416,8 +463,10 @@ fn vec_fn(args: &[Value]) -> Result<Value> {
         });
     }
     match &args[0] {
-        Value::Nil => Ok(Value::Vector(Arc::new(Vec::new()))),
-        Value::List(v) | Value::Vector(v) => Ok(Value::Vector(Arc::clone(v))),
+        Value::Nil => Ok(Value::Vector(PVec::new())),
+        Value::List(v) => Ok(Value::Vector(v.iter().cloned().collect())),
+        Value::Vector(v) => Ok(Value::Vector(v.clone())),
+        Value::Set(s) => Ok(Value::Vector(s.iter().cloned().collect())),
         _ => Err(Error::Type("vec on non-sequence".into())),
     }
 }
@@ -455,8 +504,10 @@ fn empty_q(args: &[Value]) -> Result<Value> {
     }
     Ok(Value::Bool(match &args[0] {
         Value::Nil => true,
-        Value::List(v) | Value::Vector(v) => v.is_empty(),
+        Value::List(v) => v.is_empty(),
+        Value::Vector(v) => v.is_empty(),
         Value::Map(m) => m.is_empty(),
+        Value::Set(s) => s.is_empty(),
         Value::Str(s) => s.is_empty(),
         _ => false,
     }))
@@ -488,15 +539,11 @@ fn dec_fn(args: &[Value]) -> Result<Value> {
     }
 }
 
-fn as_seq<'a>(v: &'a Value) -> Result<&'a [Value]> {
-    match v {
-        Value::Nil => Ok(&[]),
-        Value::List(v) | Value::Vector(v) => Ok(v.as_slice()),
-        _ => Err(Error::Type(format!(
-            "expected sequence, got {}",
-            v.type_name()
-        ))),
-    }
+/// Owned flattening wrapper used by the stdlib seq pipeline — avoids the
+/// slice-vs-iterator split since imbl::Vector doesn't expose a contiguous
+/// slice.
+fn as_seq(v: &Value) -> Result<Vec<Value>> {
+    seq_items(v)
 }
 
 fn map_fn(args: &[Value]) -> Result<Value> {
@@ -510,7 +557,7 @@ fn map_fn(args: &[Value]) -> Result<Value> {
     let coll = as_seq(&args[1])?;
     let mut out = Vec::with_capacity(coll.len());
     for item in coll {
-        out.push(eval::apply(f, std::slice::from_ref(item))?);
+        out.push(eval::apply(f, std::slice::from_ref(&item))?);
     }
     Ok(Value::List(Arc::new(out)))
 }
@@ -526,7 +573,7 @@ fn filter_fn(args: &[Value]) -> Result<Value> {
     let coll = as_seq(&args[1])?;
     let mut out = Vec::new();
     for item in coll {
-        let keep = eval::apply(pred, std::slice::from_ref(item))?;
+        let keep = eval::apply(pred, std::slice::from_ref(&item))?;
         if keep.truthy() {
             out.push(item.clone());
         }

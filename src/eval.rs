@@ -19,18 +19,27 @@ pub fn eval(form: &Value, env: &Env) -> Result<Value> {
         | Value::Native(_) => Ok(form.clone()),
         Value::Symbol(s) => env.lookup(s),
         Value::Vector(xs) => {
-            let mut out = Vec::with_capacity(xs.len());
+            let mut out: imbl::Vector<Value> = imbl::Vector::new();
             for x in xs.iter() {
-                out.push(eval(x, env)?);
+                out.push_back(eval(x, env)?);
             }
-            Ok(Value::Vector(Arc::new(out)))
+            Ok(Value::Vector(out))
         }
         Value::Map(pairs) => {
-            let mut out = Vec::with_capacity(pairs.len());
+            let mut out: imbl::HashMap<Value, Value> = imbl::HashMap::new();
             for (k, v) in pairs.iter() {
-                out.push((eval(k, env)?, eval(v, env)?));
+                let k = eval(k, env)?;
+                let v = eval(v, env)?;
+                out.insert(k, v);
             }
-            Ok(Value::Map(Arc::new(out)))
+            Ok(Value::Map(out))
+        }
+        Value::Set(xs) => {
+            let mut out: imbl::HashSet<Value> = imbl::HashSet::new();
+            for x in xs.iter() {
+                out.insert(eval(x, env)?);
+            }
+            Ok(Value::Set(out))
         }
         Value::List(xs) => eval_list(xs, env),
     }
@@ -282,8 +291,8 @@ fn sf_fn(args: &[Value], env: &Env, explicit_name: Option<Arc<str>>) -> Result<V
         }
         _ => return Err(Error::Eval("fn requires params vector".into())),
     };
-    let params_vec = match params_val {
-        Value::Vector(v) => Arc::clone(v),
+    let params_vec: imbl::Vector<Value> = match params_val {
+        Value::Vector(v) => v.clone(),
         _ => return Err(Error::Eval("fn params must be a vector".into())),
     };
 
@@ -322,8 +331,8 @@ fn sf_loop(args: &[Value], env: &Env) -> Result<Value> {
     if args.is_empty() {
         return Err(Error::Eval("loop requires bindings vector".into()));
     }
-    let bindings = match &args[0] {
-        Value::Vector(v) => Arc::clone(v),
+    let bindings: imbl::Vector<Value> = match &args[0] {
+        Value::Vector(v) => v.clone(),
         _ => return Err(Error::Eval("loop bindings must be a vector".into())),
     };
     if bindings.len() % 2 != 0 {
@@ -437,12 +446,12 @@ fn sf_defn_native(args: &[Value], env: &Env) -> Result<Value> {
         _ => return Err(Error::Eval("defn-native requires a name symbol".into())),
     };
 
-    let (return_type, params_vec): (PrimType, Arc<Vec<Value>>) = {
+    let (return_type, params_vec): (PrimType, imbl::Vector<Value>) = {
         let a1 = &args[1];
         if let Some((tag, inner)) = unwrap_tagged(a1) {
             let rt = parse_type_name(tag)?;
             let pv = match inner {
-                Value::Vector(v) => Arc::clone(v),
+                Value::Vector(v) => v.clone(),
                 _ => {
                     return Err(Error::Eval(
                         "defn-native: return-type hint must wrap a params vector".into(),
@@ -451,7 +460,7 @@ fn sf_defn_native(args: &[Value], env: &Env) -> Result<Value> {
             };
             (rt, pv)
         } else if let Value::Vector(v) = a1 {
-            (PrimType::I64, Arc::clone(v))
+            (PrimType::I64, v.clone())
         } else {
             return Err(Error::Eval(
                 "defn-native: expected params vector (optionally ^Type-tagged)".into(),
@@ -526,7 +535,7 @@ fn sf_defn_native(args: &[Value], env: &Env) -> Result<Value> {
             .map(|(n, _)| Value::Symbol(Arc::clone(n)))
             .collect();
         let mut fn_args: Vec<Value> = Vec::with_capacity(1 + args.len().saturating_sub(2));
-        fn_args.push(Value::Vector(Arc::new(fn_params_vec)));
+        fn_args.push(Value::Vector(fn_params_vec.into_iter().collect()));
         fn_args.extend(args[2..].iter().cloned());
         let fn_val = sf_fn(&fn_args, env, Some(Arc::clone(&name)))?;
         env.define_global(&name, fn_val.clone());

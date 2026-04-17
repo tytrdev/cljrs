@@ -34,7 +34,10 @@ pub fn syntax_quote(form: &Value) -> Value {
     match form {
         Value::Symbol(_) => list_of(vec![sym("quote"), form.clone()]),
         Value::List(xs) => wrap_seq(xs, /* vector */ false),
-        Value::Vector(xs) => wrap_seq(xs, /* vector */ true),
+        Value::Vector(xs) => {
+            let tmp: Vec<Value> = xs.iter().cloned().collect();
+            wrap_seq(&tmp, /* vector */ true)
+        }
         // maps, sets, and self-evaluating literals pass through quoted whole.
         Value::Map(_) => list_of(vec![sym("quote"), form.clone()]),
         _ => form.clone(),
@@ -128,7 +131,8 @@ impl<'a> Parser<'a> {
             }
             b'[' => {
                 self.pos += 1;
-                self.read_seq(b']').map(|v| Value::Vector(Arc::new(v)))
+                self.read_seq(b']')
+                    .map(|v| Value::Vector(v.into_iter().collect()))
             }
             b'{' => {
                 self.pos += 1;
@@ -208,7 +212,7 @@ impl<'a> Parser<'a> {
         while let (Some(k), Some(v)) = (it.next(), it.next()) {
             pairs.push((k, v));
         }
-        Ok(Value::Map(Arc::new(pairs)))
+        Ok(Value::Map(pairs.into_iter().collect()))
     }
 
     fn read_string(&mut self) -> Result<Value> {

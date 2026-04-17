@@ -1,5 +1,8 @@
 use std::fmt;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
+
+use imbl::{HashMap as PMap, HashSet as PSet, Vector as PVec};
 
 use crate::env::Env;
 use crate::error::Result;
@@ -14,9 +17,15 @@ pub enum Value {
     Str(Arc<str>),
     Symbol(Arc<str>),
     Keyword(Arc<str>),
+    // Lists stay as Arc<Vec<Value>> — they're used as SSA-style AST
+    // containers more often than as data, and never grow after read time.
+    // Phase 4 may unify if needed.
     List(Arc<Vec<Value>>),
-    Vector(Arc<Vec<Value>>),
-    Map(Arc<Vec<(Value, Value)>>),
+    // Persistent collections via imbl (HAMT). O(log32) core ops,
+    // structural sharing on clone.
+    Vector(PVec<Value>),
+    Map(PMap<Value, Value>),
+    Set(PSet<Value>),
     Fn(Arc<Lambda>),
     Macro(Arc<Lambda>),
     Builtin(Builtin),
@@ -57,6 +66,7 @@ impl Value {
             Value::List(_) => "list",
             Value::Vector(_) => "vector",
             Value::Map(_) => "map",
+            Value::Set(_) => "set",
             Value::Fn(_) => "fn",
             Value::Macro(_) => "macro",
             Value::Builtin(_) => "builtin",
@@ -106,6 +116,10 @@ impl Value {
                     .map(|(k, v)| format!("{} {}", k.to_pr_string(), v.to_pr_string()))
                     .collect();
                 format!("{{{}}}", parts.join(", "))
+            }
+            Value::Set(s) => {
+                let parts: Vec<String> = s.iter().map(Value::to_pr_string).collect();
+                format!("#{{{}}}", parts.join(" "))
             }
             Value::Fn(lam) => match &lam.name {
                 Some(n) => format!("#<fn {n}>"),
@@ -161,17 +175,116 @@ impl PartialEq for Value {
             (Str(a), Str(b)) => a == b,
             (Symbol(a), Symbol(b)) => a == b,
             (Keyword(a), Keyword(b)) => a == b,
-            (List(a), List(b)) | (Vector(a), Vector(b)) => a == b,
-            // Clojure: lists and vectors compare equal if same length + same elements in order
-            (List(a), Vector(b)) | (Vector(a), List(b)) => **a == **b,
-            (Map(a), Map(b)) => {
-                if a.len() != b.len() {
-                    return false;
-                }
-                a.iter()
-                    .all(|(k, v)| b.iter().any(|(k2, v2)| k == k2 && v == v2))
+            (List(a), List(b)) => a == b,
+            (Vector(a), Vector(b)) => a == b,
+            // Clojure: lists and vectors compare equal if same length + elements.
+            (List(a), Vector(b)) => {
+                a.len() == b.len()
+                    && a.iter().zip(b.iter()).all(|(x, y)| x == y)
             }
+            (Vector(a), List(b)) => {
+                a.len() == b.len()
+                    && a.iter().zip(b.iter()).all(|(x, y)| x == y)
+            }
+            (Map(a), Map(b)) => a == b,
+            (Set(a), Set(b)) => a == b,
             _ => false,
+        }
+    }
+}
+
+/// Eq is a semantic lie in the presence of NaN-valued Floats, but imbl's
+/// HashMap/HashSet require it. We accept the lie; it only surfaces if a
+/// NaN is used as a map key (rare and already undefined behavior in
+/// most Clojure-family implementations).
+impl Eq for Value {}
+
+impl Hash for Value {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // Discriminator bytes keep e.g. `(hash :foo)` != `(hash "foo")`
+        // even though their str payloads would otherwise collide.
+        match self {
+            Value::Nil => 0u8.hash(state),
+            Value::Bool(b) => {
+                1u8.hash(state);
+                b.hash(state);
+            }
+            Value::Int(i) => {
+                2u8.hash(state);
+                i.hash(state);
+            }
+            Value::Float(f) => {
+                3u8.hash(state);
+                f.to_bits().hash(state);
+            }
+            Value::Str(s) => {
+                4u8.hash(state);
+                s.as_ref().hash(state);
+            }
+            Value::Symbol(s) => {
+                5u8.hash(state);
+                s.as_ref().hash(state);
+            }
+            Value::Keyword(s) => {
+                6u8.hash(state);
+                s.as_ref().hash(state);
+            }
+            Value::List(v) => {
+                7u8.hash(state);
+                v.len().hash(state);
+                for item in v.iter() {
+                    item.hash(state);
+                }
+            }
+            Value::Vector(v) => {
+                8u8.hash(state);
+                v.len().hash(state);
+                for item in v.iter() {
+                    item.hash(state);
+                }
+            }
+            Value::Map(m) => {
+                // Order-independent: XOR each (k,v) sub-hash.
+                use std::collections::hash_map::DefaultHasher;
+                let mut xor: u64 = 0;
+                for (k, v) in m.iter() {
+                    let mut sub = DefaultHasher::new();
+                    k.hash(&mut sub);
+                    v.hash(&mut sub);
+                    xor ^= sub.finish();
+                }
+                9u8.hash(state);
+                m.len().hash(state);
+                xor.hash(state);
+            }
+            Value::Set(s) => {
+                use std::collections::hash_map::DefaultHasher;
+                let mut xor: u64 = 0;
+                for item in s.iter() {
+                    let mut sub = DefaultHasher::new();
+                    item.hash(&mut sub);
+                    xor ^= sub.finish();
+                }
+                10u8.hash(state);
+                s.len().hash(state);
+                xor.hash(state);
+            }
+            Value::Fn(lam) => {
+                11u8.hash(state);
+                (Arc::as_ptr(lam) as usize).hash(state);
+            }
+            Value::Macro(lam) => {
+                12u8.hash(state);
+                (Arc::as_ptr(lam) as usize).hash(state);
+            }
+            Value::Builtin(b) => {
+                13u8.hash(state);
+                b.name.hash(state);
+            }
+            Value::Native(n) => {
+                14u8.hash(state);
+                (Arc::as_ptr(n) as usize).hash(state);
+            }
         }
     }
 }

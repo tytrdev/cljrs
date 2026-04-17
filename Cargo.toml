@@ -13,6 +13,11 @@ mlir = ["dep:melior"]
 demo = ["mlir", "dep:minifb"]
 
 [dependencies]
+# imbl = maintained fork of im. Production-quality persistent HAMT
+# collections (Vector, HashMap, HashSet) backing Value::Vector/Map/Set.
+# Hand-rolling these is a multi-thousand-line project; imbl is battle-
+# tested, dependency-light, and matches Clojure's semantics closely.
+imbl = "3"
 melior = { version = "0.27", optional = true }
 minifb = { version = "0.27", optional = true }
 
