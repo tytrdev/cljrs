@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>GPU in the browser — cljrs</title>
+  <title>GPU in the browser . cljrs</title>
   <link rel="stylesheet" href="./style.css">
   <style>
     .gpu-stage {
@@ -97,7 +97,7 @@
       This page runs cljrs GPU kernels directly on your GPU via <b>WebGPU</b>.
       The exact same <code>defn-gpu-pixel</code> source compiles to WGSL once,
       and that WGSL is loaded here and dispatched by the browser's WebGPU
-      implementation — same kernel, same output, native and web.
+      implementation. Same kernel, same output, native and web.
     </p>
     <p style="color:var(--fg-dim);font-size:0.9rem">
       Requires a WebGPU-capable browser (Chrome 113+, Edge, Safari TP, or
@@ -162,12 +162,12 @@
       </li>
       <li>
         The native app (<code>cargo run --features gpu-demo --bin gpu-demo</code>)
-        does the same thing via <code>wgpu</code> — different runtime, same kernel.
+        does the same thing via <code>wgpu</code> . different runtime, same kernel.
       </li>
     </ol>
 
     <p style="color:var(--fg-dim);font-size:0.9rem">
-      Next: in-browser <code>defn-gpu-pixel</code> — edit the cljrs source in
+      Next: in-browser <code>defn-gpu-pixel</code> . edit the cljrs source in
       the live REPL, compile to WGSL in-browser, re-upload to WebGPU, all
       without a round-trip. Blocked on running the MLIR/GPU pipeline in wasm.
       For now, precompiling is simpler and tells the same story.

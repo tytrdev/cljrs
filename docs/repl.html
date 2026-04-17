@@ -3,61 +3,56 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>REPL — cljrs</title>
+  <title>REPL</title>
   <link rel="stylesheet" href="./style.css">
 </head>
 <body>
   <main>
-    <h2>Live REPL</h2>
+    <h2>REPL</h2>
     <p>
-      Stateful session. <code>def</code>s persist across runs; hit
-      <code>&#8984;&#8629;</code> or click Run. Runs entirely in your browser —
-      the WASM bundle is ~400KB and loads once.
+      Stateful in-browser session. <code>def</code>s persist across runs.
+      Hit &#8984;&#8629; or click Run.
     </p>
 
     <div class="repl">
       <textarea spellcheck="false" style="min-height:240px">(def xs (range 100))
 (def squares (mapv #(* % %) xs))
 
-;; Try: (def total (reduce + squares))
-;; Then: total
+;; try:  (def total (reduce + squares))
+;; then: total
 (first squares)</textarea>
       <div class="repl-toolbar">
         <span style="font-size:0.8rem;color:var(--fg-dim)">
-          stateful — <code>def</code>s stick · &#8984;&#8629; to run
+          state persists &middot; &#8984;&#8629; to run
         </span>
         <button>Run</button>
       </div>
       <div class="repl-out"></div>
     </div>
 
-    <h3>What's available</h3>
+    <h3>Available here</h3>
     <p>
-      The full tree-walker: ~125 builtins, macro system, persistent
-      collections, destructuring, threading macros, <code>try</code>/<code>catch</code>,
-      atoms. See <a href="./coverage.html">Coverage</a> for the list.
+      The full tree walker. About 125 builtins, macros, persistent collections,
+      destructuring, threading, try/catch, atoms. See <a href="./coverage.html">Coverage</a>.
     </p>
     <p>
-      <strong>What's <em>not</em> available here:</strong> <code>defn-native</code> falls back
-      to the interpreter (no LLVM in the browser), file I/O
-      (<code>slurp</code>/<code>spit</code>), and the graphics kernels. For those, run
-      <code>cljrs</code> natively.
+      Not available in-browser: <code>defn-native</code> falls back to the
+      interpreter (no LLVM in WASM), file I/O, graphics kernels. Run cljrs
+      natively for those.
     </p>
 
     <h3>Things to try</h3>
     <pre><code>(defn factorial [n]
   (reduce * (range 1 (inc n))))
 (factorial 20)</code></pre>
-    <pre><code>;; Fizzbuzz
-(defn fizzbuzz [n]
+    <pre><code>(defn fizzbuzz [n]
   (cond
     (zero? (mod n 15)) "FizzBuzz"
     (zero? (mod n 3))  "Fizz"
     (zero? (mod n 5))  "Buzz"
     :else n))
 (map fizzbuzz (range 1 16))</code></pre>
-    <pre><code>;; Macro: trace a fn call
-(defmacro trace [expr]
+    <pre><code>(defmacro trace [expr]
   `(let [v ~expr]
      (println "=&gt;" v)
      v))

@@ -3,146 +3,90 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Demos — cljrs</title>
+  <title>Demos</title>
   <link rel="stylesheet" href="./style.css">
 </head>
 <body>
   <main>
-    <h2>Live-coded demos</h2>
+    <h2>Demos</h2>
     <p>
-      21 graphical kernels, all written in cljrs and JIT-compiled to native
-      code via MLIR. Each video was rendered by
-      <code>cargo run --release --bin record</code> from the same source tree you
-      can open and edit — the recorder is part of the project, not a
-      separate pipeline.
-    </p>
-    <p>
-      Running natively, each demo updates at 60+ fps with the editor open.
-      Parameter sliders, time scrubbing, and reload-on-save are all wired
-      up in the demo binary (<code>cargo run --release --features demo --bin demo -- demo/fractal.clj</code>).
+      Every kernel below is cljrs source. Videos were rendered by
+      <code>bin/record</code> (CPU) and <code>bin/gpu-record</code> (GPU).
+      Run any of them locally with the commands under each section.
     </p>
 
-    <h3>GPU kernels (defn-gpu-pixel)</h3>
+    <h3>GPU (defn-gpu-pixel)</h3>
     <p>
-      These kernels compile from cljrs source to WGSL and run on the GPU
-      via wgpu — Metal on macOS, Vulkan on Linux, DX12 on Windows, and
-      WebGPU in supported browsers. Rendered 252–517 fps on an
-      integrated Apple M3 at 640×360.
+      Kernels compile to WGSL and run on wgpu. Same source, four targets:
+      Metal on macOS, Vulkan on Linux, DX12 on Windows, WebGPU in browsers.
+      Numbers below are render throughput on an integrated Apple M3 at 640x360.
     </p>
     <div class="demo-gallery">
       <figure>
         <video src="./media/gpu_plasma.mp4" autoplay muted loop playsinline></video>
-        <figcaption>Plasma · GPU (<code>demo_gpu/plasma.clj</code>) · 252 fps render</figcaption>
+        <figcaption>Plasma (<code>demo_gpu/plasma.clj</code>) &middot; 252 fps</figcaption>
       </figure>
       <figure>
         <video src="./media/gpu_waves.mp4" autoplay muted loop playsinline></video>
-        <figcaption>Wave interference · GPU (<code>demo_gpu/waves.clj</code>) · 402 fps render</figcaption>
+        <figcaption>Waves (<code>demo_gpu/waves.clj</code>) &middot; 402 fps</figcaption>
       </figure>
       <figure>
         <video src="./media/gpu_mandelbrot.mp4" autoplay muted loop playsinline></video>
-        <figcaption>Mandelbrot · GPU (<code>demo_gpu/mandelbrot.clj</code>) · 517 fps render</figcaption>
+        <figcaption>Mandelbrot (<code>demo_gpu/mandelbrot.clj</code>) &middot; 150 fps with 8x SSAA</figcaption>
       </figure>
     </div>
+    <pre><code>cargo run --release --features gpu-demo --bin gpu-demo -- demo_gpu/plasma.clj</code></pre>
     <p>
-      Run locally with:
-      <code>cargo run --release --features gpu-demo --bin gpu-demo -- demo_gpu/plasma.clj</code>.
-      Edit the .clj file while the window is open — the kernel
-      recompiles on save (same Bret-Victor loop as CPU).
+      Edit the <code>.clj</code> file while the window is open, the kernel
+      recompiles on save. See the <a href="./gpu-web.html">GPU page</a>
+      to run these in your browser.
     </p>
 
-    <h3>CPU kernels (defn-native)</h3>
+    <h3>CPU (defn-native)</h3>
     <p>
-      21 kernels below, each written in cljrs and JIT-compiled to
-      native code via MLIR + LLVM. Rendered via <code>bin/record</code>.
+      21 kernels, each JIT-compiled to machine code via MLIR and LLVM.
     </p>
-
     <div class="demo-gallery">
-      <figure>
-        <video src="./media/fractal.mp4" autoplay muted loop playsinline></video>
-        <figcaption>Mandelbrot (<code>demo/fractal.clj</code>)</figcaption>
-      </figure>
-      <figure>
-        <video src="./media/raymarch.mp4" autoplay muted loop playsinline></video>
-        <figcaption>Raymarched spheres (<code>demo/raymarch.clj</code>)</figcaption>
-      </figure>
-      <figure>
-        <video src="./media/sdf_scene.mp4" autoplay muted loop playsinline></video>
-        <figcaption>SDF scene (<code>demo/sdf_scene.clj</code>)</figcaption>
-      </figure>
-      <figure>
-        <video src="./media/raytrace.mp4" autoplay muted loop playsinline></video>
-        <figcaption>Ray tracer (<code>demo/raytrace.clj</code>)</figcaption>
-      </figure>
-      <figure>
-        <video src="./media/rasterizer.mp4" autoplay muted loop playsinline></video>
-        <figcaption>Software rasterizer (<code>demo/rasterizer.clj</code>)</figcaption>
-      </figure>
-      <figure>
-        <video src="./media/lorenz.mp4" autoplay muted loop playsinline></video>
-        <figcaption>Lorenz attractor (<code>demo/lorenz.clj</code>)</figcaption>
-      </figure>
-      <figure>
-        <video src="./media/double_pendulum.mp4" autoplay muted loop playsinline></video>
-        <figcaption>Double pendulum (<code>demo/double_pendulum.clj</code>)</figcaption>
-      </figure>
-      <figure>
-        <video src="./media/julia.mp4" autoplay muted loop playsinline></video>
-        <figcaption>Julia set (<code>demo/julia.clj</code>)</figcaption>
-      </figure>
-      <figure>
-        <video src="./media/plasma.mp4" autoplay muted loop playsinline></video>
-        <figcaption>Plasma (<code>demo/plasma.clj</code>)</figcaption>
-      </figure>
-      <figure>
-        <video src="./media/voronoi.mp4" autoplay muted loop playsinline></video>
-        <figcaption>Voronoi cells (<code>demo/voronoi.clj</code>)</figcaption>
-      </figure>
-      <figure>
-        <video src="./media/metaballs.mp4" autoplay muted loop playsinline></video>
-        <figcaption>Metaballs (<code>demo/metaballs.clj</code>)</figcaption>
-      </figure>
-      <figure>
-        <video src="./media/domain_warp.mp4" autoplay muted loop playsinline></video>
-        <figcaption>Domain warping (<code>demo/domain_warp.clj</code>)</figcaption>
-      </figure>
+      <figure><video src="./media/fractal.mp4" autoplay muted loop playsinline></video><figcaption>Mandelbrot</figcaption></figure>
+      <figure><video src="./media/raymarch.mp4" autoplay muted loop playsinline></video><figcaption>Raymarched spheres</figcaption></figure>
+      <figure><video src="./media/sdf_scene.mp4" autoplay muted loop playsinline></video><figcaption>SDF scene</figcaption></figure>
+      <figure><video src="./media/raytrace.mp4" autoplay muted loop playsinline></video><figcaption>Ray tracer</figcaption></figure>
+      <figure><video src="./media/rasterizer.mp4" autoplay muted loop playsinline></video><figcaption>Software rasterizer</figcaption></figure>
+      <figure><video src="./media/lorenz.mp4" autoplay muted loop playsinline></video><figcaption>Lorenz attractor</figcaption></figure>
+      <figure><video src="./media/double_pendulum.mp4" autoplay muted loop playsinline></video><figcaption>Double pendulum</figcaption></figure>
+      <figure><video src="./media/julia.mp4" autoplay muted loop playsinline></video><figcaption>Julia set</figcaption></figure>
+      <figure><video src="./media/plasma.mp4" autoplay muted loop playsinline></video><figcaption>Plasma</figcaption></figure>
+      <figure><video src="./media/voronoi.mp4" autoplay muted loop playsinline></video><figcaption>Voronoi cells</figcaption></figure>
+      <figure><video src="./media/metaballs.mp4" autoplay muted loop playsinline></video><figcaption>Metaballs</figcaption></figure>
+      <figure><video src="./media/domain_warp.mp4" autoplay muted loop playsinline></video><figcaption>Domain warping</figcaption></figure>
     </div>
+    <pre><code>cargo run --release --features demo --bin demo -- demo/fractal.clj</code></pre>
 
-    <h3>How the kernel ABI works</h3>
-    <p>
-      Each demo exports a single function with a fixed signature:
-    </p>
+    <h3>Kernel ABI</h3>
+    <p>CPU kernels have a fixed signature:</p>
     <pre><code>(defn-native render-pixel ^i64
   [^i64 px ^i64 py ^i64 frame ^i64 t-ms
    ^i64 s0 ^i64 s1 ^i64 s2 ^i64 s3]
-  ...body... )</code></pre>
+  ...body, returns 0xRRGGBB as i64...)</code></pre>
     <p>
-      Returns an <code>i64</code> packed as <code>0xRRGGBB</code>. The host calls it once per
-      pixel per frame in parallel via <code>rayon</code>. <code>s0</code> through <code>s3</code> are the
-      UI slider values (<code>0..1000</code>). Time scrubbing replaces <code>t-ms</code> with
-      the scrubbed value when the user pauses.
+      The host calls it once per pixel per frame, in parallel via rayon.
+      <code>s0</code> through <code>s3</code> are slider values 0 to 1000.
+      Time scrubbing replaces <code>t-ms</code> with a paused value.
     </p>
 
-    <h3>Building your own</h3>
+    <h3>Build your own</h3>
     <pre><code>echo "(defn-native render-pixel ^i64
   [^i64 px ^i64 py ^i64 frame ^i64 t-ms
    ^i64 s0 ^i64 s1 ^i64 s2 ^i64 s3]
   (+ (* px 257) py))" &gt; demo/stripes.clj
 
 cargo run --release --features demo --bin demo -- demo/stripes.clj</code></pre>
-    <p>
-      Edit the file while the window's open — the kernel recompiles
-      on save. No restart.
-    </p>
 
-    <h3>Recording your own videos</h3>
+    <h3>Record to mp4</h3>
     <pre><code>cargo run --release --features demo --bin record -- \
   --kernel demo/fractal.clj \
   --seconds 6 --fps 60 --size 960x540 \
   --out out/fractal.mp4</code></pre>
-    <p>
-      Pipes raw RGBA frames to <code>ffmpeg</code>. The videos on this page were
-      produced with this command.
-    </p>
   </main>
   <script type="module">
     import { mountChrome } from "./_layout.js";

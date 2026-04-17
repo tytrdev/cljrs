@@ -3,41 +3,33 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>cljrs — a from-scratch Clojure in Rust</title>
+  <title>cljrs</title>
   <link rel="stylesheet" href="./style.css">
 </head>
 <body>
   <main>
-    <h2>Clojure, reimplemented for performance.</h2>
+    <h2>Clojure, without the JVM.</h2>
     <p>
-      <code>cljrs</code> is a Clojure dialect built from scratch in Rust. The reader,
-      evaluator, macro system, and persistent collections are a plain tree-walker.
-      The performance-critical path compiles type-hinted fns straight to
-      native machine code via MLIR&nbsp;+&nbsp;LLVM — no JVM, no startup tax.
+      <code>cljrs</code> is a Clojure dialect implemented from scratch in Rust.
+      The reader, evaluator, macros, and persistent collections run as a
+      tree walker. Type-hinted functions compile to native code through
+      MLIR and LLVM. GPU kernels compile to WGSL and run on Metal, Vulkan,
+      DX12, or WebGPU.
     </p>
 
-    <h3>The pitch in one snippet</h3>
-    <pre><code>;; Tree-walker fn — easy, dynamic, like any Lisp.
+    <h3>One language, three compilers</h3>
+    <pre><code>;; Tree walker. Fully dynamic, lowest ceremony.
 (defn avg [xs] (/ (reduce + xs) (count xs)))
 
-;; Type-hinted fn — compiled to native machine code. Same syntax.
+;; Native. Same syntax, type-hinted, JIT-compiled to machine code.
 (defn-native fib ^i64 [^i64 n]
   (if (&lt; n 2) n (+ (fib (- n 1)) (fib (- n 2)))))
 
-(fib 35)  ; runs at native-Rust speeds</code></pre>
+;; GPU. Same syntax, compiles to a compute shader.
+(defn-gpu doubled ^f32 [^i32 i ^f32 v]
+  (* v 2.0))</code></pre>
 
-    <h3>Why</h3>
-    <p>
-      Clojure is a beautiful language bolted to a startup-hostile runtime.
-      <code>cljrs</code> drops the JVM entirely: persistent collections via
-      <code>imbl</code>, macros and reader in pure Rust, and a JIT backend
-      that emits the same MLIR / LLVM pipeline production compilers use.
-      The goal is Clojure that runs fast enough for games, numerical
-      kernels, and eventually GPU compute — native AND in the browser via
-      WebGPU + WASM.
-    </p>
-
-    <h3>Try it</h3>
+    <h3>Run it</h3>
     <div class="repl">
       <textarea spellcheck="false">(->> (range 20)
      (filter even?)
@@ -45,25 +37,19 @@
      (reduce +))</textarea>
       <div class="repl-toolbar">
         <span style="font-size:0.8rem;color:var(--fg-dim)">
-          &#8984;&#8629; to run · running in your browser via WASM
+          &#8984;&#8629; to run, tree walker compiled to WASM
         </span>
         <button>Run</button>
       </div>
       <div class="repl-out">click Run</div>
     </div>
-    <p>
-      That snippet is running in the tree-walker compiled to WebAssembly —
-      the same code path used in the native binary (minus the JIT).
-      See <a href="./repl.html">REPL</a> for a stateful session you can
-      <code>def</code> into.
-    </p>
 
     <h3>Status</h3>
     <ul>
-      <li><strong>~6.7% of clojure.core</strong> coverage today, covering the idioms most programs use. See <a href="./coverage.html">Coverage</a>.</li>
-      <li><strong>2.4–13× faster than Clojure on JVM</strong> on compute micro-benchmarks. See <a href="./benchmarks.html">Benchmarks</a>.</li>
-      <li><strong>Live-coded graphical demos</strong> with parameter sliders and time scrubbing. See <a href="./demos.html">Demos</a>.</li>
-      <li>GPU kernel DSL and cross-platform (native + WebGPU) dispatch are on the <a href="./roadmap.html">Roadmap</a>.</li>
+      <li>Tree walker, macros, persistent collections, destructuring, atoms, try/catch. See <a href="./coverage.html">Coverage</a>.</li>
+      <li>Native code path: 2.4x to 13x faster than Clojure on JVM on fib, loop_sum, cond_chain. See <a href="./benchmarks.html">Benchmarks</a>.</li>
+      <li>GPU path: cljrs kernels run natively on Metal/Vulkan/DX12 and in the browser on <a href="./gpu-web.html">WebGPU</a>.</li>
+      <li>21 CPU demos, 3 GPU demos, all live-coded. See <a href="./demos.html">Demos</a>.</li>
     </ul>
   </main>
   <script type="module">

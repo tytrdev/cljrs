@@ -3,95 +3,81 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Coverage — cljrs</title>
+  <title>Coverage</title>
   <link rel="stylesheet" href="./style.css">
 </head>
 <body>
   <main>
-    <h2>Clojure surface-area coverage</h2>
+    <h2>Coverage</h2>
     <p>
-      This page is a running inventory of what Clojure features <code>cljrs</code>
-      currently supports. "Supported" means there's a test for it. Gaps are
-      explicit — please open an issue if you want something prioritized.
+      What Clojure features run today. "Supported" has a test.
     </p>
 
-    <h3>Core forms</h3>
+    <h3>Forms</h3>
     <table>
       <thead><tr><th>Form</th><th>Status</th><th>Notes</th></tr></thead>
       <tbody>
-        <tr><td><code>def</code> / <code>defn</code> / <code>defn-</code></td><td class="ok">supported</td><td><code>defn-</code> (private) not special-cased — use <code>defn</code></td></tr>
-        <tr><td><code>fn</code> / anon <code>#()</code></td><td class="ok">supported</td><td><code>%</code>, <code>%1..%N</code>, <code>%&amp;</code></td></tr>
-        <tr><td><code>let</code> / destructuring</td><td class="ok">supported</td><td>vector, map, <code>:keys</code>, <code>:as</code>, <code>:or</code>, nested</td></tr>
-        <tr><td><code>loop</code> / <code>recur</code></td><td class="ok">supported</td><td>in both tree-walker and native paths</td></tr>
-        <tr><td><code>if</code> / <code>do</code> / <code>when</code> / <code>when-not</code></td><td class="ok">supported</td><td></td></tr>
-        <tr><td><code>cond</code> / <code>if-let</code> / <code>when-let</code></td><td class="ok">supported</td><td>via prelude macros</td></tr>
-        <tr><td><code>case</code></td><td class="partial">partial</td><td>works for simple literals; no jump-table optimization</td></tr>
-        <tr><td><code>and</code> / <code>or</code></td><td class="ok">supported</td><td></td></tr>
-        <tr><td><code>dotimes</code> / <code>doseq</code></td><td class="ok">supported</td><td><code>for</code> generator missing</td></tr>
-        <tr><td><code>defmacro</code> / quote / syntax-quote</td><td class="ok">supported</td><td>no auto-gensym (<code>x#</code>) yet</td></tr>
-        <tr><td><code>try</code> / <code>catch</code> / <code>finally</code> / <code>throw</code></td><td class="ok">supported</td><td><code>ex-info</code>, <code>ex-message</code>, <code>ex-data</code></td></tr>
-        <tr><td><code>ns</code> / <code>require</code> / <code>load-file</code></td><td class="partial">partial</td><td>single global namespace; no isolation yet</td></tr>
-        <tr><td><code>defprotocol</code> / <code>deftype</code> / <code>defrecord</code></td><td class="missing">missing</td><td>planned for Arc 2</td></tr>
-        <tr><td><code>defmulti</code> / <code>defmethod</code></td><td class="missing">missing</td><td></td></tr>
+        <tr><td><code>def</code>, <code>defn</code></td><td class="ok">supported</td><td></td></tr>
+        <tr><td><code>fn</code>, <code>#()</code></td><td class="ok">supported</td><td><code>%</code>, <code>%1..%N</code>, <code>%&amp;</code></td></tr>
+        <tr><td><code>let</code> with destructuring</td><td class="ok">supported</td><td>vector, map, <code>:keys</code>, <code>:as</code>, <code>:or</code>, nested</td></tr>
+        <tr><td><code>loop</code>, <code>recur</code></td><td class="ok">supported</td><td>Tree walker and native paths</td></tr>
+        <tr><td><code>if</code>, <code>do</code>, <code>when</code>, <code>when-not</code></td><td class="ok">supported</td><td></td></tr>
+        <tr><td><code>cond</code>, <code>if-let</code>, <code>when-let</code></td><td class="ok">supported</td><td>Prelude macros</td></tr>
+        <tr><td><code>case</code></td><td class="partial">partial</td><td>Literals only, no jump table</td></tr>
+        <tr><td><code>and</code>, <code>or</code></td><td class="ok">supported</td><td></td></tr>
+        <tr><td><code>dotimes</code>, <code>doseq</code></td><td class="ok">supported</td><td><code>for</code> generator missing</td></tr>
+        <tr><td><code>defmacro</code>, quote, syntax-quote</td><td class="ok">supported</td><td>No auto-gensym yet</td></tr>
+        <tr><td><code>try</code>, <code>catch</code>, <code>finally</code>, <code>throw</code></td><td class="ok">supported</td><td><code>ex-info</code>, <code>ex-message</code>, <code>ex-data</code></td></tr>
+        <tr><td><code>ns</code>, <code>require</code>, <code>load-file</code></td><td class="partial">partial</td><td>Single global namespace</td></tr>
+        <tr><td><code>defprotocol</code>, <code>deftype</code>, <code>defrecord</code></td><td class="missing">missing</td><td>Planned</td></tr>
+        <tr><td><code>defmulti</code>, <code>defmethod</code></td><td class="missing">missing</td><td></td></tr>
       </tbody>
     </table>
 
     <h3>Reader</h3>
     <table>
       <tbody>
-        <tr><td><code>'x</code> quote</td><td class="ok">supported</td></tr>
-        <tr><td>`x` syntax-quote, <code>~</code>, <code>~@</code></td><td class="ok">supported</td></tr>
-        <tr><td><code>^Tag</code> metadata / type hints</td><td class="ok">supported</td></tr>
+        <tr><td><code>'x</code></td><td class="ok">supported</td></tr>
+        <tr><td><code>`x</code>, <code>~</code>, <code>~@</code></td><td class="ok">supported</td></tr>
+        <tr><td><code>^Tag</code></td><td class="ok">supported</td></tr>
         <tr><td><code>#()</code>, <code>#_</code>, <code>#{}</code>, <code>@</code></td><td class="ok">supported</td></tr>
-        <tr><td><code>#'</code> var ref</td><td class="partial">partial</td><td>treated as quote (no vars yet)</td></tr>
+        <tr><td><code>#'</code></td><td class="partial">partial</td></tr>
         <tr><td><code>#"regex"</code></td><td class="missing">missing</td></tr>
         <tr><td><code>x#</code> auto-gensym</td><td class="missing">missing</td></tr>
-        <tr><td>tagged literals <code>#inst</code>, <code>#uuid</code>, <code>#custom/tag</code></td><td class="missing">missing</td></tr>
+        <tr><td>Tagged literals</td><td class="missing">missing</td></tr>
       </tbody>
     </table>
 
-    <h3>Data types</h3>
+    <h3>Data</h3>
     <table>
       <tbody>
         <tr><td>i64, f64, bool, string, keyword, symbol, nil</td><td class="ok">supported</td></tr>
-        <tr><td>list, vector, map, set (HAMT persistent)</td><td class="ok">supported</td></tr>
-        <tr><td>atom + <code>deref</code> / <code>swap!</code> / <code>reset!</code> / <code>compare-and-set!</code></td><td class="ok">supported</td></tr>
+        <tr><td>list, vector, map, set (HAMT)</td><td class="ok">supported</td></tr>
+        <tr><td>atom, <code>deref</code>, <code>swap!</code>, <code>reset!</code>, <code>compare-and-set!</code></td><td class="ok">supported</td></tr>
         <tr><td>ratios, bigint</td><td class="missing">missing</td></tr>
         <tr><td>lazy-seq, reducers, transducers</td><td class="missing">missing</td></tr>
         <tr><td>refs, agents, futures, promises, delays</td><td class="missing">missing</td></tr>
       </tbody>
     </table>
 
-    <h3>Callable-value polymorphism</h3>
-    <p>
-      Keywords, maps, sets, and vectors are all callable — standard Clojure.
-    </p>
-    <pre><code>(:name {:name "ty"})        ; &rArr; "ty"
-({:a 1 :b 2} :a)            ; &rArr; 1
-(#{1 2 3} 2)                ; &rArr; 2
-([10 20 30] 1)              ; &rArr; 20</code></pre>
+    <h3>Callable values</h3>
+    <p>Keywords, maps, sets, and vectors invoke like functions:</p>
+    <pre><code>(:name {:name "ty"})        ;=&gt; "ty"
+({:a 1 :b 2} :a)            ;=&gt; 1
+(#{1 2 3} 2)                ;=&gt; 2
+([10 20 30] 1)              ;=&gt; 20</code></pre>
 
-    <h3>Function families implemented</h3>
-    <p>
-      ~125 builtins plus the prelude macros. Concrete list (non-exhaustive):
-    </p>
+    <h3>Functions</h3>
+    <p>About 125 builtins plus the prelude macros.</p>
     <ul>
-      <li><strong>Seq:</strong> <code>map mapv filter filterv reduce reduce-kv take drop take-while drop-while range repeat partition interleave interpose distinct frequencies group-by sort reverse first rest second last count empty? some every? apply</code></li>
-      <li><strong>Coll:</strong> <code>get get-in assoc assoc-in dissoc update update-in merge select-keys keys vals contains? find conj cons concat vec list vector into hash-map hash-set set</code></li>
-      <li><strong>String:</strong> <code>str subs str/split str/join str/upper-case str/lower-case str/replace str/starts-with? str/ends-with? str/includes? str/trim str/blank?</code></li>
-      <li><strong>Math:</strong> <code>+ - * / mod rem quot inc dec min max abs sqrt pow sin cos tan exp log floor ceil round Math/PI</code></li>
-      <li><strong>Predicates:</strong> <code>nil? zero? pos? neg? even? odd? empty? string? number? integer? float? map? vector? set? list? seq? coll? keyword? symbol? fn? boolean? true? false? some? atom?</code></li>
-      <li><strong>Fn combinators:</strong> <code>comp partial complement juxt constantly identity</code></li>
-      <li><strong>I/O:</strong> <code>print println pr-str print-str println-str slurp spit read-string</code></li>
+      <li><b>Seq:</b> <code>map mapv filter filterv reduce reduce-kv take drop take-while drop-while range repeat partition interleave interpose distinct frequencies group-by sort reverse first rest second last count empty? some every? apply</code></li>
+      <li><b>Coll:</b> <code>get get-in assoc assoc-in dissoc update update-in merge select-keys keys vals contains? find conj cons concat vec list vector into hash-map hash-set set</code></li>
+      <li><b>String:</b> <code>str subs str/split str/join str/upper-case str/lower-case str/replace str/starts-with? str/ends-with? str/includes? str/trim str/blank?</code></li>
+      <li><b>Math:</b> <code>+ - * / mod rem quot inc dec min max abs sqrt pow sin cos tan exp log floor ceil round Math/PI</code></li>
+      <li><b>Predicates:</b> <code>nil? zero? pos? neg? even? odd? empty? string? number? integer? float? map? vector? set? list? seq? coll? keyword? symbol? fn? boolean? true? false? some? atom?</code></li>
+      <li><b>Fn combinators:</b> <code>comp partial complement juxt constantly identity</code></li>
+      <li><b>I/O:</b> <code>print println pr-str print-str println-str slurp spit read-string</code></li>
     </ul>
-
-    <h3>What this page isn't</h3>
-    <p>
-      This is not a performance matrix — see <a href="./benchmarks.html">Benchmarks</a>.
-      It's not a spec — Clojure doesn't have a formal one either. It's a
-      "will my code probably run" reference, and when in doubt the REPL
-      is authoritative.
-    </p>
   </main>
   <script type="module">
     import { mountChrome } from "./_layout.js";

@@ -3,16 +3,14 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Syntax — cljrs</title>
+  <title>Syntax</title>
   <link rel="stylesheet" href="./style.css">
 </head>
 <body>
   <main>
-    <h2>Syntax tour</h2>
+    <h2>Syntax</h2>
     <p>
-      cljrs is a Clojure dialect — if you know Clojure, this is mostly
-      review. The snippets below all run live (click Run), which is the
-      most reliable way to see what's supported.
+      Every snippet here runs in your browser. Hit Run (or &#8984;&#8629;).
     </p>
 
     <h3>Literals</h3>
@@ -23,7 +21,7 @@
       <div class="repl-out"></div>
     </div>
 
-    <h3>Functions and closures</h3>
+    <h3>Functions</h3>
     <div class="repl">
       <textarea spellcheck="false">(defn greet [who] (str "hello " who))
 (greet "tyler")</textarea>
@@ -31,7 +29,7 @@
       <div class="repl-out"></div>
     </div>
 
-    <h3>Anonymous fn shorthand</h3>
+    <h3>Anonymous fn</h3>
     <div class="repl">
       <textarea spellcheck="false">(map #(* % %) [1 2 3 4 5])</textarea>
       <div class="repl-toolbar"><span></span><button>Run</button></div>
@@ -50,7 +48,7 @@
       <div class="repl-out"></div>
     </div>
 
-    <h3>Threading macros</h3>
+    <h3>Threading</h3>
     <div class="repl">
       <textarea spellcheck="false">(->> (range 100)
      (filter odd?)
@@ -60,7 +58,7 @@
       <div class="repl-out"></div>
     </div>
 
-    <h3>Control flow: cond / when / if-let</h3>
+    <h3>cond / when / if-let</h3>
     <div class="repl">
       <textarea spellcheck="false">(defn classify [n]
   (cond
@@ -74,7 +72,7 @@
       <div class="repl-out"></div>
     </div>
 
-    <h3>Atoms + swap!</h3>
+    <h3>Atoms</h3>
     <div class="repl">
       <textarea spellcheck="false">(def counter (atom 0))
 (dotimes [_ 10] (swap! counter inc))
@@ -88,12 +86,12 @@
       <textarea spellcheck="false">(defmacro unless [test & body]
   `(if ~test nil (do ~@body)))
 
-(unless false :ran-because-false)</textarea>
+(unless false :ran)</textarea>
       <div class="repl-toolbar"><span></span><button>Run</button></div>
       <div class="repl-out"></div>
     </div>
 
-    <h3>Error handling</h3>
+    <h3>try / catch</h3>
     <div class="repl">
       <textarea spellcheck="false">(try
   (/ 1 0)
@@ -103,13 +101,11 @@
       <div class="repl-out"></div>
     </div>
 
-    <h3>Native-compiled fns</h3>
+    <h3>defn-native</h3>
     <p>
-      The <code>defn-native</code> form JIT-compiles a typed body to
-      machine code via MLIR. Browser WASM bundles don't have a JIT
-      (melior won't cross-compile), so these fall back to the tree-walker
-      on this page — but running <code>cljrs</code> natively, <code>fib</code> here runs at
-      native-Rust speeds. See <a href="./benchmarks.html">Benchmarks</a>.
+      Native JIT via MLIR. The browser bundle has no JIT, so these
+      fall back to the interpreter here. Running natively, fib hits
+      the <a href="./benchmarks.html">benchmarked speeds</a>.
     </p>
     <pre><code>(defn-native fib ^i64 [^i64 n]
   (if (&lt; n 2) n (+ (fib (- n 1)) (fib (- n 2)))))</code></pre>
