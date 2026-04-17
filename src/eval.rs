@@ -377,6 +377,49 @@ const SPECIAL_FORMS: &[&str] = &[
     "throw",
 ];
 
+/// Recursively macro-expand every form in an AST — walk the tree,
+/// expand any macro call to fixpoint, and descend into the result's
+/// sub-forms. Used by the GPU DSL (and anywhere else that takes a
+/// body and compiles it without going through `eval`).
+///
+/// Unlike `eval`, nothing is executed; only macro calls are rewritten.
+/// Special forms are preserved intact — their semantics are implemented
+/// by the consumer (e.g. the GPU emitter).
+pub fn macroexpand_all(form: &Value, env: &Env) -> Result<Value> {
+    // Expand any top-level macro call to fixpoint first.
+    let mut cur = form.clone();
+    while let Some(next) = try_macro_expand_once(&cur, env)? {
+        cur = next;
+    }
+    // Then recurse into sub-forms.
+    match cur {
+        Value::List(xs) => {
+            let mut out = Vec::with_capacity(xs.len());
+            // Don't re-expand inside `quote` — its argument is data, not
+            // code, and some macro libraries stash symbols called `quote`
+            // intentionally. This mirrors how most Clojure-family
+            // implementations preserve quoted forms verbatim.
+            if let Some(Value::Symbol(s)) = xs.first()
+                && s.as_ref() == "quote"
+            {
+                return Ok(Value::List(xs));
+            }
+            for f in xs.iter() {
+                out.push(macroexpand_all(f, env)?);
+            }
+            Ok(Value::List(Arc::new(out)))
+        }
+        Value::Vector(xs) => {
+            let mut out: imbl::Vector<Value> = imbl::Vector::new();
+            for f in xs.iter() {
+                out.push_back(macroexpand_all(f, env)?);
+            }
+            Ok(Value::Vector(out))
+        }
+        _ => Ok(cur),
+    }
+}
+
 fn try_macro_expand_once(form: &Value, env: &Env) -> Result<Option<Value>> {
     let Value::List(xs) = form else {
         return Ok(None);
@@ -1092,7 +1135,10 @@ fn sf_defn_gpu_pixel(args: &[Value], env: &Env) -> Result<Value> {
         Value::List(Arc::new(do_form))
     };
 
-    let wgsl = crate::gpu::emit::emit_pixel(&param_refs, &body)
+    // Expand macros in the body so the GPU DSL can use defmacro-defined
+    // helpers (e.g. a sample-mandel macro that factors out an AA loop).
+    let expanded = macroexpand_all(&body, env)?;
+    let wgsl = crate::gpu::emit::emit_pixel(&param_refs, &expanded)
         .map_err(|e| Error::Eval(format!("defn-gpu-pixel `{name}`: {e}")))?;
     let kernel = crate::gpu::GpuPixelKernel::from_wgsl(name.to_string(), wgsl);
     let v = Value::GpuPixelKernel(Arc::new(kernel));

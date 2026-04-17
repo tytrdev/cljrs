@@ -167,10 +167,13 @@ impl eframe::App for GpuDemo {
                     s3: self.sliders[3],
                     _pad: 0,
                 };
-                // TAA blend alpha: 0.22 ≈ ~5-frame effective averaging.
-                // Small enough to kill boundary flicker, large enough
-                // that continuous zoom motion doesn't smear visibly.
-                match kernel.render_frame_taa(&self.gpu, params, 0.22) {
+                // No TAA here — the history buffer is in pixel-space, but
+                // zooming kernels move what each pixel represents every
+                // frame, which produces motion smear. Temporal-reproj
+                // TAA (using known zoom ratio to sample history from the
+                // right place) is the right fix; until then, kernels do
+                // their own spatial SSAA and we keep the display crisp.
+                match kernel.render_frame(&self.gpu, params) {
                     Ok(buf) => {
                         unpack_rgba(&buf, &mut self.rgba);
                         self.last_error = None;
