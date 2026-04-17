@@ -47,3 +47,4 @@ ehthumbs.db
 *.tmp
 *.bak
 .nrepl-port
+out/

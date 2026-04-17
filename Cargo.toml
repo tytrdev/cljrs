@@ -34,6 +34,11 @@ name = "demo"
 path = "src/bin/demo.rs"
 required-features = ["demo"]
 
+[[bin]]
+name = "record"
+path = "src/bin/record.rs"
+required-features = ["demo"]
+
 [profile.release]
 lto = "fat"
 codegen-units = 1
