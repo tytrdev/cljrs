@@ -202,6 +202,8 @@ pub fn eval(form: &Value, env: &Env) -> Result<Value> {
         | Value::Builtin(_)
         | Value::Native(_)
         | Value::Atom(_) => Ok(form.clone()),
+        #[cfg(feature = "gpu")]
+        Value::GpuKernel(_) => Ok(form.clone()),
         Value::Symbol(s) => env.lookup(s),
         Value::Vector(xs) => {
             let mut out: imbl::Vector<Value> = imbl::Vector::new();
@@ -245,6 +247,8 @@ fn eval_list(xs: &[Value], env: &Env) -> Result<Value> {
             "fn" => return sf_fn(&xs[1..], env, None),
             "defn" => return sf_defn(&xs[1..], env),
             "defn-native" => return sf_defn_native(&xs[1..], env),
+            #[cfg(feature = "gpu")]
+            "defn-gpu" => return sf_defn_gpu(&xs[1..], env),
             "defmacro" => return sf_defmacro(&xs[1..], env),
             "macroexpand" => return sf_macroexpand(&xs[1..], env),
             "macroexpand-1" => return sf_macroexpand_1(&xs[1..], env),
@@ -353,6 +357,7 @@ const SPECIAL_FORMS: &[&str] = &[
     "fn",
     "defn",
     "defn-native",
+    "defn-gpu",
     "defmacro",
     "macroexpand",
     "macroexpand-1",
@@ -400,7 +405,60 @@ pub fn apply(f: &Value, args: &[Value]) -> Result<Value> {
         Value::Keyword(_) | Value::Map(_) | Value::Set(_) | Value::Vector(_) => {
             invoke_collection(f, args)
         }
+        #[cfg(feature = "gpu")]
+        Value::GpuKernel(k) => invoke_gpu_kernel(k, args),
         _ => Err(Error::Type(format!("not callable: {}", f.type_name()))),
+    }
+}
+
+/// Run a compiled GPU kernel. Expects a single argument — a seq-able
+/// collection of numbers (vector/list). Uploads it as f32, dispatches,
+/// reads back into a cljrs vector of Value::Float.
+#[cfg(feature = "gpu")]
+fn invoke_gpu_kernel(
+    k: &Arc<crate::gpu::GpuKernel>,
+    args: &[Value],
+) -> Result<Value> {
+    if args.len() != 1 {
+        return Err(Error::Arity {
+            expected: "1".into(),
+            got: args.len(),
+        });
+    }
+    let items: Vec<f32> = match &args[0] {
+        Value::Vector(v) => v
+            .iter()
+            .map(value_to_f32)
+            .collect::<Result<Vec<_>>>()?,
+        Value::List(v) => v
+            .iter()
+            .map(value_to_f32)
+            .collect::<Result<Vec<_>>>()?,
+        _ => {
+            return Err(Error::Type(format!(
+                "gpu kernel input must be a vector or list, got {}",
+                args[0].type_name()
+            )));
+        }
+    };
+    let gpu = crate::gpu::global_gpu().map_err(Error::Eval)?;
+    let out = k.run_f32(&gpu, &items).map_err(Error::Eval)?;
+    let mut v: imbl::Vector<Value> = imbl::Vector::new();
+    for x in out {
+        v.push_back(Value::Float(x as f64));
+    }
+    Ok(Value::Vector(v))
+}
+
+#[cfg(feature = "gpu")]
+fn value_to_f32(v: &Value) -> Result<f32> {
+    match v {
+        Value::Int(i) => Ok(*i as f32),
+        Value::Float(f) => Ok(*f as f32),
+        _ => Err(Error::Type(format!(
+            "gpu kernel input: non-number {}",
+            v.type_name()
+        ))),
     }
 }
 
@@ -913,6 +971,77 @@ fn sf_defn_native(args: &[Value], env: &Env) -> Result<Value> {
         env.define_global(&name, fn_val.clone());
         Ok(fn_val)
     }
+}
+
+/// `(defn-gpu name ^f32 [^i32 i ^f32 v] body...)` — compile body to WGSL
+/// and register a GPU kernel callable from cljrs. Elementwise-f32 ABI
+/// only in this pass: one input buffer, one output buffer, same length.
+/// Later we'll extend to multiple buffers, uniforms, and reductions.
+#[cfg(feature = "gpu")]
+fn sf_defn_gpu(args: &[Value], env: &Env) -> Result<Value> {
+    if args.len() < 3 {
+        return Err(Error::Arity {
+            expected: ">= 3".into(),
+            got: args.len(),
+        });
+    }
+    let name = match &args[0] {
+        Value::Symbol(s) => Arc::clone(s),
+        _ => return Err(Error::Eval("defn-gpu requires a name symbol".into())),
+    };
+
+    // Return type + params vector. Follow the same `^Type [^Type p...]`
+    // shape as defn-native so it reads identical.
+    let params_val: &Value = if let Some((_, inner)) = unwrap_tagged(&args[1]) {
+        // optional ^f32 return hint — we only accept f32 today; ignore.
+        inner
+    } else {
+        &args[1]
+    };
+    let params = match params_val {
+        Value::Vector(v) => v,
+        _ => return Err(Error::Eval("defn-gpu: expected params vector".into())),
+    };
+    if params.len() != 2 {
+        return Err(Error::Eval(
+            "defn-gpu (v0): exactly two params required — [^i32 idx ^f32 value]".into(),
+        ));
+    }
+    // Unwrap the index param.
+    let (idx_name, val_name) = {
+        let (_, p0) = unwrap_tagged(&params[0]).ok_or_else(|| {
+            Error::Eval("defn-gpu: first param must be ^i32 name".into())
+        })?;
+        let (_, p1) = unwrap_tagged(&params[1]).ok_or_else(|| {
+            Error::Eval("defn-gpu: second param must be ^f32 name".into())
+        })?;
+        let idx_name = match p0 {
+            Value::Symbol(s) => s.to_string(),
+            _ => return Err(Error::Eval("defn-gpu: idx name must be a symbol".into())),
+        };
+        let val_name = match p1 {
+            Value::Symbol(s) => s.to_string(),
+            _ => return Err(Error::Eval("defn-gpu: value name must be a symbol".into())),
+        };
+        (idx_name, val_name)
+    };
+
+    // Wrap multi-form bodies in an implicit `do`.
+    let body: Value = if args.len() == 3 {
+        args[2].clone()
+    } else {
+        let mut do_form = Vec::with_capacity(args.len() - 1);
+        do_form.push(Value::Symbol(Arc::from("do")));
+        do_form.extend(args[2..].iter().cloned());
+        Value::List(Arc::new(do_form))
+    };
+
+    let wgsl = crate::gpu::emit::emit_elementwise(&idx_name, &val_name, &body)
+        .map_err(|e| Error::Eval(format!("defn-gpu `{name}`: {e}")))?;
+    let kernel = crate::gpu::GpuKernel::from_wgsl(name.to_string(), wgsl);
+    let v = Value::GpuKernel(Arc::new(kernel));
+    env.define_global(&name, v.clone());
+    Ok(v)
 }
 
 fn sf_defmacro(args: &[Value], env: &Env) -> Result<Value> {

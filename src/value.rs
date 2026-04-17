@@ -38,6 +38,11 @@ pub enum Value {
     /// state cljrs currently exposes to user code — everything else is
     /// persistent.
     Atom(Arc<RwLock<Value>>),
+    /// Compiled GPU kernel from `defn-gpu`. Called as a normal fn: takes
+    /// one arg (an f32 buffer = vector/list of numbers) and returns a
+    /// vector of f32s. Internally dispatches via wgpu.
+    #[cfg(feature = "gpu")]
+    GpuKernel(Arc<crate::gpu::GpuKernel>),
 }
 
 #[derive(Clone)]
@@ -99,6 +104,8 @@ impl Value {
             Value::Builtin(_) => "builtin",
             Value::Native(_) => "native",
             Value::Atom(_) => "atom",
+            #[cfg(feature = "gpu")]
+            Value::GpuKernel(_) => "gpu-kernel",
         }
     }
 
@@ -160,6 +167,8 @@ impl Value {
             Value::Builtin(b) => format!("#<builtin {}>", b.name),
             Value::Native(nf) => format!("#<native {}>", nf.name),
             Value::Atom(a) => format!("#<atom {}>", a.read().unwrap().to_pr_string()),
+            #[cfg(feature = "gpu")]
+            Value::GpuKernel(k) => format!("#<gpu-kernel {}>", k.name),
         }
     }
 }
@@ -218,6 +227,8 @@ impl PartialEq for Value {
             (Map(a), Map(b)) => a == b,
             (Set(a), Set(b)) => a == b,
             (Atom(a), Atom(b)) => Arc::ptr_eq(a, b),
+            #[cfg(feature = "gpu")]
+            (GpuKernel(a), GpuKernel(b)) => Arc::ptr_eq(a, b),
             _ => false,
         }
     }
@@ -318,6 +329,11 @@ impl Hash for Value {
             Value::Atom(a) => {
                 15u8.hash(state);
                 (Arc::as_ptr(a) as usize).hash(state);
+            }
+            #[cfg(feature = "gpu")]
+            Value::GpuKernel(k) => {
+                16u8.hash(state);
+                (Arc::as_ptr(k) as usize).hash(state);
             }
         }
     }
