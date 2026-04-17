@@ -1,6 +1,6 @@
 use std::fmt;
 use std::hash::{Hash, Hasher};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use imbl::{HashMap as PMap, HashSet as PSet, Vector as PVec};
 
@@ -33,6 +33,11 @@ pub enum Value {
     /// `mlir` feature is on. Dispatched in `eval::apply` with a direct
     /// transmuted `extern "C"` call — no interpreter frame at invocation.
     Native(Arc<NativeFn>),
+    /// Mutable single-cell reference. Clojure `atom`/`deref`/`swap!`/
+    /// `reset!`/`compare-and-set!`. The inner RwLock is the only mutable
+    /// state cljrs currently exposes to user code — everything else is
+    /// persistent.
+    Atom(Arc<RwLock<Value>>),
 }
 
 #[derive(Clone)]
@@ -93,6 +98,7 @@ impl Value {
             Value::Macro(_) => "macro",
             Value::Builtin(_) => "builtin",
             Value::Native(_) => "native",
+            Value::Atom(_) => "atom",
         }
     }
 
@@ -153,6 +159,7 @@ impl Value {
             },
             Value::Builtin(b) => format!("#<builtin {}>", b.name),
             Value::Native(nf) => format!("#<native {}>", nf.name),
+            Value::Atom(a) => format!("#<atom {}>", a.read().unwrap().to_pr_string()),
         }
     }
 }
@@ -210,6 +217,7 @@ impl PartialEq for Value {
             }
             (Map(a), Map(b)) => a == b,
             (Set(a), Set(b)) => a == b,
+            (Atom(a), Atom(b)) => Arc::ptr_eq(a, b),
             _ => false,
         }
     }
@@ -306,6 +314,10 @@ impl Hash for Value {
             Value::Native(n) => {
                 14u8.hash(state);
                 (Arc::as_ptr(n) as usize).hash(state);
+            }
+            Value::Atom(a) => {
+                15u8.hash(state);
+                (Arc::as_ptr(a) as usize).hash(state);
             }
         }
     }

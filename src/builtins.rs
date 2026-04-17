@@ -190,7 +190,133 @@ fn core_fns() -> Vec<(&'static str, fn(&[Value]) -> Result<Value>)> {
         ("ceil", ceil_fn),
         ("round", round_fn),
         ("Math/PI", pi_fn),
+        ("atom", atom_fn),
+        ("deref", deref_fn),
+        ("reset!", reset_bang_fn),
+        ("swap!", swap_bang_fn),
+        ("compare-and-set!", cas_bang_fn),
+        ("atom?", atom_q),
+        ("throw", throw_fn),
+        ("ex-info", ex_info_fn),
+        ("ex-message", ex_message_fn),
+        ("ex-data", ex_data_fn),
     ]
+}
+
+// ---- Atoms -------------------------------------------------------------
+
+fn atom_fn(args: &[Value]) -> Result<Value> {
+    if args.len() != 1 {
+        return Err(Error::Arity { expected: "1".into(), got: args.len() });
+    }
+    Ok(Value::Atom(std::sync::Arc::new(std::sync::RwLock::new(args[0].clone()))))
+}
+fn deref_fn(args: &[Value]) -> Result<Value> {
+    if args.len() != 1 {
+        return Err(Error::Arity { expected: "1".into(), got: args.len() });
+    }
+    match &args[0] {
+        Value::Atom(a) => Ok(a.read().unwrap().clone()),
+        _ => Err(Error::Type(format!("deref on {}", args[0].type_name()))),
+    }
+}
+fn reset_bang_fn(args: &[Value]) -> Result<Value> {
+    if args.len() != 2 {
+        return Err(Error::Arity { expected: "2".into(), got: args.len() });
+    }
+    match &args[0] {
+        Value::Atom(a) => {
+            *a.write().unwrap() = args[1].clone();
+            Ok(args[1].clone())
+        }
+        _ => Err(Error::Type("reset! on non-atom".into())),
+    }
+}
+fn swap_bang_fn(args: &[Value]) -> Result<Value> {
+    if args.len() < 2 {
+        return Err(Error::Arity { expected: ">= 2".into(), got: args.len() });
+    }
+    let atom = match &args[0] {
+        Value::Atom(a) => a.clone(),
+        _ => return Err(Error::Type("swap! on non-atom".into())),
+    };
+    let f = &args[1];
+    let extras = &args[2..];
+    // Clone current value out, apply outside the lock, then CAS-style write.
+    // Single-threaded semantics for now; multi-writer atomicity deferred.
+    let current = atom.read().unwrap().clone();
+    let mut fargs = Vec::with_capacity(1 + extras.len());
+    fargs.push(current);
+    fargs.extend_from_slice(extras);
+    let new = eval::apply(f, &fargs)?;
+    *atom.write().unwrap() = new.clone();
+    Ok(new)
+}
+fn cas_bang_fn(args: &[Value]) -> Result<Value> {
+    if args.len() != 3 {
+        return Err(Error::Arity { expected: "3".into(), got: args.len() });
+    }
+    let atom = match &args[0] {
+        Value::Atom(a) => a.clone(),
+        _ => return Err(Error::Type("compare-and-set! on non-atom".into())),
+    };
+    let mut w = atom.write().unwrap();
+    if *w == args[1] {
+        *w = args[2].clone();
+        Ok(Value::Bool(true))
+    } else {
+        Ok(Value::Bool(false))
+    }
+}
+fn atom_q(args: &[Value]) -> Result<Value> {
+    Ok(Value::Bool(matches!(&args[0], Value::Atom(_))))
+}
+
+// ---- Exceptions --------------------------------------------------------
+
+fn throw_fn(args: &[Value]) -> Result<Value> {
+    if args.len() != 1 {
+        return Err(Error::Arity { expected: "1".into(), got: args.len() });
+    }
+    Err(Error::Thrown(args[0].clone()))
+}
+
+/// `(ex-info msg data)` — build a map-shaped exception value. cljrs
+/// represents thrown exceptions as plain maps with known keys so user
+/// code can destructure them in catch clauses without a new value
+/// variant. Matches the spirit of Clojure's ExceptionInfo.
+fn ex_info_fn(args: &[Value]) -> Result<Value> {
+    if args.len() != 2 && args.len() != 3 {
+        return Err(Error::Arity { expected: "2 or 3".into(), got: args.len() });
+    }
+    let msg = args[0].clone();
+    let data = args[1].clone();
+    let mut m = imbl::HashMap::new();
+    m.insert(Value::Keyword(Arc::from("message")), msg);
+    m.insert(Value::Keyword(Arc::from("data")), data);
+    if let Some(cause) = args.get(2) {
+        m.insert(Value::Keyword(Arc::from("cause")), cause.clone());
+    }
+    Ok(Value::Map(m))
+}
+fn ex_message_fn(args: &[Value]) -> Result<Value> {
+    match &args[0] {
+        Value::Map(m) => Ok(m
+            .get(&Value::Keyword(Arc::from("message")))
+            .cloned()
+            .unwrap_or(Value::Nil)),
+        Value::Str(s) => Ok(Value::Str(Arc::clone(s))),
+        _ => Ok(Value::Nil),
+    }
+}
+fn ex_data_fn(args: &[Value]) -> Result<Value> {
+    match &args[0] {
+        Value::Map(m) => Ok(m
+            .get(&Value::Keyword(Arc::from("data")))
+            .cloned()
+            .unwrap_or(Value::Nil)),
+        _ => Ok(Value::Nil),
+    }
 }
 
 // ---- Constants (as zero-arity fns) --------------------------------

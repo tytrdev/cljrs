@@ -16,7 +16,8 @@ pub fn eval(form: &Value, env: &Env) -> Result<Value> {
         | Value::Fn(_)
         | Value::Macro(_)
         | Value::Builtin(_)
-        | Value::Native(_) => Ok(form.clone()),
+        | Value::Native(_)
+        | Value::Atom(_) => Ok(form.clone()),
         Value::Symbol(s) => env.lookup(s),
         Value::Vector(xs) => {
             let mut out: imbl::Vector<Value> = imbl::Vector::new();
@@ -70,6 +71,7 @@ fn eval_list(xs: &[Value], env: &Env) -> Result<Value> {
             "in-ns" => return sf_ns(&xs[1..], env),
             "load-file" => return sf_load_file(&xs[1..], env),
             "require" => return sf_require(&xs[1..], env),
+            "try" => return sf_try(&xs[1..], env),
             _ => {}
         }
     }
@@ -177,6 +179,10 @@ const SPECIAL_FORMS: &[&str] = &[
     "in-ns",
     "load-file",
     "require",
+    "try",
+    "catch",
+    "finally",
+    "throw",
 ];
 
 fn try_macro_expand_once(form: &Value, env: &Env) -> Result<Option<Value>> {
@@ -718,6 +724,95 @@ fn sf_macroexpand_1(args: &[Value], env: &Env) -> Result<Value> {
         Some(f) => Ok(f),
         None => Ok(form),
     }
+}
+
+/// `(try body... (catch _ binding body...) (finally body...))` —
+/// the `_` placeholder is where Clojure names an exception class; we
+/// don't have types yet, so any thrown value matches the first catch.
+/// `finally` body always runs after try+catch, for side effects only.
+fn sf_try(args: &[Value], env: &Env) -> Result<Value> {
+    let mut body: Vec<&Value> = Vec::new();
+    let mut catch: Option<(Arc<str>, Vec<Value>)> = None;
+    let mut finally: Vec<Value> = Vec::new();
+
+    for f in args {
+        if let Value::List(xs) = f
+            && let Some(Value::Symbol(head)) = xs.first()
+        {
+            match head.as_ref() {
+                "catch" => {
+                    if xs.len() < 3 {
+                        return Err(Error::Eval(
+                            "try: (catch _ binding body...) required".into(),
+                        ));
+                    }
+                    let bind_name = match &xs[2] {
+                        Value::Symbol(s) => Arc::clone(s),
+                        _ => return Err(Error::Eval("try: catch binding must be a symbol".into())),
+                    };
+                    let catch_body: Vec<Value> = xs[3..].to_vec();
+                    catch = Some((bind_name, catch_body));
+                    continue;
+                }
+                "finally" => {
+                    finally = xs[1..].to_vec();
+                    continue;
+                }
+                _ => {}
+            }
+        }
+        body.push(f);
+    }
+
+    let run_finally = |env: &Env| -> Result<()> {
+        for f in &finally {
+            eval(f, env)?;
+        }
+        Ok(())
+    };
+
+    // Run body.
+    let mut result = Value::Nil;
+    let mut thrown: Option<Error> = None;
+    for f in &body {
+        match eval(f, env) {
+            Ok(v) => result = v,
+            Err(e) => {
+                thrown = Some(e);
+                break;
+            }
+        }
+    }
+
+    if let Some(err) = thrown {
+        // Only catch Thrown (user-raised); let Recur and others propagate.
+        let payload = match err {
+            Error::Thrown(v) => v,
+            Error::Eval(s) | Error::Type(s) | Error::Read(s) => Value::Str(Arc::from(s.as_str())),
+            Error::Unbound(s) => Value::Str(Arc::from(format!("unbound: {s}").as_str())),
+            Error::Arity { expected, got } => Value::Str(Arc::from(
+                format!("arity: expected {expected}, got {got}").as_str(),
+            )),
+            other => return Err(other),
+        };
+        if let Some((name, catch_body)) = catch {
+            let catch_env = env.push_scope(vec![(name, payload)]);
+            let mut catch_result = Value::Nil;
+            let catch_outcome: Result<Value> = (|| {
+                for f in &catch_body {
+                    catch_result = eval(f, &catch_env)?;
+                }
+                Ok(catch_result)
+            })();
+            run_finally(env)?;
+            return catch_outcome;
+        }
+        run_finally(env)?;
+        return Err(Error::Thrown(payload));
+    }
+
+    run_finally(env)?;
+    Ok(result)
 }
 
 fn sf_macroexpand(args: &[Value], env: &Env) -> Result<Value> {
