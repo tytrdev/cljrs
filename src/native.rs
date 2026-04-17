@@ -161,9 +161,78 @@ fn invoke_i64(ptr: usize, name: &str, args: &[Value]) -> Result<Value> {
             >(ptr)(
                 xs[0], xs[1], xs[2], xs[3], xs[4], xs[5], xs[6], xs[7]
             ),
+            9 => std::mem::transmute::<
+                usize,
+                extern "C" fn(i64, i64, i64, i64, i64, i64, i64, i64, i64) -> i64,
+            >(ptr)(
+                xs[0], xs[1], xs[2], xs[3], xs[4], xs[5], xs[6], xs[7], xs[8]
+            ),
+            10 => std::mem::transmute::<
+                usize,
+                extern "C" fn(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64) -> i64,
+            >(ptr)(
+                xs[0], xs[1], xs[2], xs[3], xs[4], xs[5], xs[6], xs[7], xs[8], xs[9]
+            ),
+            11 => std::mem::transmute::<
+                usize,
+                extern "C" fn(
+                    i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64,
+                ) -> i64,
+            >(ptr)(
+                xs[0], xs[1], xs[2], xs[3], xs[4], xs[5], xs[6], xs[7], xs[8], xs[9],
+                xs[10],
+            ),
+            12 => std::mem::transmute::<
+                usize,
+                extern "C" fn(
+                    i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64,
+                ) -> i64,
+            >(ptr)(
+                xs[0], xs[1], xs[2], xs[3], xs[4], xs[5], xs[6], xs[7], xs[8], xs[9],
+                xs[10], xs[11],
+            ),
+            13 => std::mem::transmute::<
+                usize,
+                extern "C" fn(
+                    i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64,
+                ) -> i64,
+            >(ptr)(
+                xs[0], xs[1], xs[2], xs[3], xs[4], xs[5], xs[6], xs[7], xs[8], xs[9],
+                xs[10], xs[11], xs[12],
+            ),
+            14 => std::mem::transmute::<
+                usize,
+                extern "C" fn(
+                    i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64,
+                    i64,
+                ) -> i64,
+            >(ptr)(
+                xs[0], xs[1], xs[2], xs[3], xs[4], xs[5], xs[6], xs[7], xs[8], xs[9],
+                xs[10], xs[11], xs[12], xs[13],
+            ),
+            15 => std::mem::transmute::<
+                usize,
+                extern "C" fn(
+                    i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64,
+                    i64, i64,
+                ) -> i64,
+            >(ptr)(
+                xs[0], xs[1], xs[2], xs[3], xs[4], xs[5], xs[6], xs[7], xs[8], xs[9],
+                xs[10], xs[11], xs[12], xs[13], xs[14],
+            ),
+            16 => std::mem::transmute::<
+                usize,
+                extern "C" fn(
+                    i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64,
+                    i64, i64, i64,
+                ) -> i64,
+            >(ptr)(
+                xs[0], xs[1], xs[2], xs[3], xs[4], xs[5], xs[6], xs[7], xs[8], xs[9],
+                xs[10], xs[11], xs[12], xs[13], xs[14], xs[15],
+            ),
             n => {
                 return Err(Error::Eval(format!(
-                    "native fn `{name}`: arity {n} > 8 not supported"
+                    "native fn `{name}`: arity {n} > 16 not supported"
                 )));
             }
         }
@@ -206,9 +275,78 @@ fn invoke_f64(ptr: usize, name: &str, args: &[Value]) -> Result<Value> {
             >(ptr)(
                 xs[0], xs[1], xs[2], xs[3], xs[4], xs[5], xs[6], xs[7]
             ),
+            9 => std::mem::transmute::<
+                usize,
+                extern "C" fn(f64, f64, f64, f64, f64, f64, f64, f64, f64) -> f64,
+            >(ptr)(
+                xs[0], xs[1], xs[2], xs[3], xs[4], xs[5], xs[6], xs[7], xs[8]
+            ),
+            10 => std::mem::transmute::<
+                usize,
+                extern "C" fn(f64, f64, f64, f64, f64, f64, f64, f64, f64, f64) -> f64,
+            >(ptr)(
+                xs[0], xs[1], xs[2], xs[3], xs[4], xs[5], xs[6], xs[7], xs[8], xs[9]
+            ),
+            11 => std::mem::transmute::<
+                usize,
+                extern "C" fn(
+                    f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64,
+                ) -> f64,
+            >(ptr)(
+                xs[0], xs[1], xs[2], xs[3], xs[4], xs[5], xs[6], xs[7], xs[8], xs[9],
+                xs[10],
+            ),
+            12 => std::mem::transmute::<
+                usize,
+                extern "C" fn(
+                    f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64,
+                ) -> f64,
+            >(ptr)(
+                xs[0], xs[1], xs[2], xs[3], xs[4], xs[5], xs[6], xs[7], xs[8], xs[9],
+                xs[10], xs[11],
+            ),
+            13 => std::mem::transmute::<
+                usize,
+                extern "C" fn(
+                    f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64,
+                ) -> f64,
+            >(ptr)(
+                xs[0], xs[1], xs[2], xs[3], xs[4], xs[5], xs[6], xs[7], xs[8], xs[9],
+                xs[10], xs[11], xs[12],
+            ),
+            14 => std::mem::transmute::<
+                usize,
+                extern "C" fn(
+                    f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64,
+                    f64,
+                ) -> f64,
+            >(ptr)(
+                xs[0], xs[1], xs[2], xs[3], xs[4], xs[5], xs[6], xs[7], xs[8], xs[9],
+                xs[10], xs[11], xs[12], xs[13],
+            ),
+            15 => std::mem::transmute::<
+                usize,
+                extern "C" fn(
+                    f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64,
+                    f64, f64,
+                ) -> f64,
+            >(ptr)(
+                xs[0], xs[1], xs[2], xs[3], xs[4], xs[5], xs[6], xs[7], xs[8], xs[9],
+                xs[10], xs[11], xs[12], xs[13], xs[14],
+            ),
+            16 => std::mem::transmute::<
+                usize,
+                extern "C" fn(
+                    f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64,
+                    f64, f64, f64,
+                ) -> f64,
+            >(ptr)(
+                xs[0], xs[1], xs[2], xs[3], xs[4], xs[5], xs[6], xs[7], xs[8], xs[9],
+                xs[10], xs[11], xs[12], xs[13], xs[14], xs[15],
+            ),
             n => {
                 return Err(Error::Eval(format!(
-                    "native fn `{name}`: arity {n} > 8 not supported"
+                    "native fn `{name}`: arity {n} > 16 not supported"
                 )));
             }
         }
