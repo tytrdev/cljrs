@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use crate::error::{Error, Result};
+use crate::native::{NativeRegistry, NativeSig};
 use crate::value::Value;
 
 /// Lexical scope frame. A chain of these (inner → outer) models the
@@ -50,6 +51,26 @@ impl Env {
             .write()
             .unwrap()
             .insert(Arc::from(name), val);
+    }
+
+    /// Build a `NativeRegistry` containing every currently-bound native fn
+    /// in globals. Consumed by the MLIR compiler so a new `defn-native`
+    /// body can call previously-defined natives via MLIR `func.call`.
+    pub fn snapshot_natives(&self) -> NativeRegistry {
+        let mut by_name = HashMap::new();
+        for (k, v) in self.globals.read().unwrap().iter() {
+            if let Value::Native(nf) = v {
+                by_name.insert(
+                    k.to_string(),
+                    NativeSig {
+                        arg_types: nf.arg_types.clone(),
+                        ret_type: nf.ret_type,
+                        ptr: nf.ptr,
+                    },
+                );
+            }
+        }
+        NativeRegistry { by_name }
     }
 
     pub fn push_scope(&self, bindings: Vec<(Arc<str>, Value)>) -> Env {

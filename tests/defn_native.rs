@@ -69,6 +69,23 @@ fn defn_native_loop_recur_via_helper_fn() {
     assert_eq!(run(src), Value::Int(5050));
 }
 
+#[cfg(feature = "mlir")]
+#[test]
+fn defn_native_cross_fn_calls() {
+    // M1.1b: one defn-native calls another. Emitter sees the call,
+    // looks up the other fn in the registry, emits `func.call @other`
+    // + a forward declaration. compile.rs registers the already-JIT'd
+    // fn's pointer with the new ExecutionEngine before lookup.
+    let src = r#"
+        (defn-native square ^i64 [^i64 n] (* n n))
+        (defn-native sum-of-squares ^i64 [^i64 n]
+          (if (= n 0) 0 (+ (square n) (sum-of-squares (- n 1)))))
+        (sum-of-squares 10)
+    "#;
+    // 1 + 4 + 9 + 16 + 25 + 36 + 49 + 64 + 81 + 100 = 385
+    assert_eq!(run(src), Value::Int(385));
+}
+
 #[test]
 fn defn_native_fib_recursive() {
     let src = r#"

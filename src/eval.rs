@@ -492,11 +492,15 @@ fn sf_defn_native(args: &[Value], env: &Env) -> Result<Value> {
             Value::List(Arc::new(do_form))
         };
 
+        // Snapshot previously-defined natives so the new fn's body can
+        // call them via MLIR's cross-fn resolution.
+        let registry = env.snapshot_natives();
         match crate::codegen::mlir::compile::compile_native_fn(
             &name,
             &typed_params,
             return_type,
             &body_form,
+            &registry,
         ) {
             Ok(native_fn) => {
                 let v = Value::Native(Arc::new(native_fn));

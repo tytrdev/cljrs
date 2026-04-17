@@ -8,10 +8,11 @@
 //! LLVM -O3's tail-call optimization collapses the chain into a native
 //! machine loop.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::error::{Error, Result};
+use crate::native::NativeRegistry;
 use crate::types::PrimType;
 use crate::value::Value;
 
@@ -60,13 +61,19 @@ fn prim_to_mlir(p: PrimType) -> MlirTy {
 type Scope = HashMap<String, EmVal>;
 
 /// Shared module-level state across the main fn and any loop helpers.
-struct ModuleState {
+struct ModuleState<'r> {
     /// Fully-formed helper function bodies to append after the main fn.
     helpers: Vec<String>,
     helper_counter: usize,
+    /// Previously-compiled natives available for cross-fn calls.
+    registry: &'r NativeRegistry,
+    /// Set of MLIR-sanitized names of externals actually referenced in
+    /// this module. We emit a `func.func private @NAME` forward
+    /// declaration for each, and compile.rs registers the pointer.
+    referenced_externals: HashSet<String>,
 }
 
-impl ModuleState {
+impl<'r> ModuleState<'r> {
     fn fresh_helper_name(&mut self, base: &str) -> String {
         let n = self.helper_counter;
         self.helper_counter += 1;
@@ -77,7 +84,7 @@ impl ModuleState {
 /// Per-function emission context. Each MLIR function gets its own counter,
 /// its own body buffer, and its own self-call shape (main fn self-calls
 /// by its user-given name; helpers self-call via `recur`).
-struct FnEmitter<'m> {
+struct FnEmitter<'m, 'r> {
     body: String,
     ssa_counter: usize,
     /// Sym in source that routes to self-call (main fn: its own name; helper: "recur").
@@ -92,10 +99,10 @@ struct FnEmitter<'m> {
     /// scope) are threaded as the first N params — they're captures.
     /// For the main fn, empty.
     capture_names: Vec<Arc<str>>,
-    module: &'m mut ModuleState,
+    module: &'m mut ModuleState<'r>,
 }
 
-impl<'m> FnEmitter<'m> {
+impl<'m, 'r> FnEmitter<'m, 'r> {
     fn fresh(&mut self) -> String {
         let n = self.ssa_counter;
         self.ssa_counter += 1;
@@ -190,9 +197,13 @@ impl<'m> FnEmitter<'m> {
             "do" => self.emit_do(xs, scope),
             "loop" => self.emit_loop(xs, scope),
             h if h == self.self_trigger => self.emit_self_call(xs, scope),
+            h if self.module.registry.get(h).is_some() => {
+                self.emit_external_call(xs, scope, h)
+            }
             _ => Err(Error::Eval(format!(
                 "native fn body: `{}` not supported — \
-                 allowed: arithmetic, comparisons, if, let, do, loop, recur, self-call",
+                 allowed: arithmetic, comparisons, if, let, do, loop, recur, self-call, \
+                 or call to another defn-native",
                 head
             ))),
         }
@@ -490,6 +501,59 @@ impl<'m> FnEmitter<'m> {
         })
     }
 
+    /// `(other-native args...)` — resolves via the registry, emits a
+    /// `func.call` to the sanitized name, records the reference so the
+    /// module finalizer inserts a forward declaration.
+    fn emit_external_call(
+        &mut self,
+        xs: &[Value],
+        scope: &Scope,
+        name: &str,
+    ) -> Result<EmVal> {
+        let sig = self
+            .module
+            .registry
+            .get(name)
+            .cloned()
+            .expect("caller checked registry.get(name)");
+        let want = sig.arg_types.len();
+        let got = xs.len() - 1;
+        if got != want {
+            return Err(Error::Arity {
+                expected: format!("{want} (for native `{name}`)"),
+                got,
+            });
+        }
+
+        let mut arg_ssas: Vec<String> = Vec::with_capacity(want);
+        let mut arg_ty_strs: Vec<&'static str> = Vec::with_capacity(want);
+        for (i, arg_form) in xs[1..].iter().enumerate() {
+            let param_ty = prim_to_mlir(sig.arg_types[i]);
+            let val = self.emit(arg_form, scope)?;
+            if val.ty != param_ty {
+                return Err(Error::Type(format!(
+                    "call to `{name}` arg {i}: expected {}, got {}",
+                    param_ty.as_str(),
+                    val.ty.as_str()
+                )));
+            }
+            arg_ssas.push(val.ssa);
+            arg_ty_strs.push(param_ty.as_str());
+        }
+
+        let ret_ty = prim_to_mlir(sig.ret_type);
+        let mlir_name = sanitize_mlir_name(name);
+        let v = self.fresh();
+        self.line(format!(
+            "{v} = func.call @{mlir_name}({}) : ({}) -> {}",
+            arg_ssas.join(", "),
+            arg_ty_strs.join(", "),
+            ret_ty.as_str()
+        ));
+        self.module.referenced_externals.insert(mlir_name);
+        Ok(EmVal { ssa: v, ty: ret_ty })
+    }
+
     /// Main fn: `(self-name args...)`.
     /// Helper fn: `(recur args...)` — prepend captures automatically so the
     /// user only writes the loop vars, not the captures.
@@ -605,14 +669,26 @@ pub fn sanitize_mlir_name(name: &str) -> String {
     out
 }
 
+/// Result of emitting a module — the MLIR source plus the set of
+/// previously-compiled native fn names this module calls. `compile.rs`
+/// registers those names with the new ExecutionEngine.
+#[derive(Debug)]
+pub struct EmittedModule {
+    pub source: String,
+    /// MLIR-sanitized names of external natives referenced by this module.
+    pub referenced_externals: HashSet<String>,
+}
+
 /// Emit a full MLIR module containing the main function plus any loop
-/// helpers it spawns during emission.
+/// helpers it spawns during emission. Cross-fn calls to `registry`
+/// natives produce `func.call @NAME` + a forward declaration for NAME.
 pub fn emit_module(
     fn_name: &str,
     params: &[(Arc<str>, PrimType)],
     ret_type: PrimType,
     body: &Value,
-) -> Result<String> {
+    registry: &NativeRegistry,
+) -> Result<EmittedModule> {
     // Phase-2 FFI boundary: reject ^bool at params/return. Internal i1 (from
     // comparisons / if conditions) works fine; only the fn signature is
     // constrained because LLVM's i1 ABI at function boundaries is
@@ -637,6 +713,8 @@ pub fn emit_module(
     let mut module = ModuleState {
         helpers: Vec::new(),
         helper_counter: 0,
+        registry,
+        referenced_externals: HashSet::new(),
     };
 
     let main_params: Vec<(Arc<str>, MlirTy)> = params
@@ -674,12 +752,43 @@ pub fn emit_module(
     };
 
     let mut out = String::from("module {\n");
+    // Forward declarations for every referenced external, so MLIR's
+    // symbol resolver knows their signature. compile.rs registers the
+    // actual pointers with the ExecutionEngine before JIT.
+    for mlir_ext_name in &module.referenced_externals {
+        // Look up the original name by sanitizing-match — registry is
+        // keyed by original names.
+        let sig = module
+            .registry
+            .by_name
+            .iter()
+            .find(|(k, _)| sanitize_mlir_name(k) == *mlir_ext_name)
+            .map(|(_, v)| v.clone())
+            .expect("referenced external must exist in registry");
+        let arg_tys: Vec<&str> = sig
+            .arg_types
+            .iter()
+            .map(|t| prim_to_mlir(*t).as_str())
+            .collect();
+        let ret_ty = prim_to_mlir(sig.ret_type).as_str();
+        // Forward declaration only — no body, no llvm.emit_c_interface.
+        // The actual fn pointer we register via ExecutionEngine::register_symbol
+        // is the inner MLIR symbol, not the _mlir_ciface_ wrapper, so the
+        // declared symbol here must match that name (no ciface wrapper).
+        out.push_str(&format!(
+            "  func.func private @{mlir_ext_name}({}) -> {ret_ty}\n",
+            arg_tys.join(", ")
+        ));
+    }
     out.push_str(&main_body_text);
     for h in module.helpers {
         out.push_str(&h);
     }
     out.push_str("}\n");
-    Ok(out)
+    Ok(EmittedModule {
+        source: out,
+        referenced_externals: module.referenced_externals,
+    })
 }
 
 #[cfg(test)]
@@ -693,11 +802,17 @@ mod tests {
         forms.into_iter().next().unwrap()
     }
 
+    fn empty_reg() -> NativeRegistry {
+        NativeRegistry::default()
+    }
+
     #[test]
     fn emits_fib_without_error() {
         let body = parse_body("(if (< n 2) n (+ (fib (- n 1)) (fib (- n 2))))");
         let params: &[(Arc<str>, PrimType)] = &[(Arc::from("n"), PrimType::I64)];
-        let src = emit_module("fib", params, PrimType::I64, &body).expect("emit");
+        let emitted =
+            emit_module("fib", params, PrimType::I64, &body, &empty_reg()).expect("emit");
+        let src = &emitted.source;
         assert!(src.contains("func.func @fib("));
         assert!(src.contains("arith.cmpi slt"));
         assert!(src.contains("scf.if"));
@@ -711,8 +826,9 @@ mod tests {
             "(loop [i 0 acc 0] (if (> i n) acc (recur (+ i 1) (+ acc i))))",
         );
         let params: &[(Arc<str>, PrimType)] = &[(Arc::from("n"), PrimType::I64)];
-        let src = emit_module("sum-to", params, PrimType::I64, &body).expect("emit");
-        // Main fn calls helper; helper self-calls on recur.
+        let emitted =
+            emit_module("sum-to", params, PrimType::I64, &body, &empty_reg()).expect("emit");
+        let src = &emitted.source;
         assert!(src.contains("func.func @sum_to("));
         assert!(src.contains("func.func @sum_to_loop_0("));
         assert!(src.contains("func.call @sum_to_loop_0"));
@@ -725,7 +841,9 @@ mod tests {
             (Arc::from("a"), PrimType::F64),
             (Arc::from("b"), PrimType::F64),
         ];
-        let src = emit_module("fadd", params, PrimType::F64, &body).expect("emit");
+        let emitted =
+            emit_module("fadd", params, PrimType::F64, &body, &empty_reg()).expect("emit");
+        let src = &emitted.source;
         assert!(src.contains("arith.addf"));
         assert!(src.contains(": f64"));
     }
@@ -737,7 +855,7 @@ mod tests {
             (Arc::from("a"), PrimType::I64),
             (Arc::from("b"), PrimType::F64),
         ];
-        let err = emit_module("f", params, PrimType::I64, &body).unwrap_err();
+        let err = emit_module("f", params, PrimType::I64, &body, &empty_reg()).unwrap_err();
         assert!(
             err.to_string().contains("mixed int/float") || err.to_string().contains("mixed"),
             "got: {err}"
@@ -748,7 +866,7 @@ mod tests {
     fn rejects_unsupported_body_form() {
         let body = parse_body("(println n)");
         let params: &[(Arc<str>, PrimType)] = &[(Arc::from("n"), PrimType::I64)];
-        let err = emit_module("f", params, PrimType::I64, &body).unwrap_err();
+        let err = emit_module("f", params, PrimType::I64, &body, &empty_reg()).unwrap_err();
         assert!(err.to_string().contains("not supported"), "got: {err}");
     }
 }

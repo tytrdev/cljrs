@@ -11,11 +11,36 @@
 //! boundaries is platform-wonky; we'll revisit in a later phase.
 
 use std::any::Any;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::error::{Error, Result};
 use crate::types::PrimType;
 use crate::value::Value;
+
+/// Signature + fn pointer for a JIT-compiled native function, shared
+/// across the emitter (which emits calls + forward declarations) and the
+/// compiler (which registers the pointer with the new ExecutionEngine).
+#[derive(Clone)]
+pub struct NativeSig {
+    pub arg_types: Vec<PrimType>,
+    pub ret_type: PrimType,
+    pub ptr: usize,
+}
+
+/// Snapshot of every native fn currently bound in an Env, indexed by
+/// cljrs-level name (not the sanitized MLIR name). Used by the emitter
+/// to resolve cross-fn calls.
+#[derive(Default, Clone)]
+pub struct NativeRegistry {
+    pub by_name: HashMap<String, NativeSig>,
+}
+
+impl NativeRegistry {
+    pub fn get(&self, name: &str) -> Option<&NativeSig> {
+        self.by_name.get(name)
+    }
+}
 
 pub struct NativeFn {
     pub name: Arc<str>,
