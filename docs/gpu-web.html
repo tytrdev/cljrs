@@ -176,6 +176,7 @@
   <script type="module">
     import { mountChrome } from "./_layout.js";
     import { GpuRunner } from "./_gpu_runner.js";
+    import { highlight } from "./_highlight.js";
     mountChrome();
 
     const KERNELS = {
@@ -203,8 +204,8 @@
           fetch(k.wgsl).then((r) => r.text()),
           fetch(k.clj).then((r) => r.text()).catch(() => "(source unavailable)"),
         ]);
-        srcClj.textContent = clj;
-        srcWgsl.textContent = wgsl;
+        srcClj.innerHTML = highlight(clj, "clj");
+        srcWgsl.innerHTML = highlight(wgsl, "wgsl");
         runner = new GpuRunner(canvas, wgsl, { width: 800, height: 450 });
         runner.onStats = (fps) => {
           status.textContent = `${kernelName} · ${(fps).toFixed(0)} fps · ${runner.adapterInfo.description || "WebGPU"}`;

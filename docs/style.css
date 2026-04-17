@@ -84,6 +84,15 @@ main pre {
 }
 main pre code { background: none; padding: 0; }
 
+/* Syntax highlighting tokens — emitted by _highlight.js. */
+.tok-comment { color: var(--fg-dim); font-style: italic; }
+.tok-string  { color: #f6c177; }        /* amber */
+.tok-number  { color: #a5b4fc; }        /* soft indigo */
+.tok-keyword { color: #86efac; }        /* green — cljrs keywords + wgsl types */
+.tok-special { color: #c084fc; font-weight: 500; }  /* purple — special forms, attributes */
+.tok-builtin { color: #7dd3fc; }        /* accent cyan for wgsl math builtins */
+.tok-ident   { color: var(--fg); }
+
 main table {
   border-collapse: collapse;
   width: 100%;
@@ -125,8 +134,10 @@ footer {
   padding: 0.8rem;
   font-family: var(--mono);
   font-size: 0.88rem;
+  line-height: 1.5;
   resize: vertical;
   outline: none;
+  tab-size: 2;
 }
 .repl-toolbar {
   display: flex;

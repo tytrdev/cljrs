@@ -16,6 +16,28 @@ function basename(href) {
   return href.split("/").pop();
 }
 
+/// Auto-highlight all `<pre><code>` blocks on the page. Detects language
+/// from `class="language-clj"` or `class="language-wgsl"`. Runs after
+/// `mountChrome` so new content injected by callers also gets scanned
+/// (callers can invoke `highlightAll()` again after they inject text).
+export async function highlightAll(root = document) {
+  const { highlight } = await import("./_highlight.js");
+  const nodes = root.querySelectorAll("pre code");
+  for (const el of nodes) {
+    if (el.dataset.hl === "1") continue;
+    const cls = el.className || "";
+    let lang = null;
+    const m = cls.match(/language-(\w+)/);
+    if (m) lang = m[1];
+    else {
+      // default: Clojure, since most docs-site snippets are cljrs.
+      lang = "clj";
+    }
+    el.innerHTML = highlight(el.textContent, lang);
+    el.dataset.hl = "1";
+  }
+}
+
 export function mountChrome(activePath) {
   const header = document.createElement("header");
   const active = basename(activePath || location.pathname);
@@ -35,6 +57,12 @@ export function mountChrome(activePath) {
   const footer = document.createElement("footer");
   footer.innerHTML = `cljrs — a from-scratch Clojure in Rust. <a href="https://github.com/">source</a> · built ${new Date().toISOString().slice(0, 10)}`;
   document.body.append(footer);
+
+  // Auto-highlight any static <pre><code> blocks on the page. Fires on
+  // DOMContentLoaded or immediately if already loaded. Pages that inject
+  // code dynamically can `import { highlightAll } from "./_layout.js"`
+  // and call it after their injection.
+  highlightAll().catch(() => {});
 }
 
 let wasmReady = null;
