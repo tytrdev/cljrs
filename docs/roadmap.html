@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Roadmap — cljrs</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main>
+    <h2>Roadmap</h2>
+    <p>
+      Rough shape. Dates are aspirational, priorities are stable.
+    </p>
+
+    <h3>Where we are</h3>
+    <ul>
+      <li>Tree-walker, reader, macro system — stable.</li>
+      <li>MLIR-JIT native path for type-hinted fns — stable, benchmarked.</li>
+      <li>Persistent collections, destructuring, threading/control macros — stable.</li>
+      <li>Atoms, <code>try</code>/<code>catch</code>, ~125 builtins — stable.</li>
+      <li>Live-coded graphics demos with editor, sliders, time scrubbing — stable.</li>
+      <li>Headless recorder (<code>bin/record</code>) for making demo videos — stable.</li>
+      <li>WASM bundle (tree-walker) + docs-site REPL — stable.</li>
+    </ul>
+
+    <h3>Next</h3>
+    <ol>
+      <li>
+        <strong>GPU kernel DSL (native).</strong> <code>defn-gpu</code> macro expanding to
+        MLIR <code>gpu</code> dialect, lowered to Metal on macOS, Vulkan/SPIR-V
+        elsewhere. Dispatch via <code>wgpu</code>. Same buffer ABI as
+        <code>defn-native</code> — the <code>f64-buf</code> type + <code>buf-get</code>/<code>buf-set</code>
+        primitives are already there, waiting.
+      </li>
+      <li>
+        <strong>GPU kernel DSL (web).</strong> Same kernel emitted as WGSL,
+        dispatched via <code>wgpu</code> inside the WASM bundle. Unlocks real
+        GPU compute in the docs-site demos.
+      </li>
+      <li>
+        <strong>GPU benchmarks.</strong> Match the CPU benchmarks page: matmul,
+        elementwise, reductions, stencil, N-body — <code>cljrs-gpu</code> vs
+        <code>numpy</code>, <code>pytorch</code>, <code>jax</code>, <code>julia-CUDA</code>. Same methodology
+        rigor (sources published, biases listed).
+      </li>
+    </ol>
+
+    <h3>Clojure coverage wishlist</h3>
+    <ul>
+      <li><code>defprotocol</code> / <code>deftype</code> / <code>defrecord</code>.</li>
+      <li>Proper namespaces with <code>:refer</code>, <code>:as</code>, isolation.</li>
+      <li>Lazy-seqs &amp; transducers.</li>
+      <li>Auto-gensym (<code>x#</code>).</li>
+      <li>Regex literals.</li>
+      <li>Ratios &amp; bigint.</li>
+    </ul>
+
+    <h3>Non-goals</h3>
+    <ul>
+      <li>JVM interop. We're not shipping <code>import</code> for Java classes.</li>
+      <li>Bit-for-bit Clojure compatibility. We match semantics where
+          it's cheap and diverge where the JVM baggage isn't worth it.</li>
+      <li>A package manager. <code>load-file</code> + <code>require</code> are the story
+          until someone wants more.</li>
+    </ul>
+  </main>
+  <script type="module">
+    import { mountChrome } from "./_layout.js";
+    mountChrome();
+  </script>
+</body>
+</html>

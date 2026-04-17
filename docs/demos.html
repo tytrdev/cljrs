@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Demos — cljrs</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main>
+    <h2>Live-coded demos</h2>
+    <p>
+      21 graphical kernels, all written in cljrs and JIT-compiled to native
+      code via MLIR. Each video was rendered by
+      <code>cargo run --release --bin record</code> from the same source tree you
+      can open and edit — the recorder is part of the project, not a
+      separate pipeline.
+    </p>
+    <p>
+      Running natively, each demo updates at 60+ fps with the editor open.
+      Parameter sliders, time scrubbing, and reload-on-save are all wired
+      up in the demo binary (<code>cargo run --release --features demo --bin demo -- demo/fractal.clj</code>).
+    </p>
+
+    <div class="demo-gallery">
+      <figure>
+        <video src="./media/fractal.mp4" autoplay muted loop playsinline></video>
+        <figcaption>Mandelbrot (<code>demo/fractal.clj</code>)</figcaption>
+      </figure>
+      <figure>
+        <video src="./media/raymarch.mp4" autoplay muted loop playsinline></video>
+        <figcaption>Raymarched spheres (<code>demo/raymarch.clj</code>)</figcaption>
+      </figure>
+      <figure>
+        <video src="./media/sdf_scene.mp4" autoplay muted loop playsinline></video>
+        <figcaption>SDF scene (<code>demo/sdf_scene.clj</code>)</figcaption>
+      </figure>
+      <figure>
+        <video src="./media/raytrace.mp4" autoplay muted loop playsinline></video>
+        <figcaption>Ray tracer (<code>demo/raytrace.clj</code>)</figcaption>
+      </figure>
+      <figure>
+        <video src="./media/rasterizer.mp4" autoplay muted loop playsinline></video>
+        <figcaption>Software rasterizer (<code>demo/rasterizer.clj</code>)</figcaption>
+      </figure>
+      <figure>
+        <video src="./media/lorenz.mp4" autoplay muted loop playsinline></video>
+        <figcaption>Lorenz attractor (<code>demo/lorenz.clj</code>)</figcaption>
+      </figure>
+      <figure>
+        <video src="./media/double_pendulum.mp4" autoplay muted loop playsinline></video>
+        <figcaption>Double pendulum (<code>demo/double_pendulum.clj</code>)</figcaption>
+      </figure>
+      <figure>
+        <video src="./media/julia.mp4" autoplay muted loop playsinline></video>
+        <figcaption>Julia set (<code>demo/julia.clj</code>)</figcaption>
+      </figure>
+      <figure>
+        <video src="./media/plasma.mp4" autoplay muted loop playsinline></video>
+        <figcaption>Plasma (<code>demo/plasma.clj</code>)</figcaption>
+      </figure>
+      <figure>
+        <video src="./media/voronoi.mp4" autoplay muted loop playsinline></video>
+        <figcaption>Voronoi cells (<code>demo/voronoi.clj</code>)</figcaption>
+      </figure>
+      <figure>
+        <video src="./media/metaballs.mp4" autoplay muted loop playsinline></video>
+        <figcaption>Metaballs (<code>demo/metaballs.clj</code>)</figcaption>
+      </figure>
+      <figure>
+        <video src="./media/domain_warp.mp4" autoplay muted loop playsinline></video>
+        <figcaption>Domain warping (<code>demo/domain_warp.clj</code>)</figcaption>
+      </figure>
+    </div>
+
+    <h3>How the kernel ABI works</h3>
+    <p>
+      Each demo exports a single function with a fixed signature:
+    </p>
+    <pre><code>(defn-native render-pixel ^i64
+  [^i64 px ^i64 py ^i64 frame ^i64 t-ms
+   ^i64 s0 ^i64 s1 ^i64 s2 ^i64 s3]
+  ...body... )</code></pre>
+    <p>
+      Returns an <code>i64</code> packed as <code>0xRRGGBB</code>. The host calls it once per
+      pixel per frame in parallel via <code>rayon</code>. <code>s0</code> through <code>s3</code> are the
+      UI slider values (<code>0..1000</code>). Time scrubbing replaces <code>t-ms</code> with
+      the scrubbed value when the user pauses.
+    </p>
+
+    <h3>Building your own</h3>
+    <pre><code>echo "(defn-native render-pixel ^i64
+  [^i64 px ^i64 py ^i64 frame ^i64 t-ms
+   ^i64 s0 ^i64 s1 ^i64 s2 ^i64 s3]
+  (+ (* px 257) py))" &gt; demo/stripes.clj
+
+cargo run --release --features demo --bin demo -- demo/stripes.clj</code></pre>
+    <p>
+      Edit the file while the window's open — the kernel recompiles
+      on save. No restart.
+    </p>
+
+    <h3>Recording your own videos</h3>
+    <pre><code>cargo run --release --features demo --bin record -- \
+  --kernel demo/fractal.clj \
+  --seconds 6 --fps 60 --size 960x540 \
+  --out out/fractal.mp4</code></pre>
+    <p>
+      Pipes raw RGBA frames to <code>ffmpeg</code>. The videos on this page were
+      produced with this command.
+    </p>
+  </main>
+  <script type="module">
+    import { mountChrome } from "./_layout.js";
+    mountChrome();
+  </script>
+</body>
+</html>

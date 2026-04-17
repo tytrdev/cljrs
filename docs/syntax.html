@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Syntax — cljrs</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main>
+    <h2>Syntax tour</h2>
+    <p>
+      cljrs is a Clojure dialect — if you know Clojure, this is mostly
+      review. The snippets below all run live (click Run), which is the
+      most reliable way to see what's supported.
+    </p>
+
+    <h3>Literals</h3>
+    <div class="repl">
+      <textarea spellcheck="false">[nil true false 42 3.14 "hello" :keyword 'symbol
+ [1 2 3] {:a 1 :b 2} #{1 2 3}]</textarea>
+      <div class="repl-toolbar"><span></span><button>Run</button></div>
+      <div class="repl-out"></div>
+    </div>
+
+    <h3>Functions and closures</h3>
+    <div class="repl">
+      <textarea spellcheck="false">(defn greet [who] (str "hello " who))
+(greet "tyler")</textarea>
+      <div class="repl-toolbar"><span></span><button>Run</button></div>
+      <div class="repl-out"></div>
+    </div>
+
+    <h3>Anonymous fn shorthand</h3>
+    <div class="repl">
+      <textarea spellcheck="false">(map #(* % %) [1 2 3 4 5])</textarea>
+      <div class="repl-toolbar"><span></span><button>Run</button></div>
+      <div class="repl-out"></div>
+    </div>
+
+    <h3>Destructuring</h3>
+    <div class="repl">
+      <textarea spellcheck="false">(defn distance [{:keys [x1 y1 x2 y2]}]
+  (let [dx (- x2 x1)
+        dy (- y2 y1)]
+    (sqrt (+ (* dx dx) (* dy dy)))))
+
+(distance {:x1 0 :y1 0 :x2 3 :y2 4})</textarea>
+      <div class="repl-toolbar"><span></span><button>Run</button></div>
+      <div class="repl-out"></div>
+    </div>
+
+    <h3>Threading macros</h3>
+    <div class="repl">
+      <textarea spellcheck="false">(->> (range 100)
+     (filter odd?)
+     (map #(* % %))
+     (take 5))</textarea>
+      <div class="repl-toolbar"><span></span><button>Run</button></div>
+      <div class="repl-out"></div>
+    </div>
+
+    <h3>Control flow: cond / when / if-let</h3>
+    <div class="repl">
+      <textarea spellcheck="false">(defn classify [n]
+  (cond
+    (neg? n) :negative
+    (zero? n) :zero
+    (&lt; n 10) :small
+    :else :big))
+
+(map classify [-3 0 5 99])</textarea>
+      <div class="repl-toolbar"><span></span><button>Run</button></div>
+      <div class="repl-out"></div>
+    </div>
+
+    <h3>Atoms + swap!</h3>
+    <div class="repl">
+      <textarea spellcheck="false">(def counter (atom 0))
+(dotimes [_ 10] (swap! counter inc))
+@counter</textarea>
+      <div class="repl-toolbar"><span></span><button>Run</button></div>
+      <div class="repl-out"></div>
+    </div>
+
+    <h3>Macros</h3>
+    <div class="repl">
+      <textarea spellcheck="false">(defmacro unless [test & body]
+  `(if ~test nil (do ~@body)))
+
+(unless false :ran-because-false)</textarea>
+      <div class="repl-toolbar"><span></span><button>Run</button></div>
+      <div class="repl-out"></div>
+    </div>
+
+    <h3>Error handling</h3>
+    <div class="repl">
+      <textarea spellcheck="false">(try
+  (/ 1 0)
+  (catch _ e
+    (str "caught: " e)))</textarea>
+      <div class="repl-toolbar"><span></span><button>Run</button></div>
+      <div class="repl-out"></div>
+    </div>
+
+    <h3>Native-compiled fns</h3>
+    <p>
+      The <code>defn-native</code> form JIT-compiles a typed body to
+      machine code via MLIR. Browser WASM bundles don't have a JIT
+      (melior won't cross-compile), so these fall back to the tree-walker
+      on this page — but running <code>cljrs</code> natively, <code>fib</code> here runs at
+      native-Rust speeds. See <a href="./benchmarks.html">Benchmarks</a>.
+    </p>
+    <pre><code>(defn-native fib ^i64 [^i64 n]
+  (if (&lt; n 2) n (+ (fib (- n 1)) (fib (- n 2)))))</code></pre>
+  </main>
+  <script type="module">
+    import { mountChrome, wireRepl } from "./_layout.js";
+    mountChrome();
+    document.querySelectorAll(".repl").forEach((el) => wireRepl(el));
+  </script>
+</body>
+</html>

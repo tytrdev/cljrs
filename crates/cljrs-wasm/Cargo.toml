@@ -1,0 +1,22 @@
+[package]
+name = "cljrs-wasm"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# wasm-bindgen wrapper around the cljrs tree-walker. The mlir feature is
+# intentionally absent: melior links against native LLVM and cannot be
+# built for wasm32. The browser gets the interpreter path only.
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+cljrs = { path = "../.." }
+wasm-bindgen = "0.2"
+console_error_panic_hook = "0.1"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1

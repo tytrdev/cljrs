@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Benchmarks — cljrs</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main>
+    <h2>Benchmarks</h2>
+    <p>
+      Numerical micro-benchmarks comparing <code>cljrs</code> (MLIR-JIT native path) against
+      other Clojure-family runtimes. <strong>Please poke holes in this.</strong>
+      Everything below is reproducible — methodology, source, runtime
+      versions, and known biases are all explicit.
+    </p>
+
+    <h3>Latest results (2026-04-16)</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Benchmark</th>
+          <th>cljrs-native</th>
+          <th>Clojure (JVM)</th>
+          <th>Babashka</th>
+          <th>jank</th>
+          <th>speedup vs JVM</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td><code>fib(35)</code></td><td>0.048s</td><td>0.12s</td><td>3.7s</td><td>0.63s</td><td class="ok">2.4×</td></tr>
+        <tr><td><code>loop_sum</code> (100M iters)</td><td>0.081s</td><td>1.08s</td><td>35.2s</td><td>1.91s</td><td class="ok">13.3×</td></tr>
+        <tr><td><code>cond_chain</code> (50M cases)</td><td>0.077s</td><td>0.76s</td><td>8.9s</td><td>1.44s</td><td class="ok">9.9×</td></tr>
+      </tbody>
+    </table>
+    <p style="font-size:0.9rem;color:var(--fg-dim)">
+      Apple M3 Max, macOS 14.5, best of 5 trials after one warmup run.
+      Lower is better. See "Methodology" below for exact commands.
+    </p>
+
+    <h3>What each benchmark measures</h3>
+    <ul>
+      <li>
+        <strong><code>fib(35)</code></strong> — naive recursive Fibonacci. Measures function-call
+        overhead, integer arithmetic, branching. Pathologically dense call
+        graph (no memoization).
+      </li>
+      <li>
+        <strong><code>loop_sum</code></strong> — a <code>loop</code>/<code>recur</code> summing 100 million integers.
+        Measures tight-loop codegen and tail-call handling. This is where
+        JIT compilers earn their keep.
+      </li>
+      <li>
+        <strong><code>cond_chain</code></strong> — a 10-arm <code>cond</code> that classifies each of
+        50 million values. Measures branch-prediction-friendly dispatch
+        and conditional codegen.
+      </li>
+    </ul>
+
+    <h3>Methodology</h3>
+    <p>
+      Every run uses the same source code for each runtime, the same
+      number of iterations, and is invoked via a shell wrapper at
+      <code>bench/run.sh</code>. To reproduce:
+    </p>
+    <pre><code>git clone &lt;repo&gt; &amp;&amp; cd cljrs
+cargo build --release --features mlir --bin bench
+cd bench &amp;&amp; ./run.sh</code></pre>
+    <p>The kernels are 1:1 ports of each other. For <code>fib</code>:</p>
+    <pre><code>;; bench/fib.clj              — tree-walker
+(defn fib [n] (if (&lt; n 2) n (+ (fib (- n 1)) (fib (- n 2)))))
+
+;; bench/fib_native.clj       — cljrs MLIR-JIT
+(defn-native fib ^i64 [^i64 n]
+  (if (&lt; n 2) n (+ (fib (- n 1)) (fib (- n 2)))))</code></pre>
+
+    <h3>Known biases (please verify)</h3>
+    <ul>
+      <li>
+        <strong>JVM startup:</strong> Clojure-on-JVM numbers <em>exclude</em> JVM startup.
+        We measure the inner loop only via <code>(System/nanoTime)</code>. If you
+        care about startup-inclusive numbers, JVM is much worse (~1.5s cold).
+      </li>
+      <li>
+        <strong>JVM warmup:</strong> one warmup iteration is done before the timed run.
+        A longer warmup would favor JVM slightly; we matched what most
+        blog-post benchmarks do.
+      </li>
+      <li>
+        <strong>Babashka:</strong> uses GraalVM native-image — great for startup,
+        poor for hot loops (no inline caches). It's fast at what it's for
+        (shell scripting), but this isn't it.
+      </li>
+      <li>
+        <strong>jank:</strong> a C++-backed Clojure dialect. We use its
+        <code>time</code> macro (millisecond granularity). Numbers below ~10ms have
+        higher relative noise. Its JIT is also newer than Clojure's.
+      </li>
+      <li>
+        <strong>Output side-channels:</strong> we verified no printing or I/O happens
+        inside any timed loop; all kernels return a scalar that's printed
+        after the timer stops.
+      </li>
+      <li>
+        <strong>One machine:</strong> everything below is from a single Apple M3 Max.
+        Results on x86_64 may differ (LLVM backend is the same, but JVM
+        HotSpot is tuned differently).
+      </li>
+      <li>
+        <strong>Micro, not macro:</strong> these are fundamental-op benchmarks.
+        Real programs have memory allocation, polymorphic dispatch, and
+        persistent-collection ops that aren't exercised here. A whole-program
+        benchmark (e.g., a small game loop) is TODO.
+      </li>
+    </ul>
+
+    <h3>Runtime versions used</h3>
+    <table>
+      <tbody>
+        <tr><td>cljrs</td><td>current HEAD, <code>cargo build --release --features mlir</code></td></tr>
+        <tr><td>Clojure</td><td>1.12.0 on OpenJDK 22 (brew <code>openjdk</code>)</td></tr>
+        <tr><td>Babashka</td><td>1.12.196</td></tr>
+        <tr><td>jank</td><td>latest <code>main</code>, built from source</td></tr>
+        <tr><td>LLVM</td><td>22.1.3 (brew <code>llvm</code>)</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Raw source</h3>
+    <p>
+      Benchmark kernels live in <code>bench/*.clj</code> in the repo. The driver
+      script <code>bench/run.sh</code> invokes each runtime with the same per-benchmark
+      iteration count and prints a table. All of it is ~200 lines total —
+      small enough that "you audited what?" has an honest answer.
+    </p>
+
+    <h3>GPU benchmarks (coming)</h3>
+    <p>
+      Once the GPU kernel DSL lands, we'll add a dedicated GPU benchmarks
+      page comparing <code>cljrs-gpu</code> against <code>numpy</code>, <code>pytorch</code>, <code>jax</code>,
+      and <code>julia-CUDA</code> on: matmul, elementwise kernels, reductions,
+      stencils, N-body. Same methodology: reproducible, biases listed.
+    </p>
+  </main>
+  <script type="module">
+    import { mountChrome } from "./_layout.js";
+    mountChrome();
+  </script>
+</body>
+</html>
