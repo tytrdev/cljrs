@@ -6,6 +6,7 @@ const NAV = [
   { href: "./syntax.html", label: "Syntax" },
   { href: "./coverage.html", label: "Coverage" },
   { href: "./demos.html", label: "Demos" },
+  { href: "./gpu-web.html", label: "GPU" },
   { href: "./benchmarks.html", label: "Benchmarks" },
   { href: "./repl.html", label: "REPL" },
   { href: "./roadmap.html", label: "Roadmap" },

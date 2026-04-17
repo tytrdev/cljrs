@@ -64,6 +64,11 @@ name = "gpu-record"
 path = "src/bin/gpu_record.rs"
 required-features = ["gpu-demo"]
 
+[[bin]]
+name = "gpu-compile"
+path = "src/bin/gpu_compile.rs"
+required-features = ["gpu"]
+
 [profile.release]
 lto = "fat"
 codegen-units = 1

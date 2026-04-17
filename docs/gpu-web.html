@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>GPU in the browser — cljrs</title>
+  <link rel="stylesheet" href="./style.css">
+  <style>
+    .gpu-stage {
+      display: grid;
+      grid-template-columns: minmax(320px, 1fr) 220px;
+      gap: 1rem;
+      margin: 1rem 0;
+      align-items: start;
+    }
+    .gpu-stage canvas {
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      background: #000;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      display: block;
+    }
+    .gpu-controls {
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.8rem;
+      font-size: 0.85rem;
+    }
+    .gpu-controls h4 {
+      margin: 0 0 0.5rem 0;
+      font-size: 0.9rem;
+      color: var(--accent);
+    }
+    .gpu-controls label {
+      display: block;
+      margin: 0.3rem 0 0.1rem 0;
+      color: var(--fg-dim);
+      font-family: var(--mono);
+      font-size: 0.8rem;
+    }
+    .gpu-controls input[type=range] { width: 100%; }
+    .gpu-picker {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      margin: 0.6rem 0;
+    }
+    .gpu-picker button {
+      background: var(--bg-elev);
+      color: var(--fg);
+      border: 1px solid var(--border);
+      padding: 0.3rem 0.7rem;
+      font-size: 0.85rem;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .gpu-picker button.active {
+      background: var(--accent);
+      color: #0b1015;
+      border-color: var(--accent);
+    }
+    .gpu-source {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+      margin-top: 1.5rem;
+    }
+    .gpu-source pre {
+      max-height: 400px;
+      overflow: auto;
+      font-size: 0.8rem;
+      margin: 0;
+    }
+    .gpu-source h4 {
+      margin: 0 0 0.3rem 0;
+      font-size: 0.95rem;
+    }
+    .gpu-status {
+      font-family: var(--mono);
+      font-size: 0.8rem;
+      color: var(--fg-dim);
+      margin-top: 0.5rem;
+    }
+    .gpu-status.err { color: var(--danger); }
+    @media (max-width: 720px) {
+      .gpu-stage { grid-template-columns: 1fr; }
+      .gpu-source { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h2>cljrs kernels running in your browser</h2>
+    <p>
+      This page runs cljrs GPU kernels directly on your GPU via <b>WebGPU</b>.
+      The exact same <code>defn-gpu-pixel</code> source compiles to WGSL once,
+      and that WGSL is loaded here and dispatched by the browser's WebGPU
+      implementation — same kernel, same output, native and web.
+    </p>
+    <p style="color:var(--fg-dim);font-size:0.9rem">
+      Requires a WebGPU-capable browser (Chrome 113+, Edge, Safari TP, or
+      recent Firefox Nightly with the flag). On unsupported browsers you'll
+      see an error below and the static video gallery on
+      <a href="./demos.html">Demos</a> still works.
+    </p>
+
+    <div class="gpu-picker">
+      <button data-kernel="plasma" class="active">plasma</button>
+      <button data-kernel="waves">waves</button>
+      <button data-kernel="mandelbrot">mandelbrot</button>
+    </div>
+
+    <div class="gpu-stage">
+      <canvas id="gpu-canvas"></canvas>
+      <div class="gpu-controls">
+        <h4>Parameters</h4>
+        <label>s0 <span id="v0">500</span></label>
+        <input type="range" min="0" max="1000" value="500" id="s0">
+        <label>s1 <span id="v1">500</span></label>
+        <input type="range" min="0" max="1000" value="500" id="s1">
+        <label>s2 <span id="v2">500</span></label>
+        <input type="range" min="0" max="1000" value="500" id="s2">
+        <label>s3 <span id="v3">500</span></label>
+        <input type="range" min="0" max="1000" value="500" id="s3">
+        <div class="gpu-status" id="status">initializing…</div>
+      </div>
+    </div>
+
+    <h3>Side-by-side</h3>
+    <p style="color:var(--fg-dim);font-size:0.9rem">
+      Left: the cljrs source (~50 lines). Right: the WGSL it compiled to.
+      The WGSL is what your browser is running right now.
+    </p>
+    <div class="gpu-source">
+      <div>
+        <h4>cljrs source</h4>
+        <pre><code id="src-clj">loading…</code></pre>
+      </div>
+      <div>
+        <h4>compiled WGSL</h4>
+        <pre><code id="src-wgsl">loading…</code></pre>
+      </div>
+    </div>
+
+    <h3>How it works</h3>
+    <ol>
+      <li>
+        The <code>defn-gpu-pixel</code> in the .clj file is parsed by the
+        cljrs reader, macro-expanded, and run through the GPU DSL emitter
+        (<code>src/gpu/emit.rs</code>), producing a WGSL compute shader.
+      </li>
+      <li>
+        That WGSL is saved as a static asset alongside this docs page.
+        No runtime cljrs required in the browser for GPU demos.
+      </li>
+      <li>
+        JavaScript (<code>_gpu_runner.js</code>) loads the WGSL, creates a
+        WebGPU pipeline, dispatches one workgroup per 8×8 pixel tile,
+        reads back the framebuffer, and draws it to a canvas.
+      </li>
+      <li>
+        The native app (<code>cargo run --features gpu-demo --bin gpu-demo</code>)
+        does the same thing via <code>wgpu</code> — different runtime, same kernel.
+      </li>
+    </ol>
+
+    <p style="color:var(--fg-dim);font-size:0.9rem">
+      Next: in-browser <code>defn-gpu-pixel</code> — edit the cljrs source in
+      the live REPL, compile to WGSL in-browser, re-upload to WebGPU, all
+      without a round-trip. Blocked on running the MLIR/GPU pipeline in wasm.
+      For now, precompiling is simpler and tells the same story.
+    </p>
+  </main>
+  <script type="module">
+    import { mountChrome } from "./_layout.js";
+    import { GpuRunner } from "./_gpu_runner.js";
+    mountChrome();
+
+    const KERNELS = {
+      plasma:     { wgsl: "./wgsl/plasma.wgsl",     clj: "./kernels/plasma.clj" },
+      waves:      { wgsl: "./wgsl/waves.wgsl",      clj: "./kernels/waves.clj" },
+      mandelbrot: { wgsl: "./wgsl/mandelbrot.wgsl", clj: "./kernels/mandelbrot.clj" },
+    };
+
+    const canvas = document.getElementById("gpu-canvas");
+    const status = document.getElementById("status");
+    const srcClj = document.getElementById("src-clj");
+    const srcWgsl = document.getElementById("src-wgsl");
+    const sliderEls = [0,1,2,3].map((i) => document.getElementById(`s${i}`));
+    const valueEls = [0,1,2,3].map((i) => document.getElementById(`v${i}`));
+
+    let runner = null;
+
+    async function load(kernelName) {
+      if (runner) runner.stop();
+      status.textContent = `loading ${kernelName}…`;
+      status.classList.remove("err");
+      try {
+        const k = KERNELS[kernelName];
+        const [wgsl, clj] = await Promise.all([
+          fetch(k.wgsl).then((r) => r.text()),
+          fetch(k.clj).then((r) => r.text()).catch(() => "(source unavailable)"),
+        ]);
+        srcClj.textContent = clj;
+        srcWgsl.textContent = wgsl;
+        runner = new GpuRunner(canvas, wgsl, { width: 800, height: 450 });
+        runner.onStats = (fps) => {
+          status.textContent = `${kernelName} · ${(fps).toFixed(0)} fps · ${runner.adapterInfo.description || "WebGPU"}`;
+        };
+        await runner.init();
+        runner.setSliders(sliderEls.map((el) => Number(el.value)));
+        runner.start();
+      } catch (e) {
+        status.textContent = String(e);
+        status.classList.add("err");
+      }
+    }
+
+    // Slider wiring.
+    sliderEls.forEach((el, i) => {
+      el.addEventListener("input", () => {
+        valueEls[i].textContent = el.value;
+        if (runner) runner.setSliders(sliderEls.map((e) => Number(e.value)));
+      });
+    });
+
+    // Kernel picker.
+    document.querySelectorAll(".gpu-picker button").forEach((b) => {
+      b.addEventListener("click", () => {
+        document.querySelectorAll(".gpu-picker button").forEach((x) => x.classList.remove("active"));
+        b.classList.add("active");
+        load(b.dataset.kernel);
+      });
+    });
+
+    load("plasma");
+  </script>
+</body>
+</html>
