@@ -42,6 +42,7 @@ pub fn create_context() -> Context {
 pub fn build_lowering_pipeline(context: &Context) -> pass::PassManager<'_> {
     let pm = pass::PassManager::new(context);
     pm.add_pass(pass::conversion::create_scf_to_control_flow());
+    pm.add_pass(pass::conversion::create_math_to_llvm());
     pm.add_pass(pass::conversion::create_arith_to_llvm());
     pm.add_pass(pass::conversion::create_control_flow_to_llvm());
     pm.add_pass(pass::conversion::create_func_to_llvm());

@@ -143,9 +143,27 @@ fn invoke_i64(ptr: usize, name: &str, args: &[Value]) -> Result<Value> {
             4 => std::mem::transmute::<usize, extern "C" fn(i64, i64, i64, i64) -> i64>(ptr)(
                 xs[0], xs[1], xs[2], xs[3],
             ),
+            5 => std::mem::transmute::<usize, extern "C" fn(i64, i64, i64, i64, i64) -> i64>(
+                ptr,
+            )(xs[0], xs[1], xs[2], xs[3], xs[4]),
+            6 => std::mem::transmute::<usize, extern "C" fn(i64, i64, i64, i64, i64, i64) -> i64>(
+                ptr,
+            )(xs[0], xs[1], xs[2], xs[3], xs[4], xs[5]),
+            7 => std::mem::transmute::<
+                usize,
+                extern "C" fn(i64, i64, i64, i64, i64, i64, i64) -> i64,
+            >(ptr)(
+                xs[0], xs[1], xs[2], xs[3], xs[4], xs[5], xs[6]
+            ),
+            8 => std::mem::transmute::<
+                usize,
+                extern "C" fn(i64, i64, i64, i64, i64, i64, i64, i64) -> i64,
+            >(ptr)(
+                xs[0], xs[1], xs[2], xs[3], xs[4], xs[5], xs[6], xs[7]
+            ),
             n => {
                 return Err(Error::Eval(format!(
-                    "native fn `{name}`: arity {n} > 4 not supported"
+                    "native fn `{name}`: arity {n} > 8 not supported"
                 )));
             }
         }
@@ -170,9 +188,27 @@ fn invoke_f64(ptr: usize, name: &str, args: &[Value]) -> Result<Value> {
             4 => std::mem::transmute::<usize, extern "C" fn(f64, f64, f64, f64) -> f64>(ptr)(
                 xs[0], xs[1], xs[2], xs[3],
             ),
+            5 => std::mem::transmute::<usize, extern "C" fn(f64, f64, f64, f64, f64) -> f64>(
+                ptr,
+            )(xs[0], xs[1], xs[2], xs[3], xs[4]),
+            6 => std::mem::transmute::<usize, extern "C" fn(f64, f64, f64, f64, f64, f64) -> f64>(
+                ptr,
+            )(xs[0], xs[1], xs[2], xs[3], xs[4], xs[5]),
+            7 => std::mem::transmute::<
+                usize,
+                extern "C" fn(f64, f64, f64, f64, f64, f64, f64) -> f64,
+            >(ptr)(
+                xs[0], xs[1], xs[2], xs[3], xs[4], xs[5], xs[6]
+            ),
+            8 => std::mem::transmute::<
+                usize,
+                extern "C" fn(f64, f64, f64, f64, f64, f64, f64, f64) -> f64,
+            >(ptr)(
+                xs[0], xs[1], xs[2], xs[3], xs[4], xs[5], xs[6], xs[7]
+            ),
             n => {
                 return Err(Error::Eval(format!(
-                    "native fn `{name}`: arity {n} > 4 not supported"
+                    "native fn `{name}`: arity {n} > 8 not supported"
                 )));
             }
         }

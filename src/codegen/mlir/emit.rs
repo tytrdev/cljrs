@@ -198,6 +198,17 @@ impl<'m, 'r> FnEmitter<'m, 'r> {
             "loop" => self.emit_loop(xs, scope),
             "float" => self.emit_convert(xs, scope, MlirTy::F64, "arith.sitofp"),
             "int" => self.emit_convert(xs, scope, MlirTy::I64, "arith.fptosi"),
+            "sqrt" => self.emit_math_unary(xs, scope, "math.sqrt"),
+            "sin" => self.emit_math_unary(xs, scope, "math.sin"),
+            "cos" => self.emit_math_unary(xs, scope, "math.cos"),
+            "tan" => self.emit_math_unary(xs, scope, "math.tan"),
+            "exp" => self.emit_math_unary(xs, scope, "math.exp"),
+            "log" => self.emit_math_unary(xs, scope, "math.log"),
+            "abs" => self.emit_abs(xs, scope),
+            "min" => self.emit_min_max(xs, scope, "arith.minsi", "arith.minimumf"),
+            "max" => self.emit_min_max(xs, scope, "arith.maxsi", "arith.maximumf"),
+            "mod" | "rem" => self.emit_mod(xs, scope),
+            "pow" => self.emit_pow(xs, scope),
             h if h == self.self_trigger => self.emit_self_call(xs, scope),
             h if self.module.registry.get(h).is_some() => {
                 self.emit_external_call(xs, scope, h)
@@ -500,6 +511,125 @@ impl<'m, 'r> FnEmitter<'m, 'r> {
         Ok(EmVal {
             ssa: result,
             ty: helper_ret,
+        })
+    }
+
+    /// Unary f64 math intrinsic lowered via MLIR's `math` dialect:
+    /// sqrt, sin, cos, tan, exp, log. Argument must be f64.
+    fn emit_math_unary(&mut self, xs: &[Value], scope: &Scope, op: &str) -> Result<EmVal> {
+        if xs.len() != 2 {
+            return Err(Error::Arity {
+                expected: "1".into(),
+                got: xs.len() - 1,
+            });
+        }
+        let v = self.emit(&xs[1], scope)?;
+        if !v.ty.is_float() {
+            return Err(Error::Type(format!("{op}: argument must be f64")));
+        }
+        let out = self.fresh();
+        self.line(format!("{out} = {op} {} : f64", v.ssa));
+        Ok(EmVal {
+            ssa: out,
+            ty: MlirTy::F64,
+        })
+    }
+
+    /// `(abs x)` — f64 absolute value via `math.absf`, or i64 via a subf-and-select
+    /// equivalent (no arith.absi in current MLIR; use `max(x, -x)`).
+    fn emit_abs(&mut self, xs: &[Value], scope: &Scope) -> Result<EmVal> {
+        if xs.len() != 2 {
+            return Err(Error::Arity {
+                expected: "1".into(),
+                got: xs.len() - 1,
+            });
+        }
+        let v = self.emit(&xs[1], scope)?;
+        let out = self.fresh();
+        match v.ty {
+            MlirTy::F64 => self.line(format!("{out} = math.absf {} : f64", v.ssa)),
+            MlirTy::I64 => {
+                // i64 abs via arith.maxsi(x, -x) — MLIR has no direct absi.
+                let neg = self.fresh();
+                let zero = self.fresh();
+                self.line(format!("{zero} = arith.constant 0 : i64"));
+                self.line(format!("{neg} = arith.subi {zero}, {} : i64", v.ssa));
+                self.line(format!("{out} = arith.maxsi {}, {neg} : i64", v.ssa));
+            }
+            _ => return Err(Error::Type(format!("abs: bad type {}", v.ty.as_str()))),
+        }
+        Ok(EmVal { ssa: out, ty: v.ty })
+    }
+
+    fn emit_min_max(
+        &mut self,
+        xs: &[Value],
+        scope: &Scope,
+        int_op: &str,
+        float_op: &str,
+    ) -> Result<EmVal> {
+        if xs.len() < 3 {
+            return Err(Error::Arity {
+                expected: ">= 2".into(),
+                got: xs.len() - 1,
+            });
+        }
+        let mut acc = self.emit(&xs[1], scope)?;
+        for a in &xs[2..] {
+            let rhs = self.emit(a, scope)?;
+            if acc.ty != rhs.ty {
+                return Err(Error::Type("min/max: mixed types".into()));
+            }
+            let v = self.fresh();
+            let op = if acc.ty.is_int() { int_op } else { float_op };
+            self.line(format!("{v} = {op} {}, {} : {}", acc.ssa, rhs.ssa, acc.ty.as_str()));
+            acc = EmVal { ssa: v, ty: acc.ty };
+        }
+        Ok(acc)
+    }
+
+    /// `(mod a b)` — remainder. `arith.remsi` for i64, `math.fpowi` path
+    /// not used (we use `arith.remf` which MLIR provides for floats).
+    fn emit_mod(&mut self, xs: &[Value], scope: &Scope) -> Result<EmVal> {
+        if xs.len() != 3 {
+            return Err(Error::Arity {
+                expected: "2".into(),
+                got: xs.len() - 1,
+            });
+        }
+        let a = self.emit(&xs[1], scope)?;
+        let b = self.emit(&xs[2], scope)?;
+        if a.ty != b.ty {
+            return Err(Error::Type("mod: mixed types".into()));
+        }
+        let out = self.fresh();
+        let op = if a.ty.is_int() {
+            "arith.remsi"
+        } else {
+            "arith.remf"
+        };
+        self.line(format!("{out} = {op} {}, {} : {}", a.ssa, b.ssa, a.ty.as_str()));
+        Ok(EmVal { ssa: out, ty: a.ty })
+    }
+
+    /// `(pow base exp)` — f64 power via `math.powf`. Both args must be f64.
+    fn emit_pow(&mut self, xs: &[Value], scope: &Scope) -> Result<EmVal> {
+        if xs.len() != 3 {
+            return Err(Error::Arity {
+                expected: "2".into(),
+                got: xs.len() - 1,
+            });
+        }
+        let a = self.emit(&xs[1], scope)?;
+        let b = self.emit(&xs[2], scope)?;
+        if !a.ty.is_float() || !b.ty.is_float() {
+            return Err(Error::Type("pow: both args must be f64".into()));
+        }
+        let out = self.fresh();
+        self.line(format!("{out} = math.powf {}, {} : f64", a.ssa, b.ssa));
+        Ok(EmVal {
+            ssa: out,
+            ty: MlirTy::F64,
         })
     }
 

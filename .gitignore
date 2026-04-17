@@ -46,3 +46,4 @@ ehthumbs.db
 /tmp/
 *.tmp
 *.bak
+.nrepl-port
