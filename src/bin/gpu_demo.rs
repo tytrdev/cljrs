@@ -25,8 +25,8 @@ use cljrs::{
 };
 use eframe::egui;
 
-const WIDTH: u32 = 960;
-const HEIGHT: u32 = 540;
+const WIDTH: u32 = 1440;
+const HEIGHT: u32 = 810;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
