@@ -184,7 +184,13 @@ impl<'m, 'r> FnEmitter<'m, 'r> {
         };
         match head.as_ref() {
             "+" => self.emit_num_binop(xs, scope, "arith.addi", "arith.addf"),
-            "-" => self.emit_num_binop(xs, scope, "arith.subi", "arith.subf"),
+            "-" => {
+                if xs.len() == 2 {
+                    self.emit_unary_neg(xs, scope)
+                } else {
+                    self.emit_num_binop(xs, scope, "arith.subi", "arith.subf")
+                }
+            }
             "*" => self.emit_num_binop(xs, scope, "arith.muli", "arith.mulf"),
             "/" => self.emit_num_binop(xs, scope, "arith.divsi", "arith.divf"),
             "<" => self.emit_cmp(xs, scope, "slt", "olt"),
@@ -512,6 +518,25 @@ impl<'m, 'r> FnEmitter<'m, 'r> {
             ssa: result,
             ty: helper_ret,
         })
+    }
+
+    /// `(- x)` unary negation: `arith.subi 0, x` for i64; `arith.negf x`
+    /// for f64. Lets kernels write `(- foo)` the way Clojure does.
+    fn emit_unary_neg(&mut self, xs: &[Value], scope: &Scope) -> Result<EmVal> {
+        let v = self.emit(&xs[1], scope)?;
+        let out = self.fresh();
+        match v.ty {
+            MlirTy::I64 => {
+                let zero = self.fresh();
+                self.line(format!("{zero} = arith.constant 0 : i64"));
+                self.line(format!("{out} = arith.subi {zero}, {} : i64", v.ssa));
+            }
+            MlirTy::F64 => {
+                self.line(format!("{out} = arith.negf {} : f64", v.ssa));
+            }
+            _ => return Err(Error::Type(format!("(- x): bad type {}", v.ty.as_str()))),
+        }
+        Ok(EmVal { ssa: out, ty: v.ty })
     }
 
     /// Unary f64 math intrinsic lowered via MLIR's `math` dialect:
