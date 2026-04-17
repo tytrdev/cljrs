@@ -8,9 +8,22 @@ default = []
 # Opt-in native codegen via MLIR + LLVM 22. Not default until stable.
 # Build/test with `cargo build --features mlir` / `cargo test --features mlir`.
 mlir = ["dep:melior"]
+# Windowed live-coded demo (src/bin/demo.rs). Off by default so CI
+# without a display can still build cleanly.
+demo = ["mlir", "dep:minifb"]
 
 [dependencies]
 melior = { version = "0.27", optional = true }
+minifb = { version = "0.27", optional = true }
+
+[[bin]]
+name = "bench"
+path = "src/bin/bench.rs"
+
+[[bin]]
+name = "demo"
+path = "src/bin/demo.rs"
+required-features = ["demo"]
 
 [profile.release]
 lto = "fat"

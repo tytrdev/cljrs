@@ -196,6 +196,8 @@ impl<'m, 'r> FnEmitter<'m, 'r> {
             "let" => self.emit_let(xs, scope),
             "do" => self.emit_do(xs, scope),
             "loop" => self.emit_loop(xs, scope),
+            "float" => self.emit_convert(xs, scope, MlirTy::F64, "arith.sitofp"),
+            "int" => self.emit_convert(xs, scope, MlirTy::I64, "arith.fptosi"),
             h if h == self.self_trigger => self.emit_self_call(xs, scope),
             h if self.module.registry.get(h).is_some() => {
                 self.emit_external_call(xs, scope, h)
@@ -499,6 +501,33 @@ impl<'m, 'r> FnEmitter<'m, 'r> {
             ssa: result,
             ty: helper_ret,
         })
+    }
+
+    /// `(float x)` → `arith.sitofp %x : i64 to f64`, and
+    /// `(int x)` → `arith.fptosi %x : f64 to i64`. Makes fractal-style
+    /// kernels with mixed int/float intermediates ergonomic.
+    fn emit_convert(
+        &mut self,
+        xs: &[Value],
+        scope: &Scope,
+        to: MlirTy,
+        op: &str,
+    ) -> Result<EmVal> {
+        if xs.len() != 2 {
+            return Err(Error::Arity {
+                expected: "1".into(),
+                got: xs.len() - 1,
+            });
+        }
+        let val = self.emit(&xs[1], scope)?;
+        let v = self.fresh();
+        self.line(format!(
+            "{v} = {op} {} : {} to {}",
+            val.ssa,
+            val.ty.as_str(),
+            to.as_str()
+        ));
+        Ok(EmVal { ssa: v, ty: to })
     }
 
     /// `(other-native args...)` — resolves via the registry, emits a
