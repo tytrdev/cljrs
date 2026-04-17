@@ -117,7 +117,12 @@ footer {
   border-top: 1px solid var(--border);
 }
 
-/* REPL */
+/* REPL. When the highlight overlay is attached, the textarea is wrapped
+   in a .repl-hl-wrap containing an absolutely-positioned <pre> (the
+   colored rendering) and the textarea itself (transparent text, visible
+   caret). Both elements share identical font metrics so the caret lines
+   up with the painted glyphs.
+   Until the overlay JS runs, textareas fall back to normal rendering. */
 .repl {
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -125,16 +130,31 @@ footer {
   margin: 1rem 0;
   background: var(--bg-elev);
 }
-/* REPL with highlight overlay. The textarea has transparent text; the
-   <pre> sitting behind it shows the colored rendering. Both must share
-   identical font metrics (family, size, line-height, padding) so the
-   caret lines up with the visible glyphs. */
-.repl-hl-wrap {
+.repl textarea {
+  display: block;
+  width: 100%;
+  min-height: 120px;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0.8rem;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 0.88rem;
+  line-height: 1.5;
+  tab-size: 2;
+  white-space: pre;
+  resize: vertical;
+  outline: none;
+}
+.repl .repl-hl-wrap {
   position: relative;
   min-height: 120px;
 }
-.repl-hl-wrap textarea,
-.repl-hl {
+.repl .repl-hl-wrap .repl-hl {
+  position: absolute;
+  inset: 0;
   margin: 0;
   padding: 0.8rem;
   border: none;
@@ -143,48 +163,21 @@ footer {
   line-height: 1.5;
   tab-size: 2;
   white-space: pre;
-  overflow-wrap: normal;
   overflow: auto;
-  word-break: normal;
-  box-sizing: border-box;
-}
-.repl-hl {
-  position: absolute;
-  inset: 0;
   color: var(--fg);
   background: transparent;
   pointer-events: none;
-  white-space: pre-wrap;
+  box-sizing: border-box;
 }
-.repl-hl-wrap textarea {
+.repl .repl-hl-wrap textarea {
   position: relative;
-  width: 100%;
-  min-height: 120px;
-  background: transparent;
   color: transparent;
   caret-color: var(--accent);
-  resize: vertical;
-  outline: none;
-  white-space: pre-wrap;
-}
-.repl-hl-wrap textarea::selection {
-  background: rgba(125, 211, 252, 0.25);
-}
-
-/* Fallback for REPLs without the overlay (e.g. if JS fails). */
-.repl textarea {
-  width: 100%;
-  min-height: 120px;
   background: transparent;
-  color: var(--fg);
-  border: none;
-  padding: 0.8rem;
-  font-family: var(--mono);
-  font-size: 0.88rem;
-  line-height: 1.5;
-  resize: vertical;
-  outline: none;
-  tab-size: 2;
+}
+.repl .repl-hl-wrap textarea::selection {
+  background: rgba(125, 211, 252, 0.25);
+  color: transparent;
 }
 .repl-toolbar {
   display: flex;
