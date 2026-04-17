@@ -24,10 +24,14 @@ struct EmVal {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)] // Ptr reserved for when we bind pointer values in scope (buf-set, raw ptrs).
 enum MlirTy {
     I64,
     F64,
     I1,
+    /// Opaque pointer for buffer args. Handled by buf-get / buf-set
+    /// intrinsics; not legal in arith ops directly.
+    Ptr,
 }
 
 impl MlirTy {
@@ -36,6 +40,7 @@ impl MlirTy {
             MlirTy::I64 => "i64",
             MlirTy::F64 => "f64",
             MlirTy::I1 => "i1",
+            MlirTy::Ptr => "!llvm.ptr",
         }
     }
 
@@ -55,6 +60,11 @@ fn prim_to_mlir(p: PrimType) -> MlirTy {
         PrimType::I64 => MlirTy::I64,
         PrimType::F64 => MlirTy::F64,
         PrimType::Bool => MlirTy::I1,
+        // F64Buf crosses the FFI as i64 (pointer bits) and is
+        // `inttoptr`-converted to !llvm.ptr at the top of the fn body.
+        // This function returns the *FFI* type; the internal Ptr
+        // binding is set up separately in emit_module.
+        PrimType::F64Buf => MlirTy::I64,
     }
 }
 
@@ -204,6 +214,7 @@ impl<'m, 'r> FnEmitter<'m, 'r> {
             "loop" => self.emit_loop(xs, scope),
             "float" => self.emit_convert(xs, scope, MlirTy::F64, "arith.sitofp"),
             "int" => self.emit_convert(xs, scope, MlirTy::I64, "arith.fptosi"),
+            "buf-get" => self.emit_buf_get(xs, scope),
             "sqrt" => self.emit_math_unary(xs, scope, "math.sqrt"),
             "sin" => self.emit_math_unary(xs, scope, "math.sin"),
             "cos" => self.emit_math_unary(xs, scope, "math.cos"),
@@ -654,6 +665,47 @@ impl<'m, 'r> FnEmitter<'m, 'r> {
         self.line(format!("{out} = math.powf {}, {} : f64", a.ssa, b.ssa));
         Ok(EmVal {
             ssa: out,
+            ty: MlirTy::F64,
+        })
+    }
+
+    /// `(buf-get buf i)` — load an f64 from a buffer at index `i`.
+    /// `buf` is a pointer-as-i64 (FFI convention: pointer bits in an i64
+    /// register). We inttoptr it locally each time, which LLVM will CSE
+    /// across repeated uses in the same fn.
+    fn emit_buf_get(&mut self, xs: &[Value], scope: &Scope) -> Result<EmVal> {
+        if xs.len() != 3 {
+            return Err(Error::Arity {
+                expected: "2".into(),
+                got: xs.len() - 1,
+            });
+        }
+        let buf = self.emit(&xs[1], scope)?;
+        let idx = self.emit(&xs[2], scope)?;
+        if !buf.ty.is_int() {
+            return Err(Error::Type(
+                "buf-get: first arg must be an f64-buf (i64 handle)".into(),
+            ));
+        }
+        if !idx.ty.is_int() {
+            return Err(Error::Type("buf-get: index must be i64".into()));
+        }
+        let ptr = self.fresh();
+        self.line(format!(
+            "{ptr} = llvm.inttoptr {} : i64 to !llvm.ptr",
+            buf.ssa
+        ));
+        let gep = self.fresh();
+        self.line(format!(
+            "{gep} = llvm.getelementptr {ptr}[{}] : (!llvm.ptr, i64) -> !llvm.ptr, f64",
+            idx.ssa
+        ));
+        let v = self.fresh();
+        self.line(format!(
+            "{v} = llvm.load {gep} : !llvm.ptr -> f64"
+        ));
+        Ok(EmVal {
+            ssa: v,
             ty: MlirTy::F64,
         })
     }

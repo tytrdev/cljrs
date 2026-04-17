@@ -61,6 +61,76 @@ mod tests {
         let _ctx = create_context();
     }
 
+    /// Proof of concept for the upcoming buffer ABI. Pass a Rust Vec's
+    /// pointer as an i64 arg; inside the JIT'd fn, llvm.inttoptr converts
+    /// it back to a pointer and we load/GEP into the buffer. This is the
+    /// primitive all of the phase-3 buffer work (N-body, BVH, GPU kernels)
+    /// is built on top of.
+    #[test]
+    fn jit_buffer_read_via_pointer_arg() {
+        use melior::ExecutionEngine;
+        use melior::ir::Module;
+        use melior::ir::operation::OperationLike;
+
+        let context = create_context();
+        // sum_buf iterates 0..len, reads buf[i] as f64, accumulates.
+        // No MLIR loop — we recurse tail-wise into sum_loop and let
+        // LLVM -O3 TCO it into a native loop.
+        let source = r#"
+            module {
+              func.func private @sum_loop(
+                %buf: i64, %i: i64, %len: i64, %acc: f64
+              ) -> f64 {
+                %cond = arith.cmpi sge, %i, %len : i64
+                %r = scf.if %cond -> (f64) {
+                  scf.yield %acc : f64
+                } else {
+                  %ptr = llvm.inttoptr %buf : i64 to !llvm.ptr
+                  %gep = llvm.getelementptr %ptr[%i]
+                    : (!llvm.ptr, i64) -> !llvm.ptr, f64
+                  %v = llvm.load %gep : !llvm.ptr -> f64
+                  %c1 = arith.constant 1 : i64
+                  %ni = arith.addi %i, %c1 : i64
+                  %na = arith.addf %acc, %v : f64
+                  %rec = func.call @sum_loop(%buf, %ni, %len, %na)
+                    : (i64, i64, i64, f64) -> f64
+                  scf.yield %rec : f64
+                }
+                return %r : f64
+              }
+
+              func.func @sum_buf(%buf: i64, %len: i64) -> f64
+                  attributes { llvm.emit_c_interface } {
+                %z = arith.constant 0.0 : f64
+                %c0 = arith.constant 0 : i64
+                %r = func.call @sum_loop(%buf, %c0, %len, %z)
+                  : (i64, i64, i64, f64) -> f64
+                return %r : f64
+              }
+            }
+        "#;
+
+        let mut module = Module::parse(&context, source).expect("parse MLIR");
+        assert!(module.as_operation().verify(), "module failed verify");
+        build_lowering_pipeline(&context)
+            .run(&mut module)
+            .expect("lowering failed");
+
+        let engine = ExecutionEngine::new(&module, 3, &[], false, false);
+        let data: Vec<f64> = (0..1000).map(|i| i as f64).collect();
+        let expected: f64 = data.iter().sum();
+
+        // Pass Vec's pointer as a raw i64. extern "C" fn(i64, i64) -> f64.
+        let ptr_as_i64 = data.as_ptr() as usize as i64;
+        let f: extern "C" fn(i64, i64) -> f64 =
+            unsafe { std::mem::transmute(engine.lookup("sum_buf")) };
+        let result = f(ptr_as_i64, data.len() as i64);
+        assert!(
+            (result - expected).abs() < 1e-9,
+            "sum mismatch: {result} vs {expected}"
+        );
+    }
+
     /// Hardcoded-MLIR fib JIT (Phase 2 baseline). Green = whole pipeline —
     /// parse, lower, JIT, invoke — actually works on this machine.
     #[test]

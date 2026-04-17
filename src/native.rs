@@ -80,32 +80,32 @@ impl NativeFn {
             });
         }
 
-        // Homogeneity check: phase-2 only supports all-i64 or all-f64 signatures.
-        let homogeneous = self.arg_types.iter().all(|t| *t == self.ret_type);
-        if !homogeneous {
-            return Err(Error::Eval(format!(
-                "native fn `{}`: mixed-type signatures not yet supported \
-                 (args={:?}, ret={:?})",
-                self.name, self.arg_types, self.ret_type
-            )));
-        }
+        let all_int_abi = self.arg_types.iter().all(|t| t.is_int_abi());
+        let all_f64 = self.arg_types.iter().all(|t| matches!(t, PrimType::F64));
 
-        match self.ret_type {
-            PrimType::I64 => invoke_i64(self.ptr, &self.name, args),
-            PrimType::F64 => invoke_f64(self.ptr, &self.name, args),
-            PrimType::Bool => Err(Error::Eval(format!(
-                "native fn `{}`: bool at FFI boundary not yet supported",
-                self.name
+        match (all_int_abi, all_f64, self.ret_type) {
+            (true, _, PrimType::I64) => invoke_i64(self.ptr, &self.name, args, &self.arg_types),
+            (true, _, PrimType::F64) => invoke_iargs_fret(self.ptr, &self.name, args, &self.arg_types),
+            (_, true, PrimType::F64) => invoke_f64(self.ptr, &self.name, args),
+            (_, true, PrimType::I64) => invoke_fargs_iret(self.ptr, &self.name, args),
+            _ => Err(Error::Eval(format!(
+                "native fn `{}`: arg mix not supported yet (args={:?}, ret={:?})",
+                self.name, self.arg_types, self.ret_type
             ))),
         }
     }
 }
 
-fn extract_i64(name: &str, idx: usize, v: &Value) -> Result<i64> {
-    match v {
-        Value::Int(n) => Ok(*n),
-        other => Err(Error::Type(format!(
-            "native fn `{name}` arg {idx}: expected int, got {}",
+/// Extract an i64-ABI arg value (handles regular i64 and F64Buf).
+fn extract_int_abi(name: &str, idx: usize, arg_ty: PrimType, v: &Value) -> Result<i64> {
+    match (arg_ty, v) {
+        (PrimType::I64, Value::Int(n)) => Ok(*n),
+        (PrimType::F64Buf, Value::Int(n)) => Ok(*n),
+        (PrimType::Bool, Value::Bool(b)) => Ok(if *b { 1 } else { 0 }),
+        (PrimType::Bool, Value::Int(n)) => Ok(*n),
+        (ty, other) => Err(Error::Type(format!(
+            "native fn `{name}`: arg {idx}: expected {}, got {}",
+            ty.as_str(),
             other.type_name()
         ))),
     }
@@ -123,10 +123,15 @@ fn extract_f64(name: &str, idx: usize, v: &Value) -> Result<f64> {
     }
 }
 
-fn invoke_i64(ptr: usize, name: &str, args: &[Value]) -> Result<Value> {
+fn invoke_i64(
+    ptr: usize,
+    name: &str,
+    args: &[Value],
+    arg_types: &[PrimType],
+) -> Result<Value> {
     let mut xs = Vec::with_capacity(args.len());
     for (i, a) in args.iter().enumerate() {
-        xs.push(extract_i64(name, i, a)?);
+        xs.push(extract_int_abi(name, i, arg_types[i], a)?);
     }
     // SAFETY: caller of compile_native_fn guarantees the pointer is a valid
     // JIT-compiled function matching this signature, and the holder keeps
@@ -233,6 +238,80 @@ fn invoke_i64(ptr: usize, name: &str, args: &[Value]) -> Result<Value> {
             n => {
                 return Err(Error::Eval(format!(
                     "native fn `{name}`: arity {n} > 16 not supported"
+                )));
+            }
+        }
+    };
+    Ok(Value::Int(r))
+}
+
+/// i64-ABI args (regular i64 / f64-buf pointer / bool) returning f64.
+/// Primary use case: buffer-reading kernels that return floats.
+fn invoke_iargs_fret(
+    ptr: usize,
+    name: &str,
+    args: &[Value],
+    arg_types: &[PrimType],
+) -> Result<Value> {
+    let mut xs = Vec::with_capacity(args.len());
+    for (i, a) in args.iter().enumerate() {
+        xs.push(extract_int_abi(name, i, arg_types[i], a)?);
+    }
+    // SAFETY: same contract as invoke_i64.
+    let r: f64 = unsafe {
+        match xs.len() {
+            1 => std::mem::transmute::<usize, extern "C" fn(i64) -> f64>(ptr)(xs[0]),
+            2 => std::mem::transmute::<usize, extern "C" fn(i64, i64) -> f64>(ptr)(xs[0], xs[1]),
+            3 => std::mem::transmute::<usize, extern "C" fn(i64, i64, i64) -> f64>(ptr)(
+                xs[0], xs[1], xs[2],
+            ),
+            4 => std::mem::transmute::<usize, extern "C" fn(i64, i64, i64, i64) -> f64>(ptr)(
+                xs[0], xs[1], xs[2], xs[3],
+            ),
+            5 => std::mem::transmute::<usize, extern "C" fn(i64, i64, i64, i64, i64) -> f64>(ptr)(
+                xs[0], xs[1], xs[2], xs[3], xs[4],
+            ),
+            6 => std::mem::transmute::<
+                usize,
+                extern "C" fn(i64, i64, i64, i64, i64, i64) -> f64,
+            >(ptr)(xs[0], xs[1], xs[2], xs[3], xs[4], xs[5]),
+            7 => std::mem::transmute::<
+                usize,
+                extern "C" fn(i64, i64, i64, i64, i64, i64, i64) -> f64,
+            >(ptr)(xs[0], xs[1], xs[2], xs[3], xs[4], xs[5], xs[6]),
+            8 => std::mem::transmute::<
+                usize,
+                extern "C" fn(i64, i64, i64, i64, i64, i64, i64, i64) -> f64,
+            >(ptr)(xs[0], xs[1], xs[2], xs[3], xs[4], xs[5], xs[6], xs[7]),
+            n => {
+                return Err(Error::Eval(format!(
+                    "native fn `{name}`: arity {n} not supported for (i64-ABI...)->f64"
+                )));
+            }
+        }
+    };
+    Ok(Value::Float(r))
+}
+
+/// f64 args returning i64.
+fn invoke_fargs_iret(ptr: usize, name: &str, args: &[Value]) -> Result<Value> {
+    let mut xs = Vec::with_capacity(args.len());
+    for (i, a) in args.iter().enumerate() {
+        xs.push(extract_f64(name, i, a)?);
+    }
+    let r: i64 = unsafe {
+        match xs.len() {
+            1 => std::mem::transmute::<usize, extern "C" fn(f64) -> i64>(ptr)(xs[0]),
+            2 => std::mem::transmute::<usize, extern "C" fn(f64, f64) -> i64>(ptr)(xs[0], xs[1]),
+            3 => std::mem::transmute::<usize, extern "C" fn(f64, f64, f64) -> i64>(ptr)(
+                xs[0], xs[1], xs[2],
+            ),
+            4 => std::mem::transmute::<usize, extern "C" fn(f64, f64, f64, f64) -> i64>(ptr)(
+                xs[0], xs[1], xs[2], xs[3],
+            ),
+            n => {
+                return Err(Error::Eval(format!(
+                    "native fn `{name}`: arity {n} not supported for (f64...)->i64"
                 )));
             }
         }

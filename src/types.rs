@@ -12,6 +12,11 @@ pub enum PrimType {
     I64,
     F64,
     Bool,
+    /// Pointer to a flat `f64` buffer. At the FFI boundary this is
+    /// passed as an `i64` (pointer bits); inside the kernel it behaves
+    /// as an opaque handle indexed by `(buf-get buf i)` / `(buf-set ...)`.
+    /// Prerequisite for BSP/BVH/N-body and eventually GPU kernels.
+    F64Buf,
 }
 
 impl PrimType {
@@ -20,7 +25,14 @@ impl PrimType {
             PrimType::I64 => "i64",
             PrimType::F64 => "f64",
             PrimType::Bool => "bool",
+            PrimType::F64Buf => "f64-buf",
         }
+    }
+
+    /// True if this type travels through the C ABI in an integer register
+    /// (i64 or pointer). Used to decide how to pack invoke args.
+    pub fn is_int_abi(self) -> bool {
+        matches!(self, PrimType::I64 | PrimType::F64Buf | PrimType::Bool)
     }
 }
 
@@ -41,8 +53,9 @@ pub fn parse_type_name(v: &Value) -> Result<PrimType> {
         "i64" | "long" => Ok(PrimType::I64),
         "f64" | "double" => Ok(PrimType::F64),
         "bool" => Ok(PrimType::Bool),
+        "f64-buf" => Ok(PrimType::F64Buf),
         other => Err(Error::Eval(format!(
-            "unknown type hint: ^{other} (allowed: i64/long, f64/double, bool)"
+            "unknown type hint: ^{other} (allowed: i64/long, f64/double, bool, f64-buf)"
         ))),
     }
 }
