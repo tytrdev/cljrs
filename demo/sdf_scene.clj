@@ -105,18 +105,21 @@
         aspect (/ width height)
         nx (* (- (/ (* 2.0 fx) width)  1.0) aspect)
         ny (- 1.0 (/ (* 2.0 fy) height))
-        rx nx ry ny rz 2.0
+        ;; Fixed camera looking at roughly (0, 1, 0) from behind and above.
+        ;; Previous orbit transform was rotating the ray the wrong way and
+        ;; sending ~every pixel ray off into empty sky. Scene objects live
+        ;; in a box roughly [-1.2, 1.2] x [0, 2] x [-1.2, 1.2].
+        ox 0.0
+        oy 2.0
+        oz -5.0
+        pitch 0.3
+        rx nx
+        ry (- ny pitch)
+        rz 1.0
         rlen (sqrt (+ (+ (* rx rx) (* ry ry)) (* rz rz)))
-        dx (/ rx rlen) dy (/ ry rlen) dz (/ rz rlen)
-        ;; Camera orbits at radius 3.5 looking at origin.
-        ox (* 3.5 (cos (* time 0.3)))
-        oz (* 3.5 (sin (* time 0.3)))
-        oy 2.5
-        ;; Simple camera: aim toward origin via a basis rotation.
-        cax (cos (* time 0.3)) csx (sin (* time 0.3))
-        cam-dx (+ (* dx cax) (* dz csx))
-        cam-dz (+ (* (- dx) csx) (* dz cax))
-        cam-dy dy
+        cam-dx (/ rx rlen)
+        cam-dy (/ ry rlen)
+        cam-dz (/ rz rlen)
         t     (march-t ox oy oz cam-dx cam-dy cam-dz sx sy sz bx bz tx ty tz blend)]
     (if (>= t 100.0)
       (let [sky-t (* 0.5 (+ 1.0 cam-dy))
