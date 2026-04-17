@@ -18,6 +18,7 @@ use std::time::{Instant, SystemTime};
 
 use cljrs::{builtins, env::Env, eval, reader, value::Value};
 use minifb::{Key, Window, WindowOptions};
+use rayon::prelude::*;
 
 const WIDTH: usize = 640;
 const HEIGHT: usize = 480;
@@ -148,30 +149,32 @@ fn load_file(env: &Env, path: &str) -> Option<SystemTime> {
 }
 
 fn render_frame(render_fn: &Value, buffer: &mut [u32], frame: u64, t_millis: i64) {
-    // Native call per pixel. The JIT'd fn returns an i64 packed as 0xRRGGBB
-    // that minifb interprets directly.
-    // Pre-allocate args Vec to avoid re-allocation per call.
-    let mut args: [Value; 4] = [
-        Value::Int(0),
-        Value::Int(0),
-        Value::Int(frame as i64),
-        Value::Int(t_millis),
-    ];
-    for y in 0..HEIGHT {
-        args[1] = Value::Int(y as i64);
-        for x in 0..WIDTH {
-            args[0] = Value::Int(x as i64);
-            match eval::apply(render_fn, &args) {
-                Ok(Value::Int(c)) => buffer[y * WIDTH + x] = c as u32,
-                Ok(other) => {
-                    eprintln!("[demo] render-pixel returned non-int: {other}");
-                    return;
-                }
-                Err(e) => {
-                    eprintln!("[demo] render-pixel error: {e}");
-                    return;
+    // Rayon splits the rows across the thread pool; each thread runs the
+    // JIT'd fn independently. The native code is pure f64/i64 math with
+    // no shared state — safe to call concurrently. `&Value` / `Arc<NativeFn>`
+    // are Send+Sync (see native.rs for the audit).
+    let frame_i = frame as i64;
+    buffer
+        .par_chunks_mut(WIDTH)
+        .enumerate()
+        .for_each(|(y, row)| {
+            let mut args: [Value; 4] = [
+                Value::Int(0),
+                Value::Int(y as i64),
+                Value::Int(frame_i),
+                Value::Int(t_millis),
+            ];
+            for x in 0..WIDTH {
+                args[0] = Value::Int(x as i64);
+                match eval::apply(render_fn, &args) {
+                    Ok(Value::Int(c)) => row[x] = c as u32,
+                    Ok(_) | Err(_) => {
+                        // On any error, leave this pixel black — avoids
+                        // tearing the frame mid-render when the user
+                        // temporarily saves a broken file.
+                        row[x] = 0;
+                    }
                 }
             }
-        }
-    }
+        });
 }
