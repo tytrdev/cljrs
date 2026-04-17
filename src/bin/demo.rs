@@ -78,6 +78,8 @@ fn main() {
         last_edit_at: Instant::now(),
         save_flash: None,
         editor_open: true,
+        paused: false,
+        scrub_t_ms: 0,
     };
 
     let options = eframe::NativeOptions {
@@ -119,6 +121,35 @@ struct DemoApp {
     /// Whether the left editor panel is visible. Toggle with Cmd/Ctrl-E
     /// or the "< hide editor" / "show editor >" button.
     editor_open: bool,
+    /// Bret-Victor-style time scrubbing. When paused, the render clock
+    /// doesn't advance from `Instant::now()`; it reads from `scrub_t_ms`
+    /// so the user can rewind or hold on a specific frame.
+    paused: bool,
+    /// The clock value shown to the kernel. When unpaused this is
+    /// `started.elapsed().as_millis()`; when paused it's whatever the
+    /// scrub slider is set to.
+    scrub_t_ms: i64,
+}
+
+impl DemoApp {
+    /// Flip the pause state. On pause, freeze the clock at its current
+    /// reading; on resume, adjust `started` so `elapsed()` picks up
+    /// exactly where we paused (no jump forward).
+    fn toggle_paused(&mut self) {
+        if self.paused {
+            // Resuming — shift `started` back so elapsed() yields scrub_t_ms right now.
+            if let Some(new_started) = Instant::now()
+                .checked_sub(Duration::from_millis(self.scrub_t_ms.max(0) as u64))
+            {
+                self.started = new_started;
+            }
+            self.paused = false;
+        } else {
+            // Pausing — freeze at current clock.
+            self.scrub_t_ms = self.started.elapsed().as_millis() as i64;
+            self.paused = true;
+        }
+    }
 }
 
 impl eframe::App for DemoApp {
@@ -164,6 +195,14 @@ impl eframe::App for DemoApp {
             self.editor_open = !self.editor_open;
         }
 
+        // Space toggles pause/play.
+        let toggle_pause = ctx.input(|i| {
+            i.key_pressed(egui::Key::Space) && !i.modifiers.any()
+        });
+        if toggle_pause {
+            self.toggle_paused();
+        }
+
         // Read slider-name hints from env globals if the kernel exported them.
         for i in 0..4 {
             let key = format!("slider-{i}-label");
@@ -207,12 +246,24 @@ impl eframe::App for DemoApp {
                     egui::ScrollArea::vertical()
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
+                            // Custom layouter: produce a highlighted
+                            // LayoutJob from the current buffer each
+                            // frame. Small enough buffers (~100 lines)
+                            // that re-scanning per frame is cheap.
+                            let mut layouter =
+                                |ui: &egui::Ui, src: &str, _wrap_width: f32| {
+                                    let mut job = clojure_highlight(src);
+                                    job.wrap.max_width = f32::INFINITY;
+                                    ui.fonts(|f| f.layout_job(job))
+                                };
                             let response = ui.add_sized(
                                 [ui.available_width(), ui.available_height()],
                                 egui::TextEdit::multiline(&mut self.source)
+                                    .font(egui::TextStyle::Monospace)
                                     .code_editor()
                                     .desired_rows(40)
-                                    .desired_width(f32::MAX),
+                                    .desired_width(f32::MAX)
+                                    .layouter(&mut layouter),
                             );
                             if response.changed() {
                                 self.last_edit_at = Instant::now();
@@ -239,11 +290,11 @@ impl eframe::App for DemoApp {
                 });
         }
 
-        // Right-side panel: sliders + perf HUD.
+        // Right-side panel: sliders + perf HUD + time controls.
         egui::SidePanel::right("params")
-            .min_width(260.0)
+            .min_width(280.0)
             .show(ctx, |ui| {
-                ui.heading("cljrs kernel params");
+                ui.heading("kernel params");
                 ui.separator();
                 for i in 0..4 {
                     ui.label(&self.slider_names[i]);
@@ -251,6 +302,41 @@ impl eframe::App for DemoApp {
                     ui.add(egui::Slider::new(&mut v, 0..=1000).show_value(true));
                     self.sliders[i] = v as i64;
                 }
+
+                ui.separator();
+                ui.heading("time");
+
+                // Current clock reading — either live or paused.
+                let live_t = self.started.elapsed().as_millis() as i64;
+                let effective_t = if self.paused { self.scrub_t_ms } else { live_t };
+
+                ui.horizontal(|ui| {
+                    let btn_label = if self.paused { "▶ play (space)" } else { "⏸ pause (space)" };
+                    if ui.button(btn_label).clicked() {
+                        self.toggle_paused();
+                    }
+                    if ui.button("⟲ reset").clicked() {
+                        self.started = Instant::now();
+                        self.scrub_t_ms = 0;
+                    }
+                });
+
+                // Scrub slider — only meaningful while paused, but show
+                // current t even while running.
+                let mut scrub = effective_t as i32;
+                // Upper bound grows with observed elapsed so the user
+                // can scrub all the way back to 0 but also forward a bit.
+                let max_t = (live_t.max(self.scrub_t_ms).max(10_000)) as i32;
+                let resp = ui.add_enabled(
+                    self.paused,
+                    egui::Slider::new(&mut scrub, 0..=max_t)
+                        .text("t (ms)")
+                        .clamping(egui::SliderClamping::Always),
+                );
+                if resp.changed() {
+                    self.scrub_t_ms = scrub as i64;
+                }
+
                 ui.separator();
                 ui.label(format!(
                     "last frame: {:.2} ms ({:.0} fps)",
@@ -258,9 +344,8 @@ impl eframe::App for DemoApp {
                     1000.0 / self.last_frame_ms.max(0.001),
                 ));
                 ui.label(format!("frame #{}", self.frame));
-                ui.separator();
-                ui.label("Edit the .clj file — the window");
-                ui.label("picks up the save within a frame.");
+                ui.label(format!("t = {} ms", effective_t));
+
                 if let Some(err) = &self.last_error {
                     ui.separator();
                     ui.colored_label(egui::Color32::LIGHT_RED, "kernel error:");
@@ -281,7 +366,13 @@ impl eframe::App for DemoApp {
             };
 
             if let Some(render_fn) = render_fn {
-                let t_ms = self.started.elapsed().as_millis() as i64;
+                // If the user has scrubbed/paused, the kernel sees
+                // scrub_t_ms instead of the wall clock.
+                let t_ms = if self.paused {
+                    self.scrub_t_ms
+                } else {
+                    self.started.elapsed().as_millis() as i64
+                };
                 let frame_i = self.frame as i64;
                 let sliders = self.sliders;
 
@@ -394,6 +485,171 @@ impl eframe::App for DemoApp {
         self.frame += 1;
         ctx.request_repaint();
     }
+}
+
+/// Lightweight Clojure syntax highlighter. Walks the buffer once, produces
+/// an egui::text::LayoutJob with color-coded runs. Not a real parser —
+/// just enough lexer state to tell comments, strings, keywords, numbers,
+/// and special forms from everything else.
+fn clojure_highlight(src: &str) -> egui::text::LayoutJob {
+    use egui::text::{LayoutJob, TextFormat};
+    use egui::{Color32, FontId};
+
+    let mut job = LayoutJob::default();
+    let font = FontId::monospace(13.0);
+
+    // Palette — tuned for dark UI; lightish accents on a dark background.
+    const DEFAULT_FG: Color32 = Color32::from_rgb(220, 220, 220);
+    const COMMENT: Color32 = Color32::from_rgb(110, 110, 110);
+    const STRING: Color32 = Color32::from_rgb(220, 180, 120);
+    const NUMBER: Color32 = Color32::from_rgb(140, 200, 255);
+    const KEYWORD: Color32 = Color32::from_rgb(150, 220, 150);
+    const SPECIAL: Color32 = Color32::from_rgb(230, 140, 230);
+    const FN_NAME: Color32 = Color32::from_rgb(240, 200, 100);
+    const PAREN: Color32 = Color32::from_rgb(140, 140, 140);
+
+    let specials: &[&str] = &[
+        "defn", "defn-native", "defmacro", "def", "fn", "let", "loop",
+        "recur", "if", "do", "quote", "ns", "require", "load-file",
+        "in-ns", "macroexpand", "macroexpand-1",
+    ];
+
+    let fmt = |color: Color32| TextFormat {
+        font_id: font.clone(),
+        color,
+        ..Default::default()
+    };
+
+    let bytes = src.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        // Comments: ; to end of line.
+        if b == b';' {
+            let start = i;
+            while i < bytes.len() && bytes[i] != b'\n' {
+                i += 1;
+            }
+            job.append(&src[start..i], 0.0, fmt(COMMENT));
+            continue;
+        }
+        // Strings: "..."
+        if b == b'"' {
+            let start = i;
+            i += 1;
+            while i < bytes.len() {
+                if bytes[i] == b'\\' && i + 1 < bytes.len() {
+                    i += 2;
+                    continue;
+                }
+                if bytes[i] == b'"' {
+                    i += 1;
+                    break;
+                }
+                i += 1;
+            }
+            job.append(&src[start..i], 0.0, fmt(STRING));
+            continue;
+        }
+        // Keywords: :foo
+        if b == b':' {
+            let start = i;
+            i += 1;
+            while i < bytes.len() && is_sym_byte(bytes[i]) {
+                i += 1;
+            }
+            job.append(&src[start..i], 0.0, fmt(KEYWORD));
+            continue;
+        }
+        // Numbers: optional sign + digits (+ optional dot/digits/e).
+        if b.is_ascii_digit()
+            || ((b == b'-' || b == b'+')
+                && i + 1 < bytes.len()
+                && bytes[i + 1].is_ascii_digit())
+        {
+            let start = i;
+            if b == b'-' || b == b'+' {
+                i += 1;
+            }
+            while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == b'.') {
+                i += 1;
+            }
+            // Exponent like 1e-3
+            if i < bytes.len() && (bytes[i] == b'e' || bytes[i] == b'E') {
+                i += 1;
+                if i < bytes.len() && (bytes[i] == b'+' || bytes[i] == b'-') {
+                    i += 1;
+                }
+                while i < bytes.len() && bytes[i].is_ascii_digit() {
+                    i += 1;
+                }
+            }
+            job.append(&src[start..i], 0.0, fmt(NUMBER));
+            continue;
+        }
+        // Parens.
+        if matches!(b, b'(' | b')' | b'[' | b']' | b'{' | b'}') {
+            job.append(&src[i..i + 1], 0.0, fmt(PAREN));
+            i += 1;
+            continue;
+        }
+        // Symbol / identifier.
+        if is_sym_byte(b) {
+            let start = i;
+            while i < bytes.len() && is_sym_byte(bytes[i]) {
+                i += 1;
+            }
+            let word = &src[start..i];
+            let color = if specials.contains(&word) {
+                SPECIAL
+            } else if is_probable_fn_name(src, start) {
+                FN_NAME
+            } else {
+                DEFAULT_FG
+            };
+            job.append(word, 0.0, fmt(color));
+            continue;
+        }
+        // Whitespace / everything else passes through.
+        let mut j = i;
+        while j < bytes.len() && !is_highlight_start(bytes[j]) {
+            j += 1;
+        }
+        job.append(&src[i..j], 0.0, fmt(DEFAULT_FG));
+        i = j;
+    }
+
+    job
+}
+
+fn is_sym_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric()
+        || matches!(
+            b,
+            b'_' | b'-' | b'+' | b'*' | b'/' | b'<' | b'>' | b'=' | b'!' | b'?' | b'.' | b'&' | b'\''
+        )
+}
+
+fn is_highlight_start(b: u8) -> bool {
+    b == b';'
+        || b == b'"'
+        || b == b':'
+        || b.is_ascii_digit()
+        || matches!(b, b'(' | b')' | b'[' | b']' | b'{' | b'}')
+        || is_sym_byte(b)
+}
+
+/// Heuristic: a symbol that follows an open paren and whitespace
+/// (possibly after `defn` etc.) looks like a fn being called. Light
+/// coloring just for the word right after `(`. Good enough for syntax
+/// highlighting without a real parser.
+fn is_probable_fn_name(src: &str, start: usize) -> bool {
+    let bytes = src.as_bytes();
+    let mut j = start;
+    while j > 0 && matches!(bytes[j - 1], b' ' | b'\t' | b'\n') {
+        j -= 1;
+    }
+    j > 0 && bytes[j - 1] == b'('
 }
 
 /// Parse + evaluate a full source string into the given env. Returns
