@@ -215,6 +215,7 @@ impl<'m, 'r> FnEmitter<'m, 'r> {
             "float" => self.emit_convert(xs, scope, MlirTy::F64, "arith.sitofp"),
             "int" => self.emit_convert(xs, scope, MlirTy::I64, "arith.fptosi"),
             "buf-get" => self.emit_buf_get(xs, scope),
+            "buf-set" => self.emit_buf_set(xs, scope),
             "sqrt" => self.emit_math_unary(xs, scope, "math.sqrt"),
             "sin" => self.emit_math_unary(xs, scope, "math.sin"),
             "cos" => self.emit_math_unary(xs, scope, "math.cos"),
@@ -707,6 +708,49 @@ impl<'m, 'r> FnEmitter<'m, 'r> {
         Ok(EmVal {
             ssa: v,
             ty: MlirTy::F64,
+        })
+    }
+
+    /// `(buf-set buf i v)` — store f64 `v` into buffer at index `i`. Returns
+    /// i64 0 so it composes inside expression position — kernels use it as
+    /// `(do (buf-set ...) (buf-set ...) sentinel)` or similar.
+    fn emit_buf_set(&mut self, xs: &[Value], scope: &Scope) -> Result<EmVal> {
+        if xs.len() != 4 {
+            return Err(Error::Arity {
+                expected: "3".into(),
+                got: xs.len() - 1,
+            });
+        }
+        let buf = self.emit(&xs[1], scope)?;
+        let idx = self.emit(&xs[2], scope)?;
+        let val = self.emit(&xs[3], scope)?;
+        if !buf.ty.is_int() {
+            return Err(Error::Type(
+                "buf-set: first arg must be an f64-buf (i64 handle)".into(),
+            ));
+        }
+        if !idx.ty.is_int() {
+            return Err(Error::Type("buf-set: index must be i64".into()));
+        }
+        if !val.ty.is_float() {
+            return Err(Error::Type("buf-set: value must be f64".into()));
+        }
+        let ptr = self.fresh();
+        self.line(format!(
+            "{ptr} = llvm.inttoptr {} : i64 to !llvm.ptr",
+            buf.ssa
+        ));
+        let gep = self.fresh();
+        self.line(format!(
+            "{gep} = llvm.getelementptr {ptr}[{}] : (!llvm.ptr, i64) -> !llvm.ptr, f64",
+            idx.ssa
+        ));
+        self.line(format!("llvm.store {}, {gep} : f64, !llvm.ptr", val.ssa));
+        let z = self.fresh();
+        self.line(format!("{z} = arith.constant 0 : i64"));
+        Ok(EmVal {
+            ssa: z,
+            ty: MlirTy::I64,
         })
     }
 

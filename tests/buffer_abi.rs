@@ -57,6 +57,43 @@ fn sum_buffer_via_native_fn() {
 }
 
 #[test]
+fn buf_set_then_read_via_native_fn() {
+    // Kernel: for i in 0..n, xs[i] = i * 2.0. Return n so we have a sentinel.
+    let body = parse_body(
+        r#"(loop [i 0]
+             (if (>= i n) n
+               (do
+                 (buf-set xs i (* (float i) 2.0))
+                 (recur (+ i 1)))))"#,
+    );
+    let params: &[(Arc<str>, PrimType)] = &[
+        (Arc::from("xs"), PrimType::F64Buf),
+        (Arc::from("n"), PrimType::I64),
+    ];
+    let native = compile_native_fn(
+        "fill-buf",
+        params,
+        PrimType::I64,
+        &body,
+        &NativeRegistry::default(),
+    )
+    .expect("compile");
+
+    let mut data: Vec<f64> = vec![0.0; 256];
+    let ptr_as_i64 = data.as_mut_ptr() as usize as i64;
+    let r = native
+        .invoke(&[Value::Int(ptr_as_i64), Value::Int(data.len() as i64)])
+        .expect("invoke");
+    match r {
+        Value::Int(n) => assert_eq!(n, 256),
+        other => panic!("expected int sentinel, got {other:?}"),
+    }
+    for (i, v) in data.iter().enumerate() {
+        assert_eq!(*v, (i as f64) * 2.0, "idx {i}");
+    }
+}
+
+#[test]
 fn max_buffer_via_native_fn() {
     // A slightly different kernel to confirm buf-get composes with loop/recur.
     let body = parse_body(
