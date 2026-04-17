@@ -24,6 +24,27 @@ fn skip_if_no_gpu() -> bool {
     }
 }
 
+fn compile_and_render_with(src: &str, sliders: [i32; 4]) -> Vec<u32> {
+    let env = Env::new();
+    builtins::install(&env);
+    for f in reader::read_all(src).expect("read") {
+        eval::eval(&f, &env).expect("eval");
+    }
+    let k = match env.lookup("render").expect("render") {
+        Value::GpuPixelKernel(k) => k,
+        _ => panic!("render is not a gpu pixel kernel"),
+    };
+    let gpu = global_gpu().expect("gpu");
+    k.render_frame(
+        &gpu,
+        PixelParams {
+            width: 128, height: 72, t_ms: 500,
+            s0: sliders[0], s1: sliders[1], s2: sliders[2], s3: sliders[3],
+            _pad: 0,
+        },
+    ).expect("render")
+}
+
 fn compile_and_render(src: &str) -> Vec<u32> {
     let env = Env::new();
     builtins::install(&env);
@@ -77,6 +98,9 @@ fn waves_kernel_renders() {
 fn mandelbrot_kernel_renders() {
     if skip_if_no_gpu() { return; }
     let src = fs::read_to_string("demo_gpu/mandelbrot.clj").expect("read mandelbrot.clj");
-    let buf = compile_and_render(&src);
-    assert!(buf.iter().any(|&c| c != 0));
+    // Zoomed-out, off-center so the viewport has both set and escaping
+    // regions. s0=100 → zoom ≈ 0.9 (nearly full set visible).
+    let buf = compile_and_render_with(&src, [100, 500, 500, 500]);
+    let nonzero = buf.iter().filter(|&&c| c != 0).count();
+    assert!(nonzero > buf.len() / 4, "expected some set detail, got {nonzero}/{}", buf.len());
 }

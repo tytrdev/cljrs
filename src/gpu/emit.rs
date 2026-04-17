@@ -79,6 +79,16 @@ pub fn parse_gpu_type(name: &str) -> Result<Ty> {
     }
 }
 
+/// WGSL identifiers can't use `-` (or other Clojure-legal symbol chars).
+/// Loop vars get prefixed with `_lv<counter>_` anyway, so we just need
+/// to strip the unfriendly chars to keep WGSL parsers happy while
+/// leaving the name readable in generated code.
+fn sanitize_ident(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+        .collect()
+}
+
 fn ty_for_symbol(s: &Value) -> Result<Ty> {
     match s {
         Value::Symbol(n) => parse_gpu_type(n.as_ref()),
@@ -206,6 +216,21 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     Ok(out)
 }
 
+/// State threaded through tail-position emission inside a `loop`. We
+/// need to know where to write the result and how to translate `recur`.
+struct LoopTail {
+    /// (wgsl_var_name, type) for each loop variable, in declaration
+    /// order. recur writes these via temporaries to preserve ordering.
+    vars: Vec<(String, Ty)>,
+    /// WGSL name of the result variable that holds the loop's eventual
+    /// value. Each non-recur tail form assigns here + `break`s.
+    result_var: String,
+    /// Discovered result type. We do a probe pass through the body to
+    /// discover this before declaring the result var (since WGSL needs
+    /// a type on declaration). Probe pass writes to a throwaway buffer.
+    result_ty_known: Option<Ty>,
+}
+
 struct Ctx {
     body: String,
     counter: usize,
@@ -316,6 +341,10 @@ impl Ctx {
             "u32" => self.emit_cast(xs, scope, Ty::U32),
             "i32" => self.emit_cast(xs, scope, Ty::I32),
             "f32" => self.emit_cast(xs, scope, Ty::F32),
+            "loop" => self.emit_loop(xs, scope),
+            "recur" => Err(Error::Eval(
+                "gpu: `recur` only valid in tail position of a `loop`".into(),
+            )),
             _ => Err(Error::Eval(format!(
                 "gpu: `{head}` not supported — \
                  allowed: arith, cmp, if, let, do, math intrinsics"
@@ -510,6 +539,261 @@ impl Ctx {
         })
     }
 
+    /// `(loop [v1 init1 v2 init2 ...] body...)` — compiled as a WGSL
+    /// `loop { ... }` with mutable `var` locals for each loop variable.
+    /// The body must end in either `(recur ...)` (which rewrites the
+    /// vars + continues) or a plain value expression (which breaks out
+    /// with that value as the loop's result). `if` / `let` / `do`
+    /// propagate tail-position to their sub-expressions.
+    ///
+    /// Loop bodies MUST reach a non-recur expression on every path —
+    /// WGSL requires `loop` to terminate, and we don't insert any
+    /// implicit iteration cap. Kernels that naturally iterate a fixed
+    /// N times should just `(recur ...)` until a counter-based `if`.
+    fn emit_loop(&mut self, xs: &[Value], scope: &Scope) -> Result<Val> {
+        if xs.len() < 3 {
+            return Err(Error::Eval(
+                "gpu loop: (loop [v init ...] body) required".into(),
+            ));
+        }
+        let bindings = match &xs[1] {
+            Value::Vector(v) => v,
+            _ => return Err(Error::Eval("gpu loop: bindings must be a vector".into())),
+        };
+        if bindings.len() % 2 != 0 {
+            return Err(Error::Eval("gpu loop: bindings must be pairs".into()));
+        }
+        // Eval each init in the outer scope first (so later inits can
+        // reference earlier ones). Bind to fresh `var`s. Later we
+        // reassign to them on `recur`.
+        let mut cur = scope.clone();
+        let mut loop_vars: Vec<(String, String, Ty)> = Vec::new(); // (user_name, wgsl_var, ty)
+        let mut i = 0;
+        while i < bindings.len() {
+            let name = match &bindings[i] {
+                Value::Symbol(s) => s.to_string(),
+                _ => return Err(Error::Eval("gpu loop: binding name must be symbol".into())),
+            };
+            let init = self.emit(&bindings[i + 1], &cur)?;
+            let var_name = format!("_lv{}_{}", self.counter, sanitize_ident(&name));
+            self.counter += 1;
+            self.line(&format!(
+                "var {var_name}: {} = {};",
+                init.ty.as_str(),
+                init.expr
+            ));
+            cur.insert(
+                name.clone(),
+                Val { expr: var_name.clone(), ty: init.ty },
+            );
+            loop_vars.push((name, var_name, init.ty));
+            i += 2;
+        }
+
+        // Type-check body's result by compiling once in a "probe" mode:
+        // we need the result type before we can declare the result var.
+        // Simple approach: require the first plain-value form we reach
+        // to reveal its type, and declare the result var lazily. We use
+        // an indirection: emit into a temp ctx first, throw it away,
+        // just to discover the type. That's expensive but robust.
+        let probe_ty = {
+            let saved_body = std::mem::take(&mut self.body);
+            let saved_counter = self.counter;
+            let mut probe_tail = LoopTail {
+                vars: loop_vars.iter().map(|(_, v, t)| (v.clone(), *t)).collect(),
+                result_var: "__probe".into(),
+                result_ty_known: None,
+            };
+            let _ = self.emit_tail(&xs[2..], &cur, &mut probe_tail);
+            self.body = saved_body;
+            self.counter = saved_counter;
+            probe_tail
+                .result_ty_known
+                .ok_or_else(|| Error::Eval(
+                    "gpu loop: body must reach a non-recur value on some path".into(),
+                ))?
+        };
+
+        let result_var = format!("_lr{}", self.counter);
+        self.counter += 1;
+        // Declare result var (zero-init, reassigned on loop exit).
+        let zero = match probe_ty {
+            Ty::I32 => "0i",
+            Ty::U32 => "0u",
+            Ty::F32 => "0.0",
+            Ty::Bool => "false",
+        };
+        self.line(&format!(
+            "var {result_var}: {} = {};",
+            probe_ty.as_str(),
+            zero
+        ));
+        self.line("loop {");
+        let mut tail = LoopTail {
+            vars: loop_vars.iter().map(|(_, v, t)| (v.clone(), *t)).collect(),
+            result_var: result_var.clone(),
+            result_ty_known: Some(probe_ty),
+        };
+        self.emit_tail(&xs[2..], &cur, &mut tail)?;
+        self.line("}");
+        Ok(Val {
+            expr: result_var,
+            ty: probe_ty,
+        })
+    }
+
+    /// Emit a sequence of forms in tail-position of the enclosing loop.
+    /// The last form is the tail; earlier forms are ordinary expressions
+    /// evaluated for side effect (though our DSL is pure, they're still
+    /// bound to let-exprs).
+    fn emit_tail(&mut self, forms: &[Value], scope: &Scope, tail: &mut LoopTail) -> Result<()> {
+        if forms.is_empty() {
+            return Err(Error::Eval("gpu loop: empty body".into()));
+        }
+        // Evaluate all but the last as normal expressions.
+        for f in &forms[..forms.len() - 1] {
+            self.emit(f, scope)?;
+        }
+        self.emit_tail_form(&forms[forms.len() - 1], scope, tail)
+    }
+
+    /// Emit a single form at tail position.
+    fn emit_tail_form(&mut self, form: &Value, scope: &Scope, tail: &mut LoopTail) -> Result<()> {
+        match form {
+            Value::List(xs) if !xs.is_empty() => {
+                if let Value::Symbol(head) = &xs[0] {
+                    match head.as_ref() {
+                        "recur" => return self.emit_tail_recur(xs, scope, tail),
+                        "if" => return self.emit_tail_if(xs, scope, tail),
+                        "let" => return self.emit_tail_let(xs, scope, tail),
+                        "do" => {
+                            if xs.len() < 2 {
+                                return Err(Error::Eval("gpu do: empty body".into()));
+                            }
+                            return self.emit_tail(&xs[1..], scope, tail);
+                        }
+                        _ => {}
+                    }
+                }
+                // Ordinary call in tail position → compute value, break.
+                let v = self.emit(form, scope)?;
+                self.emit_break_with(v, tail)
+            }
+            _ => {
+                let v = self.emit(form, scope)?;
+                self.emit_break_with(v, tail)
+            }
+        }
+    }
+
+    fn emit_break_with(&mut self, v: Val, tail: &mut LoopTail) -> Result<()> {
+        if let Some(t) = tail.result_ty_known
+            && t != v.ty
+        {
+            return Err(Error::Type(format!(
+                "gpu loop: mixed result types ({} and {})",
+                t.as_str(),
+                v.ty.as_str()
+            )));
+        }
+        tail.result_ty_known = Some(v.ty);
+        self.line(&format!("{} = {};", tail.result_var, v.expr));
+        self.line("break;");
+        Ok(())
+    }
+
+    fn emit_tail_recur(
+        &mut self,
+        xs: &[Value],
+        scope: &Scope,
+        tail: &mut LoopTail,
+    ) -> Result<()> {
+        let got = xs.len() - 1;
+        if got != tail.vars.len() {
+            return Err(Error::Arity {
+                expected: format!("{}", tail.vars.len()),
+                got,
+            });
+        }
+        // Evaluate all new values FIRST into temporaries, so recur
+        // expressions that reference the loop vars see the old values
+        // (matches Clojure's loop semantics). Then assign.
+        let mut temps: Vec<(String, Val)> = Vec::with_capacity(tail.vars.len());
+        for (i, form) in xs[1..].iter().enumerate() {
+            let v = self.emit(form, scope)?;
+            let (_, ty) = tail.vars[i];
+            if v.ty != ty {
+                return Err(Error::Type(format!(
+                    "gpu recur arg {i}: expected {}, got {}",
+                    ty.as_str(),
+                    v.ty.as_str()
+                )));
+            }
+            let tmp = format!("_rt{}", self.counter);
+            self.counter += 1;
+            self.line(&format!("let {tmp}: {} = {};", ty.as_str(), v.expr));
+            temps.push((tmp, v));
+        }
+        for (i, (tmp, _)) in temps.iter().enumerate() {
+            let (var, _) = &tail.vars[i];
+            self.line(&format!("{var} = {tmp};"));
+        }
+        self.line("continue;");
+        Ok(())
+    }
+
+    fn emit_tail_if(
+        &mut self,
+        xs: &[Value],
+        scope: &Scope,
+        tail: &mut LoopTail,
+    ) -> Result<()> {
+        if xs.len() != 4 {
+            return Err(Error::Eval("gpu if: (if cond then else)".into()));
+        }
+        let cond = self.emit(&xs[1], scope)?;
+        if !cond.ty.is_bool() {
+            return Err(Error::Type("gpu if: condition must be bool".into()));
+        }
+        self.line(&format!("if ({}) {{", cond.expr));
+        self.emit_tail_form(&xs[2], scope, tail)?;
+        self.line("} else {");
+        self.emit_tail_form(&xs[3], scope, tail)?;
+        self.line("}");
+        Ok(())
+    }
+
+    fn emit_tail_let(
+        &mut self,
+        xs: &[Value],
+        scope: &Scope,
+        tail: &mut LoopTail,
+    ) -> Result<()> {
+        if xs.len() < 3 {
+            return Err(Error::Eval("gpu let: (let [n v ...] body...)".into()));
+        }
+        let bindings = match &xs[1] {
+            Value::Vector(v) => v,
+            _ => return Err(Error::Eval("gpu let: bindings must be a vector".into())),
+        };
+        if bindings.len() % 2 != 0 {
+            return Err(Error::Eval("gpu let: bindings must be pairs".into()));
+        }
+        let mut cur = scope.clone();
+        let mut i = 0;
+        while i < bindings.len() {
+            let name = match &bindings[i] {
+                Value::Symbol(s) => s.to_string(),
+                _ => return Err(Error::Eval("gpu let: binding name must be symbol".into())),
+            };
+            let val = self.emit(&bindings[i + 1], &cur)?;
+            let bound = self.bind(val);
+            cur.insert(name, bound);
+            i += 2;
+        }
+        self.emit_tail(&xs[2..], &cur, tail)
+    }
+
     fn emit_math_binary(&mut self, xs: &[Value], scope: &Scope, fn_name: &str) -> Result<Val> {
         if xs.len() != 3 {
             return Err(Error::Arity {
@@ -568,6 +852,19 @@ mod tests {
         let wgsl = emit_elementwise("i", "v", &body).expect("emit");
         assert!(wgsl.contains("sin(k_v)"));
         assert!(wgsl.contains("cos(k_v)"));
+    }
+
+    #[test]
+    fn emits_loop_recur_shape() {
+        // Simple summation loop: (loop [i 0 acc 0.0] (if (>= i 10) acc (recur (+ i 1) (+ acc 1.0))))
+        let body = parse(
+            "(loop [i 0 acc 0.0] (if (>= i 10) acc (recur (+ i 1) (+ acc 1.0))))",
+        );
+        let wgsl = emit_elementwise("i", "v", &body).expect("emit");
+        assert!(wgsl.contains("var _lv"), "expected var declarations in:\n{wgsl}");
+        assert!(wgsl.contains("loop {"), "expected loop block in:\n{wgsl}");
+        assert!(wgsl.contains("continue;"), "expected continue in:\n{wgsl}");
+        assert!(wgsl.contains("break;"), "expected break in:\n{wgsl}");
     }
 
     #[test]
