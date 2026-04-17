@@ -56,6 +56,20 @@ fn defn_native_without_return_hint_defaults_ok() {
 }
 
 #[test]
+fn defn_native_loop_recur_via_helper_fn() {
+    // Phase M1.1a: idiomatic loop/recur compiles natively. The emitter
+    // spawns a helper fn in the same module; recur is a tail self-call;
+    // LLVM -O3 TCOs it into a machine-level loop.
+    let src = r#"
+        (defn-native sum-to ^i64 [^i64 n]
+          (loop [i 0 acc 0]
+            (if (> i n) acc (recur (+ i 1) (+ acc i)))))
+        (sum-to 100)
+    "#;
+    assert_eq!(run(src), Value::Int(5050));
+}
+
+#[test]
 fn defn_native_fib_recursive() {
     let src = r#"
         (defn-native fib ^i64 [^i64 n]
@@ -112,12 +126,9 @@ fn defn_native_requires_name_symbol() {
     assert!(res.is_err());
 }
 
-/// Tree-walker fallback accepts f64 signatures. Phase-2 MLIR codegen
-/// restricts to i64 only, so these only run without the `mlir` feature.
-/// Phase 3 lifts this restriction and the gate goes away.
-#[cfg(not(feature = "mlir"))]
+/// f64 now works under both feature paths.
 #[test]
-fn float_hint_parses_tree_walker_only() {
+fn float_hint_parses_and_adds() {
     let src = r#"
         (defn-native plus ^f64 [^f64 a ^f64 b] (+ a b))
         (plus 1.5 2.5)
@@ -125,6 +136,7 @@ fn float_hint_parses_tree_walker_only() {
     assert_eq!(run(src), Value::Float(4.0));
 }
 
+/// Bool at FFI boundary isn't wired yet; tree-walker accepts it.
 #[cfg(not(feature = "mlir"))]
 #[test]
 fn bool_hint_parses_tree_walker_only() {
@@ -135,14 +147,11 @@ fn bool_hint_parses_tree_walker_only() {
     assert_eq!(run(src), Value::Bool(true));
 }
 
-/// With the `mlir` feature on, non-i64 signatures must be rejected at
-/// defn-native time — we don't want silent tree-walker fallback masking
-/// what should be native-compiled code.
+/// With the `mlir` feature on, bool params/return still error — phase-2
+/// doesn't wire them at the FFI boundary (LLVM i1 ABI is finicky).
 #[cfg(feature = "mlir")]
 #[test]
-fn mlir_feature_rejects_non_i64_signatures() {
-    let res_float = run_result(r#"(defn-native plus ^f64 [^f64 a ^f64 b] (+ a b))"#);
-    assert!(res_float.is_err());
+fn mlir_feature_rejects_bool_at_boundary() {
     let res_bool = run_result(r#"(defn-native yes ^bool [^bool x] x)"#);
     assert!(res_bool.is_err());
 }

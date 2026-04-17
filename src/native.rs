@@ -1,12 +1,14 @@
 //! Backend-agnostic representation of a JIT-compiled cljrs function.
 //!
 //! [`NativeFn`] holds a raw code pointer plus its type signature. Any
-//! codegen backend (currently just MLIR; GPU / other backends later) can
+//! codegen backend (currently MLIR; GPU / other backends later) can
 //! produce one by providing an opaque holder that keeps the backing
 //! resources alive while the pointer is in use.
 //!
-//! Phase 2 invocation is restricted to i64-only signatures of arity 0–4.
-//! Phase 3 extends to f64 / bool and higher arities.
+//! Phase-2 invocation scope: homogeneous i64 or f64 signatures, arity
+//! 0–4. Bool is used internally (comparison results / if conditions)
+//! but not as a fn parameter or return type — LLVM's i1 ABI at function
+//! boundaries is platform-wonky; we'll revisit in a later phase.
 
 use std::any::Any;
 use std::sync::Arc;
@@ -19,13 +21,11 @@ pub struct NativeFn {
     pub name: Arc<str>,
     pub arg_types: Vec<PrimType>,
     pub ret_type: PrimType,
-    /// Function pointer as `usize` — kept Send+Sync without unsafe impls
-    /// on this struct. Transmuted to the right `extern "C" fn(...)` at
-    /// call time based on `arg_types`.
+    /// Function pointer as `usize` — Send+Sync without unsafe impls on
+    /// this struct. Transmuted to `extern "C" fn(...)` at call time.
     pub ptr: usize,
-    /// Opaque keep-alive for backing resources (e.g., MLIR ExecutionEngine
-    /// and Context). Must outlive any invocation. `Any + Send + Sync` lets
-    /// any backend slot in its own holder.
+    /// Opaque keep-alive for backing resources (e.g., ExecutionEngine +
+    /// MLIR Context). Must outlive any invocation.
     _holder: Box<dyn Any + Send + Sync>,
 }
 
@@ -47,11 +47,6 @@ impl NativeFn {
     }
 
     /// Invoke the native function from the tree-walker.
-    ///
-    /// Phase-2 rules: every arg must be `Value::Int`, every arg_type must be
-    /// `PrimType::I64`, return type must be `PrimType::I64`. Arity ≤ 4.
-    /// These are the same restrictions the emitter enforces, so anything
-    /// that compiled can be called here.
     pub fn invoke(&self, args: &[Value]) -> Result<Value> {
         if args.len() != self.arg_types.len() {
             return Err(Error::Arity {
@@ -59,68 +54,103 @@ impl NativeFn {
                 got: args.len(),
             });
         }
-        if !matches!(self.ret_type, PrimType::I64) {
+
+        // Homogeneity check: phase-2 only supports all-i64 or all-f64 signatures.
+        let homogeneous = self.arg_types.iter().all(|t| *t == self.ret_type);
+        if !homogeneous {
             return Err(Error::Eval(format!(
-                "native fn: ret type {} not yet supported at call site",
-                self.ret_type.as_str()
+                "native fn `{}`: mixed-type signatures not yet supported \
+                 (args={:?}, ret={:?})",
+                self.name, self.arg_types, self.ret_type
             )));
         }
 
-        let mut ints: Vec<i64> = Vec::with_capacity(args.len());
-        for (i, a) in args.iter().enumerate() {
-            if !matches!(self.arg_types[i], PrimType::I64) {
+        match self.ret_type {
+            PrimType::I64 => invoke_i64(self.ptr, &self.name, args),
+            PrimType::F64 => invoke_f64(self.ptr, &self.name, args),
+            PrimType::Bool => Err(Error::Eval(format!(
+                "native fn `{}`: bool at FFI boundary not yet supported",
+                self.name
+            ))),
+        }
+    }
+}
+
+fn extract_i64(name: &str, idx: usize, v: &Value) -> Result<i64> {
+    match v {
+        Value::Int(n) => Ok(*n),
+        other => Err(Error::Type(format!(
+            "native fn `{name}` arg {idx}: expected int, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+fn extract_f64(name: &str, idx: usize, v: &Value) -> Result<f64> {
+    match v {
+        Value::Float(x) => Ok(*x),
+        // Promote int args when the fn takes floats — matches Clojure's implicit coercion.
+        Value::Int(n) => Ok(*n as f64),
+        other => Err(Error::Type(format!(
+            "native fn `{name}` arg {idx}: expected number, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+fn invoke_i64(ptr: usize, name: &str, args: &[Value]) -> Result<Value> {
+    let mut xs = Vec::with_capacity(args.len());
+    for (i, a) in args.iter().enumerate() {
+        xs.push(extract_i64(name, i, a)?);
+    }
+    // SAFETY: caller of compile_native_fn guarantees the pointer is a valid
+    // JIT-compiled function matching this signature, and the holder keeps
+    // it alive. i64 maps to C's int64_t under SysV / AAPCS, matching
+    // MLIR/LLVM's default lowering.
+    let r: i64 = unsafe {
+        match xs.len() {
+            0 => std::mem::transmute::<usize, extern "C" fn() -> i64>(ptr)(),
+            1 => std::mem::transmute::<usize, extern "C" fn(i64) -> i64>(ptr)(xs[0]),
+            2 => std::mem::transmute::<usize, extern "C" fn(i64, i64) -> i64>(ptr)(xs[0], xs[1]),
+            3 => std::mem::transmute::<usize, extern "C" fn(i64, i64, i64) -> i64>(ptr)(
+                xs[0], xs[1], xs[2],
+            ),
+            4 => std::mem::transmute::<usize, extern "C" fn(i64, i64, i64, i64) -> i64>(ptr)(
+                xs[0], xs[1], xs[2], xs[3],
+            ),
+            n => {
                 return Err(Error::Eval(format!(
-                    "native fn: arg {i} type {} not yet supported",
-                    self.arg_types[i].as_str()
+                    "native fn `{name}`: arity {n} > 4 not supported"
                 )));
             }
-            match a {
-                Value::Int(n) => ints.push(*n),
-                other => {
-                    return Err(Error::Type(format!(
-                        "native fn `{}`: arg {i} expected int, got {}",
-                        self.name,
-                        other.type_name()
-                    )));
-                }
+        }
+    };
+    Ok(Value::Int(r))
+}
+
+fn invoke_f64(ptr: usize, name: &str, args: &[Value]) -> Result<Value> {
+    let mut xs = Vec::with_capacity(args.len());
+    for (i, a) in args.iter().enumerate() {
+        xs.push(extract_f64(name, i, a)?);
+    }
+    // SAFETY: same contract as invoke_i64; f64 matches `double` at the C ABI.
+    let r: f64 = unsafe {
+        match xs.len() {
+            0 => std::mem::transmute::<usize, extern "C" fn() -> f64>(ptr)(),
+            1 => std::mem::transmute::<usize, extern "C" fn(f64) -> f64>(ptr)(xs[0]),
+            2 => std::mem::transmute::<usize, extern "C" fn(f64, f64) -> f64>(ptr)(xs[0], xs[1]),
+            3 => std::mem::transmute::<usize, extern "C" fn(f64, f64, f64) -> f64>(ptr)(
+                xs[0], xs[1], xs[2],
+            ),
+            4 => std::mem::transmute::<usize, extern "C" fn(f64, f64, f64, f64) -> f64>(ptr)(
+                xs[0], xs[1], xs[2], xs[3],
+            ),
+            n => {
+                return Err(Error::Eval(format!(
+                    "native fn `{name}`: arity {n} > 4 not supported"
+                )));
             }
         }
-
-        // SAFETY: caller of compile_native_fn guarantees the pointer is a
-        // valid JIT-compiled function matching the signature we built, and
-        // the holder keeps it alive. i64 maps to C's `int64_t` with the
-        // standard SysV/AAPCS calling convention on both macOS architectures.
-        let result: i64 = unsafe {
-            match ints.len() {
-                0 => {
-                    let f: extern "C" fn() -> i64 = std::mem::transmute(self.ptr);
-                    f()
-                }
-                1 => {
-                    let f: extern "C" fn(i64) -> i64 = std::mem::transmute(self.ptr);
-                    f(ints[0])
-                }
-                2 => {
-                    let f: extern "C" fn(i64, i64) -> i64 = std::mem::transmute(self.ptr);
-                    f(ints[0], ints[1])
-                }
-                3 => {
-                    let f: extern "C" fn(i64, i64, i64) -> i64 =
-                        std::mem::transmute(self.ptr);
-                    f(ints[0], ints[1], ints[2])
-                }
-                4 => {
-                    let f: extern "C" fn(i64, i64, i64, i64) -> i64 =
-                        std::mem::transmute(self.ptr);
-                    f(ints[0], ints[1], ints[2], ints[3])
-                }
-                n => {
-                    return Err(Error::Eval(format!(
-                        "native fn: arity {n} not yet supported (max 4 in phase 2)"
-                    )));
-                }
-            }
-        };
-        Ok(Value::Int(result))
-    }
+    };
+    Ok(Value::Float(r))
 }
