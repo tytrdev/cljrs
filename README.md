@@ -47,11 +47,15 @@ cargo test                  # tree-walker tests (no LLVM required)
 cargo test --features mlir  # adds the MLIR JIT tests
 ```
 
-**Run the live-coded fractal demo** (the thing worth showing):
+**Run a live-coded demo** (the thing worth showing):
 ```bash
-cargo run --release --features demo --bin demo -- demo/fractal.clj
+cargo run --release --features demo --bin demo -- demo/fractal.clj    # Mandelbrot, 60+ fps
+cargo run --release --features demo --bin demo -- demo/raymarch.clj   # 3D SDF raymarcher, ~32 fps
+cargo run --release --features demo --bin demo -- demo/plasma.clj     # demoscene plasma, 130+ fps
 ```
-A 640×480 Mandelbrot opens. 307,200 JIT-compiled pixel calls per frame at ~33 FPS. Edit any number in `demo/fractal.clj`, save, the window reflects the change within one frame.
+Each demo opens an `eframe` window with a side panel of four sliders plus a live FPS HUD. Every slider is threaded into the kernel as an additional `^i64` arg (0..1000); the cljrs code rescales to whatever it wants (iter count, light angle, color cycle, march step, whatever). Edit the `.clj` in your editor, save, and the window picks up the new JIT-compiled version within a frame — *while* you're sliding parameters.
+
+Under the hood: rayon parallelizes across all CPU cores, so 518,400 JIT-compiled pixel calls per frame at 960×540 finish in ~16 ms on Apple Silicon. The CPU rendering is doing real work — no cached framebuffers, no GPU — and it still feels fluid because every pixel call resolves through one `extern "C"` transmute + native fn dispatch, no interpreter frame.
 
 **Run the REPL:**
 ```bash
