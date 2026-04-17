@@ -3,6 +3,8 @@ pub mod codegen;
 pub mod env;
 pub mod error;
 pub mod eval;
+#[cfg(feature = "gpu")]
+pub mod gpu;
 pub mod native;
 pub mod reader;
 pub mod types;

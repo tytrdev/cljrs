@@ -14,6 +14,9 @@ mlir = ["dep:melior"]
 # Windowed live-coded demo (src/bin/demo.rs). Off by default so CI
 # without a display can still build cleanly.
 demo = ["mlir", "dep:eframe", "dep:rayon"]
+# GPU compute via wgpu. Works natively (Metal/Vulkan/DX12) and in the
+# browser via WebGPU. Kernels are compiled from cljrs forms to WGSL.
+gpu = ["dep:wgpu", "dep:pollster", "dep:bytemuck"]
 
 [dependencies]
 # imbl = maintained fork of im. Production-quality persistent HAMT
@@ -27,6 +30,13 @@ melior = { version = "0.27", optional = true }
 eframe = { version = "0.31", optional = true, default-features = false, features = ["default_fonts", "glow"] }
 # Data-parallelism for the demo's pixel loop.
 rayon = { version = "1", optional = true }
+# GPU compute. wgpu = the cross-platform (Metal/Vulkan/DX12/WebGPU)
+# graphics+compute abstraction used by Bevy, Deno, etc. pollster =
+# single-thread futures::block_on replacement so we don't drag in a
+# full async runtime. bytemuck = safe [T] ↔ [u8] casts for buffer IO.
+wgpu = { version = "24", optional = true }
+pollster = { version = "0.4", optional = true }
+bytemuck = { version = "1", optional = true, features = ["derive"] }
 
 [[bin]]
 name = "bench"
