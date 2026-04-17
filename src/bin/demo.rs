@@ -77,6 +77,7 @@ fn main() {
         last_evaled_source: initial_source,
         last_edit_at: Instant::now(),
         save_flash: None,
+        editor_open: true,
     };
 
     let options = eframe::NativeOptions {
@@ -115,6 +116,9 @@ struct DemoApp {
     last_edit_at: Instant,
     /// Transient "saved!" toast shown next to the save button.
     save_flash: Option<Instant>,
+    /// Whether the left editor panel is visible. Toggle with Cmd/Ctrl-E
+    /// or the "< hide editor" / "show editor >" button.
+    editor_open: bool,
 }
 
 impl eframe::App for DemoApp {
@@ -151,6 +155,15 @@ impl eframe::App for DemoApp {
             }
         }
 
+        // Cmd/Ctrl-E toggles the editor panel visibility.
+        let toggle_editor = ctx.input(|i| {
+            i.key_pressed(egui::Key::E)
+                && (i.modifiers.command || i.modifiers.ctrl)
+        });
+        if toggle_editor {
+            self.editor_open = !self.editor_open;
+        }
+
         // Read slider-name hints from env globals if the kernel exported them.
         for i in 0..4 {
             let key = format!("slider-{i}-label");
@@ -159,48 +172,72 @@ impl eframe::App for DemoApp {
             }
         }
 
-        // Left-side panel: the code editor.
-        egui::SidePanel::left("editor")
-            .default_width(460.0)
-            .resizable(true)
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.heading("editor");
-                    ui.separator();
-                    if ui.button("save to disk").clicked() {
-                        if fs::write(&self.path, &self.source).is_ok() {
-                            self.save_flash = Some(Instant::now());
+        // Left-side panel: the code editor. Collapsible.
+        if self.editor_open {
+            egui::SidePanel::left("editor")
+                .default_width(460.0)
+                .resizable(true)
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        if ui.button("◀ hide").clicked() {
+                            self.editor_open = false;
                         }
-                    }
-                    if let Some(when) = self.save_flash {
-                        if when.elapsed() < Duration::from_millis(1500) {
-                            ui.colored_label(egui::Color32::LIGHT_GREEN, "✓ saved");
-                        } else {
-                            self.save_flash = None;
+                        ui.heading("editor");
+                        ui.separator();
+                        if ui.button("save").clicked() {
+                            if fs::write(&self.path, &self.source).is_ok() {
+                                self.save_flash = Some(Instant::now());
+                            }
                         }
-                    }
-                });
-                ui.label(format!("file: {}", self.path.display()));
-                ui.label(egui::RichText::new(
-                    "edits re-eval 300ms after last keystroke. Cmd/Ctrl-S saves.",
-                ).small().weak());
-                ui.separator();
-
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        let response = ui.add_sized(
-                            [ui.available_width(), ui.available_height()],
-                            egui::TextEdit::multiline(&mut self.source)
-                                .code_editor()
-                                .desired_rows(40)
-                                .desired_width(f32::MAX),
-                        );
-                        if response.changed() {
-                            self.last_edit_at = Instant::now();
+                        if let Some(when) = self.save_flash {
+                            if when.elapsed() < Duration::from_millis(1500) {
+                                ui.colored_label(egui::Color32::LIGHT_GREEN, "✓ saved");
+                            } else {
+                                self.save_flash = None;
+                            }
                         }
                     });
-            });
+                    ui.label(format!("file: {}", self.path.display()));
+                    ui.label(egui::RichText::new(
+                        "edits re-eval 300ms after last keystroke. \
+                         Cmd/Ctrl-S saves. Cmd/Ctrl-E toggles this panel.",
+                    ).small().weak());
+                    ui.separator();
+
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            let response = ui.add_sized(
+                                [ui.available_width(), ui.available_height()],
+                                egui::TextEdit::multiline(&mut self.source)
+                                    .code_editor()
+                                    .desired_rows(40)
+                                    .desired_width(f32::MAX),
+                            );
+                            if response.changed() {
+                                self.last_edit_at = Instant::now();
+                            }
+                        });
+                });
+        } else {
+            // A slim collapsed strip with a "show editor" button so the
+            // UI is obviously recoverable.
+            egui::SidePanel::left("editor-toggle")
+                .exact_width(42.0)
+                .resizable(false)
+                .show(ctx, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(8.0);
+                        if ui
+                            .button("▶")
+                            .on_hover_text("show editor (Cmd/Ctrl-E)")
+                            .clicked()
+                        {
+                            self.editor_open = true;
+                        }
+                    });
+                });
+        }
 
         // Right-side panel: sliders + perf HUD.
         egui::SidePanel::right("params")
