@@ -58,6 +58,56 @@ fn wrap_seq(xs: &[Value], as_vector: bool) -> Value {
     }
 }
 
+/// Walk an anon-fn body to find the highest `%N` reference and whether
+/// `%&` is used. Used by `#(...)` to decide the implicit param vector.
+fn scan_anon_params(body: &[Value]) -> (usize, bool) {
+    fn walk(v: &Value, max: &mut usize, rest: &mut bool) {
+        match v {
+            Value::Symbol(s) => {
+                let n = s.as_ref();
+                if n == "%" || n == "%1" {
+                    *max = (*max).max(1);
+                } else if n == "%&" {
+                    *rest = true;
+                } else if let Some(rest_num) = n.strip_prefix('%')
+                    && let Ok(idx) = rest_num.parse::<usize>()
+                    && idx >= 1
+                {
+                    *max = (*max).max(idx);
+                }
+            }
+            Value::List(xs) => {
+                for x in xs.iter() {
+                    walk(x, max, rest);
+                }
+            }
+            Value::Vector(xs) => {
+                for x in xs.iter() {
+                    walk(x, max, rest);
+                }
+            }
+            Value::Map(m) => {
+                for (k, val) in m.iter() {
+                    walk(k, max, rest);
+                    walk(val, max, rest);
+                }
+            }
+            Value::Set(s) => {
+                for x in s.iter() {
+                    walk(x, max, rest);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut max = 0usize;
+    let mut rest = false;
+    for f in body {
+        walk(f, &mut max, &mut rest);
+    }
+    (max, rest)
+}
+
 fn quoted_item(e: &Value) -> Value {
     if let Value::List(inner) = e
         && inner.len() == 2
@@ -171,6 +221,12 @@ impl<'a> Parser<'a> {
                 let form = self.read_form()?;
                 Ok(list_of(vec![sym("__tagged__"), tag, form]))
             }
+            b'#' => self.read_dispatch(),
+            b'@' => {
+                self.pos += 1;
+                let form = self.read_form()?;
+                Ok(list_of(vec![sym("deref"), form]))
+            }
             b':' => self.read_keyword(),
             c if c.is_ascii_digit() => self.read_number(),
             b'-' | b'+' => {
@@ -182,6 +238,76 @@ impl<'a> Parser<'a> {
                 self.read_symbol()
             }
             _ => self.read_symbol(),
+        }
+    }
+
+    /// `#` reader dispatch. Handles:
+    ///   `#{a b c}`  → set literal
+    ///   `#_form`    → discard next form (returns the one after)
+    ///   `#(body)`   → anonymous fn, with `%`, `%1`, `%2`, `%&` params
+    fn read_dispatch(&mut self) -> Result<Value> {
+        self.pos += 1; // consume '#'
+        let next = self
+            .peek()
+            .ok_or_else(|| Error::Read("unexpected eof after '#'".into()))?;
+        match next {
+            b'{' => {
+                self.pos += 1;
+                let items = self.read_seq(b'}')?;
+                Ok(Value::Set(items.into_iter().collect()))
+            }
+            b'_' => {
+                self.pos += 1;
+                // Read and discard the next form.
+                let _ = self.read_form()?;
+                // Then read and return the form after it. If we're inside
+                // a sequence, the caller will see this as the next real item.
+                self.read_form()
+            }
+            b'(' => {
+                self.pos += 1;
+                let body = self.read_seq(b')')?;
+                // Walk body collecting %, %1, %2, ... %& references.
+                let (max_idx, has_rest) = scan_anon_params(&body);
+                let mut params: Vec<Value> = Vec::new();
+                for i in 1..=max_idx {
+                    params.push(sym(&format!("%{i}")));
+                }
+                if has_rest {
+                    params.push(sym("&"));
+                    params.push(sym("%&"));
+                }
+                // Also allow bare `%` → same as `%1`. We leave `%` as an
+                // alias by binding it below.
+                let mut bindings: Vec<Value> = Vec::new();
+                if max_idx >= 1 {
+                    bindings.push(sym("%"));
+                    bindings.push(sym("%1"));
+                }
+                let call = Value::List(Arc::new(body));
+                let body_form = if bindings.is_empty() {
+                    call
+                } else {
+                    list_of(vec![
+                        sym("let"),
+                        Value::Vector(bindings.into_iter().collect()),
+                        call,
+                    ])
+                };
+                let fn_form = list_of(vec![
+                    sym("fn"),
+                    Value::Vector(params.into_iter().collect()),
+                    body_form,
+                ]);
+                Ok(fn_form)
+            }
+            b'\'' => {
+                // #'sym — var reference. We don't have vars yet; treat as quote for now.
+                self.pos += 1;
+                let form = self.read_form()?;
+                Ok(list_of(vec![sym("quote"), form]))
+            }
+            other => Err(Error::Read(format!("unknown reader dispatch #{}", other as char))),
         }
     }
 

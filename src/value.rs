@@ -38,7 +38,29 @@ pub enum Value {
 #[derive(Clone)]
 pub struct Builtin {
     pub name: &'static str,
-    pub f: fn(&[Value]) -> Result<Value>,
+    pub f: Arc<dyn Fn(&[Value]) -> Result<Value> + Send + Sync>,
+}
+
+impl Builtin {
+    pub fn new_static(
+        name: &'static str,
+        f: fn(&[Value]) -> Result<Value>,
+    ) -> Self {
+        Builtin {
+            name,
+            f: Arc::new(f),
+        }
+    }
+
+    pub fn new_closure<F>(name: &'static str, f: F) -> Self
+    where
+        F: Fn(&[Value]) -> Result<Value> + Send + Sync + 'static,
+    {
+        Builtin {
+            name,
+            f: Arc::new(f),
+        }
+    }
 }
 
 pub struct Lambda {

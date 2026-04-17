@@ -91,6 +91,73 @@ fn eval_list(xs: &[Value], env: &Env) -> Result<Value> {
     apply(&f, &args)
 }
 
+/// Clojure semantics: keywords, maps, and sets can be invoked as functions.
+///   (:k m)           — lookup key `:k` in map `m` (nil if missing, 2-arg default supported)
+///   (m :k)           — same, reversed
+///   (m :k default)   — lookup with fallback
+///   (#{1 2 3} x)     — set membership test (returns the member or nil)
+///   (vec i)          — nth into the vector
+fn invoke_collection(f: &Value, args: &[Value]) -> Result<Value> {
+    match f {
+        Value::Keyword(_) | Value::Symbol(_) => {
+            if args.is_empty() || args.len() > 2 {
+                return Err(Error::Arity {
+                    expected: "1 or 2".into(),
+                    got: args.len(),
+                });
+            }
+            let default = args.get(1).cloned().unwrap_or(Value::Nil);
+            match &args[0] {
+                Value::Map(m) => Ok(m.get(f).cloned().unwrap_or(default)),
+                Value::Nil => Ok(default),
+                _ => Ok(default),
+            }
+        }
+        Value::Map(m) => {
+            if args.is_empty() || args.len() > 2 {
+                return Err(Error::Arity {
+                    expected: "1 or 2".into(),
+                    got: args.len(),
+                });
+            }
+            let default = args.get(1).cloned().unwrap_or(Value::Nil);
+            Ok(m.get(&args[0]).cloned().unwrap_or(default))
+        }
+        Value::Set(s) => {
+            if args.len() != 1 {
+                return Err(Error::Arity {
+                    expected: "1".into(),
+                    got: args.len(),
+                });
+            }
+            Ok(if s.contains(&args[0]) {
+                args[0].clone()
+            } else {
+                Value::Nil
+            })
+        }
+        Value::Vector(v) => {
+            if args.len() != 1 {
+                return Err(Error::Arity {
+                    expected: "1".into(),
+                    got: args.len(),
+                });
+            }
+            let i = match &args[0] {
+                Value::Int(n) => *n,
+                _ => return Err(Error::Type("vector invocation: index must be int".into())),
+            };
+            if i < 0 {
+                return Err(Error::Eval(format!("vector lookup: negative index {i}")));
+            }
+            v.get(i as usize)
+                .cloned()
+                .ok_or_else(|| Error::Eval(format!("vector lookup: index {i} out of range")))
+        }
+        _ => Err(Error::Type(format!("not callable: {}", f.type_name()))),
+    }
+}
+
 const SPECIAL_FORMS: &[&str] = &[
     "quote",
     "def",
@@ -140,6 +207,9 @@ pub fn apply(f: &Value, args: &[Value]) -> Result<Value> {
         Value::Builtin(b) => (b.f)(args),
         Value::Fn(lam) => invoke_lambda(lam, args),
         Value::Native(nf) => nf.invoke(args),
+        Value::Keyword(_) | Value::Map(_) | Value::Set(_) | Value::Vector(_) => {
+            invoke_collection(f, args)
+        }
         _ => Err(Error::Type(format!("not callable: {}", f.type_name()))),
     }
 }
