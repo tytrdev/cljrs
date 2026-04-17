@@ -1,9 +1,193 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::env::Env;
 use crate::error::{Error, Result};
 use crate::types::{PrimType, parse_type_name, unwrap_tagged};
 use crate::value::{Lambda, Value};
+
+/// Monotonically increasing counter for fresh symbol names created by
+/// destructuring and auto-gensym. Process-global; collisions with user
+/// code are avoided by prefixing with `__gs_`.
+static FRESH_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+fn fresh_sym(prefix: &str) -> Value {
+    let n = FRESH_COUNTER.fetch_add(1, Ordering::Relaxed);
+    Value::Symbol(Arc::from(format!("__gs_{prefix}_{n}").as_str()))
+}
+
+/// Expand a single binding pattern/expr pair into a flat sequence of
+/// symbol-to-expr pairs suitable for `sf_let` to consume. Handles:
+///   `sym`                          — identity
+///   `[a b c]`                      — positional from a seq, incl. `& rest` and `:as full`
+///   `{:keys [a b]}` / `{:as m}`    — map access, incl. `:or {a default}`
+/// Recurses into nested patterns.
+fn expand_destructure(pattern: &Value, expr: &Value, out: &mut Vec<(Value, Value)>) -> Result<()> {
+    match pattern {
+        Value::Symbol(_) => {
+            out.push((pattern.clone(), expr.clone()));
+            Ok(())
+        }
+        Value::Vector(items) => {
+            let t = fresh_sym("vec");
+            out.push((t.clone(), expr.clone()));
+            // Scan for & rest and :as
+            let mut i = 0usize;
+            let mut position = 0i64;
+            while i < items.len() {
+                let item = &items[i];
+                if let Value::Symbol(s) = item {
+                    if s.as_ref() == "&" {
+                        if i + 1 >= items.len() {
+                            return Err(Error::Eval(
+                                "destructure: '&' must be followed by a symbol".into(),
+                            ));
+                        }
+                        let rest_expr = Value::List(Arc::new(vec![
+                            Value::Symbol(Arc::from("drop")),
+                            Value::Int(position),
+                            t.clone(),
+                        ]));
+                        expand_destructure(&items[i + 1], &rest_expr, out)?;
+                        i += 2;
+                        continue;
+                    }
+                    if s.as_ref() == ":as" {
+                        if i + 1 >= items.len() {
+                            return Err(Error::Eval(
+                                "destructure: ':as' must be followed by a symbol".into(),
+                            ));
+                        }
+                        out.push((items[i + 1].clone(), t.clone()));
+                        i += 2;
+                        continue;
+                    }
+                }
+                // Keyword ':as form (reader produces Keyword, not Symbol)
+                if let Value::Keyword(k) = item
+                    && k.as_ref() == "as"
+                {
+                    if i + 1 >= items.len() {
+                        return Err(Error::Eval(
+                            "destructure: ':as' must be followed by a symbol".into(),
+                        ));
+                    }
+                    out.push((items[i + 1].clone(), t.clone()));
+                    i += 2;
+                    continue;
+                }
+                let getter = Value::List(Arc::new(vec![
+                    Value::Symbol(Arc::from("get")),
+                    t.clone(),
+                    Value::Int(position),
+                    Value::Nil,
+                ]));
+                expand_destructure(item, &getter, out)?;
+                position += 1;
+                i += 1;
+            }
+            Ok(())
+        }
+        Value::Map(pairs) => {
+            let t = fresh_sym("map");
+            out.push((t.clone(), expr.clone()));
+            // Gather :or defaults first (so we can reference them as each binding is expanded).
+            let or_defaults: imbl::HashMap<Value, Value> = pairs
+                .iter()
+                .find_map(|(k, v)| {
+                    if matches!(k, Value::Keyword(s) if s.as_ref() == "or") {
+                        match v {
+                            Value::Map(m) => Some(m.clone()),
+                            _ => None,
+                        }
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_default();
+
+            for (k, v) in pairs.iter() {
+                match k {
+                    Value::Keyword(s) => match s.as_ref() {
+                        "as" => {
+                            out.push((v.clone(), t.clone()));
+                        }
+                        "or" => {} // consumed above
+                        "keys" => {
+                            let Value::Vector(ks) = v else {
+                                return Err(Error::Eval(
+                                    "destructure: :keys must be followed by a vector of symbols"
+                                        .into(),
+                                ));
+                            };
+                            for key_sym in ks.iter() {
+                                let Value::Symbol(name) = key_sym else {
+                                    return Err(Error::Eval(
+                                        "destructure: :keys entries must be symbols".into(),
+                                    ));
+                                };
+                                let kw = Value::Keyword(Arc::clone(name));
+                                let default = or_defaults.get(key_sym).cloned().unwrap_or(Value::Nil);
+                                let getter = Value::List(Arc::new(vec![
+                                    Value::Symbol(Arc::from("get")),
+                                    t.clone(),
+                                    kw,
+                                    default,
+                                ]));
+                                out.push((key_sym.clone(), getter));
+                            }
+                        }
+                        "strs" => {
+                            let Value::Vector(ks) = v else {
+                                return Err(Error::Eval(
+                                    "destructure: :strs must be followed by a vector".into(),
+                                ));
+                            };
+                            for key_sym in ks.iter() {
+                                let Value::Symbol(name) = key_sym else {
+                                    return Err(Error::Eval(
+                                        "destructure: :strs entries must be symbols".into(),
+                                    ));
+                                };
+                                let ks = Value::Str(Arc::clone(name));
+                                let default = or_defaults.get(key_sym).cloned().unwrap_or(Value::Nil);
+                                let getter = Value::List(Arc::new(vec![
+                                    Value::Symbol(Arc::from("get")),
+                                    t.clone(),
+                                    ks,
+                                    default,
+                                ]));
+                                out.push((key_sym.clone(), getter));
+                            }
+                        }
+                        _ => {
+                            return Err(Error::Eval(format!(
+                                "destructure: unsupported map-pattern key :{}",
+                                s.as_ref()
+                            )));
+                        }
+                    },
+                    _ => {
+                        // {pattern key-expr} — bind pattern to (get t key-expr [default])
+                        let default = or_defaults.get(k).cloned().unwrap_or(Value::Nil);
+                        let getter = Value::List(Arc::new(vec![
+                            Value::Symbol(Arc::from("get")),
+                            t.clone(),
+                            v.clone(),
+                            default,
+                        ]));
+                        expand_destructure(k, &getter, out)?;
+                    }
+                }
+            }
+            Ok(())
+        }
+        _ => Err(Error::Eval(format!(
+            "destructure: unsupported pattern {}",
+            pattern.type_name()
+        ))),
+    }
+}
 
 pub fn eval(form: &Value, env: &Env) -> Result<Value> {
     match form {
@@ -337,16 +521,21 @@ fn sf_let(args: &[Value], env: &Env) -> Result<Value> {
     if bindings.len() % 2 != 0 {
         return Err(Error::Eval("let bindings must have even count".into()));
     }
-    let mut cur = env.clone();
+    // Expand destructuring into a flat list of (symbol, expr) pairs.
+    let mut expanded: Vec<(Value, Value)> = Vec::with_capacity(bindings.len() / 2);
     let mut i = 0;
     while i < bindings.len() {
-        let name = match &bindings[i] {
-            Value::Symbol(s) => Arc::clone(s),
-            _ => return Err(Error::Eval("let binding name must be a symbol".into())),
-        };
-        let val = eval(&bindings[i + 1], &cur)?;
-        cur = cur.push_scope(vec![(name, val)]);
+        expand_destructure(&bindings[i], &bindings[i + 1], &mut expanded)?;
         i += 2;
+    }
+    let mut cur = env.clone();
+    for (pat, expr) in expanded {
+        let name = match pat {
+            Value::Symbol(s) => s,
+            _ => return Err(Error::Eval("let: post-destructure name must be symbol".into())),
+        };
+        let val = eval(&expr, &cur)?;
+        cur = cur.push_scope(vec![(name, val)]);
     }
     let mut result = Value::Nil;
     for f in &args[1..] {
@@ -382,6 +571,10 @@ fn sf_fn(args: &[Value], env: &Env, explicit_name: Option<Arc<str>>) -> Result<V
 
     let mut params: Vec<Arc<str>> = Vec::new();
     let mut variadic: Option<Arc<str>> = None;
+    // Destructuring patterns get replaced with fresh param names; the
+    // original pattern gets rebound at the top of the body via a synthetic
+    // `let`. We accumulate those rebindings here in source order.
+    let mut destructure_pairs: Vec<Value> = Vec::new();
     let mut i = 0;
     while i < params_vec.len() {
         match &params_vec[i] {
@@ -391,17 +584,48 @@ fn sf_fn(args: &[Value], env: &Env, explicit_name: Option<Arc<str>>) -> Result<V
                 }
                 variadic = match &params_vec[i + 1] {
                     Value::Symbol(r) => Some(r.clone()),
-                    _ => return Err(Error::Eval("& rest name must be a symbol".into())),
+                    Value::Vector(_) | Value::Map(_) => {
+                        // destructure the rest arg: `& [a b]` or `& {:keys [a b]}`
+                        let fresh = match fresh_sym("rest") {
+                            Value::Symbol(s) => s,
+                            _ => unreachable!(),
+                        };
+                        destructure_pairs.push(params_vec[i + 1].clone());
+                        destructure_pairs.push(Value::Symbol(Arc::clone(&fresh)));
+                        Some(fresh)
+                    }
+                    _ => return Err(Error::Eval("& rest name must be a symbol or pattern".into())),
                 };
                 break;
             }
             Value::Symbol(s) => params.push(s.clone()),
-            _ => return Err(Error::Eval("fn params must be symbols".into())),
+            Value::Vector(_) | Value::Map(_) => {
+                // Destructuring pattern: allocate a fresh param name and
+                // schedule a destructuring let around the body.
+                let fresh = match fresh_sym("p") {
+                    Value::Symbol(s) => s,
+                    _ => unreachable!(),
+                };
+                destructure_pairs.push(params_vec[i].clone());
+                destructure_pairs.push(Value::Symbol(Arc::clone(&fresh)));
+                params.push(fresh);
+            }
+            _ => return Err(Error::Eval("fn params must be symbols or patterns".into())),
         }
         i += 1;
     }
 
-    let body: Vec<Value> = args[body_start..].to_vec();
+    let mut body: Vec<Value> = args[body_start..].to_vec();
+    if !destructure_pairs.is_empty() {
+        // Wrap the body in a single `let` that rebinds each pattern.
+        // The original body forms become the let body.
+        let let_bindings = Value::Vector(destructure_pairs.into_iter().collect());
+        let mut let_form: Vec<Value> = Vec::with_capacity(2 + body.len());
+        let_form.push(Value::Symbol(Arc::from("let")));
+        let_form.push(let_bindings);
+        let_form.extend(body);
+        body = vec![Value::List(Arc::new(let_form))];
+    }
     Ok(Value::Fn(Arc::new(Lambda {
         params,
         variadic,
