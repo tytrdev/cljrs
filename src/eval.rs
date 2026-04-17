@@ -203,7 +203,7 @@ pub fn eval(form: &Value, env: &Env) -> Result<Value> {
         | Value::Native(_)
         | Value::Atom(_) => Ok(form.clone()),
         #[cfg(feature = "gpu")]
-        Value::GpuKernel(_) => Ok(form.clone()),
+        Value::GpuKernel(_) | Value::GpuPixelKernel(_) => Ok(form.clone()),
         Value::Symbol(s) => env.lookup(s),
         Value::Vector(xs) => {
             let mut out: imbl::Vector<Value> = imbl::Vector::new();
@@ -249,6 +249,8 @@ fn eval_list(xs: &[Value], env: &Env) -> Result<Value> {
             "defn-native" => return sf_defn_native(&xs[1..], env),
             #[cfg(feature = "gpu")]
             "defn-gpu" => return sf_defn_gpu(&xs[1..], env),
+            #[cfg(feature = "gpu")]
+            "defn-gpu-pixel" => return sf_defn_gpu_pixel(&xs[1..], env),
             "defmacro" => return sf_defmacro(&xs[1..], env),
             "macroexpand" => return sf_macroexpand(&xs[1..], env),
             "macroexpand-1" => return sf_macroexpand_1(&xs[1..], env),
@@ -358,6 +360,7 @@ const SPECIAL_FORMS: &[&str] = &[
     "defn",
     "defn-native",
     "defn-gpu",
+    "defn-gpu-pixel",
     "defmacro",
     "macroexpand",
     "macroexpand-1",
@@ -1040,6 +1043,59 @@ fn sf_defn_gpu(args: &[Value], env: &Env) -> Result<Value> {
         .map_err(|e| Error::Eval(format!("defn-gpu `{name}`: {e}")))?;
     let kernel = crate::gpu::GpuKernel::from_wgsl(name.to_string(), wgsl);
     let v = Value::GpuKernel(Arc::new(kernel));
+    env.define_global(&name, v.clone());
+    Ok(v)
+}
+
+/// `(defn-gpu-pixel name [x y w h t-ms s0 s1 s2 s3] body...)` —
+/// compile a 2D pixel-shader kernel. Body returns a packed u32 color
+/// (0x00RRGGBB). Params are all i32; no type hints needed (they're
+/// fixed by the ABI). The kernel is stored as a `Value::GpuPixelKernel`
+/// and dispatched by `render_frame` at the host level (not via normal
+/// `apply` — pixel kernels need uniforms + 2D dispatch).
+#[cfg(feature = "gpu")]
+fn sf_defn_gpu_pixel(args: &[Value], env: &Env) -> Result<Value> {
+    if args.len() < 3 {
+        return Err(Error::Arity { expected: ">= 3".into(), got: args.len() });
+    }
+    let name = match &args[0] {
+        Value::Symbol(s) => Arc::clone(s),
+        _ => return Err(Error::Eval("defn-gpu-pixel: requires a name symbol".into())),
+    };
+    let params_vec = match &args[1] {
+        Value::Vector(v) => v,
+        _ => return Err(Error::Eval("defn-gpu-pixel: expected [x y w h t s0 s1 s2 s3]".into())),
+    };
+    if params_vec.len() != 9 {
+        return Err(Error::Eval(
+            "defn-gpu-pixel: param vector must be exactly [x y width height t-ms s0 s1 s2 s3]".into(),
+        ));
+    }
+    let mut names: Vec<String> = Vec::with_capacity(9);
+    for p in params_vec.iter() {
+        // Accept bare symbols or tagged `^i32 sym` for consistency; the
+        // tag is ignored because the ABI is fixed.
+        let sym = if let Some((_, inner)) = unwrap_tagged(p) { inner } else { p };
+        match sym {
+            Value::Symbol(s) => names.push(s.to_string()),
+            _ => return Err(Error::Eval("defn-gpu-pixel: params must be symbols".into())),
+        }
+    }
+    let param_refs: [&str; 9] = std::array::from_fn(|i| names[i].as_str());
+
+    let body: Value = if args.len() == 3 {
+        args[2].clone()
+    } else {
+        let mut do_form = Vec::with_capacity(args.len() - 1);
+        do_form.push(Value::Symbol(Arc::from("do")));
+        do_form.extend(args[2..].iter().cloned());
+        Value::List(Arc::new(do_form))
+    };
+
+    let wgsl = crate::gpu::emit::emit_pixel(&param_refs, &body)
+        .map_err(|e| Error::Eval(format!("defn-gpu-pixel `{name}`: {e}")))?;
+    let kernel = crate::gpu::GpuPixelKernel::from_wgsl(name.to_string(), wgsl);
+    let v = Value::GpuPixelKernel(Arc::new(kernel));
     env.define_global(&name, v.clone());
     Ok(v)
 }

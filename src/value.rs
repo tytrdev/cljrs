@@ -43,6 +43,11 @@ pub enum Value {
     /// vector of f32s. Internally dispatches via wgpu.
     #[cfg(feature = "gpu")]
     GpuKernel(Arc<crate::gpu::GpuKernel>),
+    /// Compiled 2D pixel-shader kernel from `defn-gpu-pixel`. Not
+    /// callable via normal `apply` — the host's render loop calls
+    /// `render_frame` with width/height/t/sliders.
+    #[cfg(feature = "gpu")]
+    GpuPixelKernel(Arc<crate::gpu::GpuPixelKernel>),
 }
 
 #[derive(Clone)]
@@ -106,6 +111,8 @@ impl Value {
             Value::Atom(_) => "atom",
             #[cfg(feature = "gpu")]
             Value::GpuKernel(_) => "gpu-kernel",
+            #[cfg(feature = "gpu")]
+            Value::GpuPixelKernel(_) => "gpu-pixel-kernel",
         }
     }
 
@@ -169,6 +176,8 @@ impl Value {
             Value::Atom(a) => format!("#<atom {}>", a.read().unwrap().to_pr_string()),
             #[cfg(feature = "gpu")]
             Value::GpuKernel(k) => format!("#<gpu-kernel {}>", k.name),
+            #[cfg(feature = "gpu")]
+            Value::GpuPixelKernel(k) => format!("#<gpu-pixel-kernel {}>", k.name),
         }
     }
 }
@@ -229,6 +238,8 @@ impl PartialEq for Value {
             (Atom(a), Atom(b)) => Arc::ptr_eq(a, b),
             #[cfg(feature = "gpu")]
             (GpuKernel(a), GpuKernel(b)) => Arc::ptr_eq(a, b),
+            #[cfg(feature = "gpu")]
+            (GpuPixelKernel(a), GpuPixelKernel(b)) => Arc::ptr_eq(a, b),
             _ => false,
         }
     }
@@ -333,6 +344,11 @@ impl Hash for Value {
             #[cfg(feature = "gpu")]
             Value::GpuKernel(k) => {
                 16u8.hash(state);
+                (Arc::as_ptr(k) as usize).hash(state);
+            }
+            #[cfg(feature = "gpu")]
+            Value::GpuPixelKernel(k) => {
+                17u8.hash(state);
                 (Arc::as_ptr(k) as usize).hash(state);
             }
         }

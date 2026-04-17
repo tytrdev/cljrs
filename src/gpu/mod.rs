@@ -233,6 +233,173 @@ struct Params {
     _pad: [u32; 3],
 }
 
+/// Uniform block shared by every pixel kernel. Mirrored in WGSL by the
+/// `Params` struct in `emit.rs`. Keep in sync — size and field order
+/// matter for the binding.
+#[repr(C)]
+#[derive(Copy, Clone, Pod, Zeroable)]
+pub struct PixelParams {
+    pub width: u32,
+    pub height: u32,
+    pub t_ms: i32,
+    pub s0: i32,
+    pub s1: i32,
+    pub s2: i32,
+    pub s3: i32,
+    pub _pad: i32,
+}
+
+/// A compiled pixel-shader-style GPU kernel. Renders a W×H u32 buffer
+/// where each element is 0x00RRGGBB. Caches its pipeline after first
+/// dispatch (amortizes compile cost over frames).
+pub struct GpuPixelKernel {
+    pub name: String,
+    pub wgsl: String,
+    pipeline: std::sync::Mutex<Option<PixelPipeline>>,
+}
+
+struct PixelPipeline {
+    pipeline: wgpu::ComputePipeline,
+    bgl: wgpu::BindGroupLayout,
+}
+
+impl GpuPixelKernel {
+    pub fn from_wgsl(name: impl Into<String>, wgsl: impl Into<String>) -> Self {
+        GpuPixelKernel {
+            name: name.into(),
+            wgsl: wgsl.into(),
+            pipeline: std::sync::Mutex::new(None),
+        }
+    }
+
+    fn ensure_pipeline(&self, gpu: &Gpu) -> Result<(), String> {
+        let mut guard = self.pipeline.lock().unwrap();
+        if guard.is_some() {
+            return Ok(());
+        }
+        let module = gpu
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some(&self.name),
+                source: wgpu::ShaderSource::Wgsl(self.wgsl.as_str().into()),
+            });
+        let bgl = gpu.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("cljrs-gpu::px-bgl"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let pl = gpu.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("cljrs-gpu::px-pl"),
+            bind_group_layouts: &[&bgl],
+            push_constant_ranges: &[],
+        });
+        let pipeline = gpu.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some(&self.name),
+            layout: Some(&pl),
+            module: &module,
+            entry_point: Some("main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            cache: None,
+        });
+        *guard = Some(PixelPipeline { pipeline, bgl });
+        Ok(())
+    }
+
+    /// Render one frame into a fresh Vec<u32>. Each element is the
+    /// packed pixel color (0x00RRGGBB). Callers flatten to RGBA bytes
+    /// for display. Rendering reuses GPU buffers for the readback path
+    /// per call — this is fine up to ~4K. For real-time at 4K you'd
+    /// want buffer pooling; out of scope for v0.
+    pub fn render_frame(
+        &self,
+        gpu: &Gpu,
+        params: PixelParams,
+    ) -> Result<Vec<u32>, String> {
+        self.ensure_pipeline(gpu)?;
+        let guard = self.pipeline.lock().unwrap();
+        let cached = guard.as_ref().expect("ensured");
+
+        let n = (params.width as usize) * (params.height as usize);
+        let bytes = (n * std::mem::size_of::<u32>()) as u64;
+        let uniform = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("cljrs-gpu::px-uniform"),
+            contents: bytemuck::bytes_of(&params),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let dst = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("cljrs-gpu::px-dst"),
+            size: bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let readback = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("cljrs-gpu::px-readback"),
+            size: bytes,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let bg = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &cached.bgl,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniform.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: dst.as_entire_binding(),
+                },
+            ],
+        });
+        let mut enc = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        {
+            let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: None,
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&cached.pipeline);
+            pass.set_bind_group(0, &bg, &[]);
+            let gx = (params.width + 7) / 8;
+            let gy = (params.height + 7) / 8;
+            pass.dispatch_workgroups(gx, gy, 1);
+        }
+        enc.copy_buffer_to_buffer(&dst, 0, &readback, 0, bytes);
+        gpu.queue.submit(std::iter::once(enc.finish()));
+        let slice = readback.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |res| { tx.send(res).ok(); });
+        gpu.device.poll(wgpu::Maintain::Wait);
+        rx.recv().map_err(|e| format!("map recv: {e}"))?
+            .map_err(|e| format!("map async: {e}"))?;
+        let mapped = slice.get_mapped_range();
+        let out: Vec<u32> = bytemuck::cast_slice(&mapped).to_vec();
+        drop(mapped);
+        readback.unmap();
+        Ok(out)
+    }
+}
+
 /// A compiled GPU kernel — holds its WGSL source and a lazily-built
 /// pipeline. The pipeline is cached after first dispatch.
 pub struct GpuKernel {

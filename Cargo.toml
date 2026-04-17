@@ -17,6 +17,8 @@ demo = ["mlir", "dep:eframe", "dep:rayon"]
 # GPU compute via wgpu. Works natively (Metal/Vulkan/DX12) and in the
 # browser via WebGPU. Kernels are compiled from cljrs forms to WGSL.
 gpu = ["dep:wgpu", "dep:pollster", "dep:bytemuck"]
+# GPU live-coded demo binary. Needs both the GPU path and eframe.
+gpu-demo = ["gpu", "dep:eframe"]
 
 [dependencies]
 # imbl = maintained fork of im. Production-quality persistent HAMT
@@ -51,6 +53,16 @@ required-features = ["demo"]
 name = "record"
 path = "src/bin/record.rs"
 required-features = ["demo"]
+
+[[bin]]
+name = "gpu-demo"
+path = "src/bin/gpu_demo.rs"
+required-features = ["gpu-demo"]
+
+[[bin]]
+name = "gpu-record"
+path = "src/bin/gpu_record.rs"
+required-features = ["gpu-demo"]
 
 [profile.release]
 lto = "fat"

@@ -142,6 +142,70 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     Ok(out)
 }
 
+/// Emit a 2D pixel-shading kernel. The body is given the pixel
+/// coordinates + uniforms (width, height, t-ms, 4 sliders), and must
+/// return a u32 packed as 0x00RRGGBB. The host calls it as a 2D
+/// workgroup grid and reads back a width*height u32 buffer.
+///
+/// `params`: the cljrs symbols the body uses, in order:
+///   [x y width height t-ms s0 s1 s2 s3]
+/// The host binds these to their corresponding slots.
+pub fn emit_pixel(params: &[&str; 9], body: &Value) -> Result<String> {
+    let mut ctx = Ctx::new();
+    let mut scope = Scope::new();
+    scope.insert(params[0].into(), Val { expr: "k_x".into(), ty: Ty::I32 });
+    scope.insert(params[1].into(), Val { expr: "k_y".into(), ty: Ty::I32 });
+    scope.insert(params[2].into(), Val { expr: "i32(params.width)".into(), ty: Ty::I32 });
+    scope.insert(params[3].into(), Val { expr: "i32(params.height)".into(), ty: Ty::I32 });
+    scope.insert(params[4].into(), Val { expr: "params.t_ms".into(), ty: Ty::I32 });
+    scope.insert(params[5].into(), Val { expr: "params.s0".into(), ty: Ty::I32 });
+    scope.insert(params[6].into(), Val { expr: "params.s1".into(), ty: Ty::I32 });
+    scope.insert(params[7].into(), Val { expr: "params.s2".into(), ty: Ty::I32 });
+    scope.insert(params[8].into(), Val { expr: "params.s3".into(), ty: Ty::I32 });
+
+    let result = ctx.emit(body, &scope)?;
+    // Body must return i32 or u32 — it's the packed pixel color.
+    let final_expr = match result.ty {
+        Ty::U32 => result.expr,
+        Ty::I32 => format!("u32({})", result.expr),
+        _ => {
+            return Err(Error::Type(format!(
+                "gpu pixel body must return i32 or u32 (packed 0xRRGGBB), got {}",
+                result.ty.as_str()
+            )));
+        }
+    };
+
+    let mut out = String::from(
+        r#"struct Params {
+  width: u32,
+  height: u32,
+  t_ms: i32,
+  s0: i32,
+  s1: i32,
+  s2: i32,
+  s3: i32,
+  _pad: i32,
+};
+
+@group(0) @binding(0) var<uniform>           params: Params;
+@group(0) @binding(1) var<storage, read_write> dst: array<u32>;
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    if (gid.x >= params.width || gid.y >= params.height) { return; }
+    let k_x: i32 = i32(gid.x);
+    let k_y: i32 = i32(gid.y);
+"#,
+    );
+    out.push_str(&ctx.body);
+    out.push_str(&format!(
+        "    dst[gid.y * params.width + gid.x] = {final_expr};\n"
+    ));
+    out.push_str("}\n");
+    Ok(out)
+}
+
 struct Ctx {
     body: String,
     counter: usize,
@@ -243,6 +307,15 @@ impl Ctx {
             "min" => self.emit_math_binary(xs, scope, "min"),
             "max" => self.emit_math_binary(xs, scope, "max"),
             "pow" => self.emit_math_binary(xs, scope, "pow"),
+            "mod" | "rem" => self.emit_infix_binary(xs, scope, "%"),
+            "bit-and" => self.emit_bitwise(xs, scope, "&"),
+            "bit-or" => self.emit_bitwise(xs, scope, "|"),
+            "bit-xor" => self.emit_bitwise(xs, scope, "^"),
+            "bit-shift-left" => self.emit_bitwise(xs, scope, "<<"),
+            "bit-shift-right" => self.emit_bitwise(xs, scope, ">>"),
+            "u32" => self.emit_cast(xs, scope, Ty::U32),
+            "i32" => self.emit_cast(xs, scope, Ty::I32),
+            "f32" => self.emit_cast(xs, scope, Ty::F32),
             _ => Err(Error::Eval(format!(
                 "gpu: `{head}` not supported — \
                  allowed: arith, cmp, if, let, do, math intrinsics"
@@ -395,6 +468,45 @@ impl Ctx {
         Ok(Val {
             expr: format!("{fn_name}({})", v.expr),
             ty: Ty::F32,
+        })
+    }
+
+    fn emit_infix_binary(&mut self, xs: &[Value], scope: &Scope, op: &str) -> Result<Val> {
+        if xs.len() != 3 {
+            return Err(Error::Arity {
+                expected: "2".into(),
+                got: xs.len() - 1,
+            });
+        }
+        let a = self.emit(&xs[1], scope)?;
+        let b = self.emit(&xs[2], scope)?;
+        if a.ty != b.ty {
+            return Err(Error::Type(format!("gpu {op}: mixed types")));
+        }
+        Ok(Val {
+            expr: format!("({} {op} {})", a.expr, b.expr),
+            ty: a.ty,
+        })
+    }
+
+    fn emit_bitwise(&mut self, xs: &[Value], scope: &Scope, op: &str) -> Result<Val> {
+        if xs.len() != 3 {
+            return Err(Error::Arity {
+                expected: "2".into(),
+                got: xs.len() - 1,
+            });
+        }
+        let a = self.emit(&xs[1], scope)?;
+        let b = self.emit(&xs[2], scope)?;
+        if !a.ty.is_int() || !b.ty.is_int() {
+            return Err(Error::Type(format!("gpu {op}: operands must be integers")));
+        }
+        if a.ty != b.ty {
+            return Err(Error::Type(format!("gpu {op}: mixed int types")));
+        }
+        Ok(Val {
+            expr: format!("({} {op} {})", a.expr, b.expr),
+            ty: a.ty,
         })
     }
 

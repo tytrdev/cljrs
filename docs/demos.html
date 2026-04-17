@@ -22,6 +22,40 @@
       up in the demo binary (<code>cargo run --release --features demo --bin demo -- demo/fractal.clj</code>).
     </p>
 
+    <h3>GPU kernels (defn-gpu-pixel)</h3>
+    <p>
+      These kernels compile from cljrs source to WGSL and run on the GPU
+      via wgpu — Metal on macOS, Vulkan on Linux, DX12 on Windows, and
+      WebGPU in supported browsers. Rendered 252–517 fps on an
+      integrated Apple M3 at 640×360.
+    </p>
+    <div class="demo-gallery">
+      <figure>
+        <video src="./media/gpu_plasma.mp4" autoplay muted loop playsinline></video>
+        <figcaption>Plasma · GPU (<code>demo_gpu/plasma.clj</code>) · 252 fps render</figcaption>
+      </figure>
+      <figure>
+        <video src="./media/gpu_waves.mp4" autoplay muted loop playsinline></video>
+        <figcaption>Wave interference · GPU (<code>demo_gpu/waves.clj</code>) · 402 fps render</figcaption>
+      </figure>
+      <figure>
+        <video src="./media/gpu_mandelbrot.mp4" autoplay muted loop playsinline></video>
+        <figcaption>Mandelbrot · GPU (<code>demo_gpu/mandelbrot.clj</code>) · 517 fps render</figcaption>
+      </figure>
+    </div>
+    <p>
+      Run locally with:
+      <code>cargo run --release --features gpu-demo --bin gpu-demo -- demo_gpu/plasma.clj</code>.
+      Edit the .clj file while the window is open — the kernel
+      recompiles on save (same Bret-Victor loop as CPU).
+    </p>
+
+    <h3>CPU kernels (defn-native)</h3>
+    <p>
+      21 kernels below, each written in cljrs and JIT-compiled to
+      native code via MLIR + LLVM. Rendered via <code>bin/record</code>.
+    </p>
+
     <div class="demo-gallery">
       <figure>
         <video src="./media/fractal.mp4" autoplay muted loop playsinline></video>
