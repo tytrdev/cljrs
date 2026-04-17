@@ -11,22 +11,41 @@
 //! bench/gpu_pytorch.py. Run this, run those, paste the results side by
 //! side.
 
+use std::hint::black_box;
 use std::time::Instant;
 
 use cljrs::gpu::{Gpu, GpuKernel};
 
+// Grid-stride loop: a fixed dispatch of N workgroups handles any input
+// size by having each thread walk the buffer with stride = total
+// threads. WebGPU caps workgroups at 65535 per dim so we can't just
+// dispatch n/64 workgroups once n gets large (>~4M).
 const WGSL: &str = r#"
 @group(0) @binding(0) var<storage, read>       src: array<f32>;
 @group(0) @binding(1) var<storage, read_write> dst: array<f32>;
 
-@compute @workgroup_size(64)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let i = gid.x;
-    if (i >= arrayLength(&src)) { return; }
-    let v = src[i];
-    dst[i] = sin(v) + cos(v * 2.0);
+@compute @workgroup_size(256)
+fn main(
+    @builtin(global_invocation_id) gid: vec3<u32>,
+    @builtin(num_workgroups)       nwg: vec3<u32>,
+) {
+    let stride = nwg.x * 256u;
+    let n = arrayLength(&src);
+    var i = gid.x;
+    loop {
+        if (i >= n) { break; }
+        let v = src[i];
+        dst[i] = sin(v) + cos(v * 2.0);
+        i = i + stride;
+    }
 }
 "#;
+
+// Same kernel, hand-written plain-Rust reference. Used to double-check
+// the GPU results and so we can time CPU-vs-GPU side by side.
+fn cpu_sincos(src: &[f32]) -> Vec<f32> {
+    src.iter().map(|&v| v.sin() + (v * 2.0).cos()).collect()
+}
 
 fn main() {
     let gpu = Gpu::new().unwrap_or_else(|e| {
@@ -44,8 +63,8 @@ fn main() {
     let iters = 10;
 
     println!(
-        "{:>10}  {:>12}  {:>14}  {:>12}  {:>12}",
-        "N", "first (ms)", "steady (ms)", "GB/s", "GFLOP/s"
+        "{:>10}  {:>12}  {:>14}  {:>10}  {:>10}  {:>8}",
+        "N", "first (ms)", "gpu steady (ms)", "gpu GB/s", "cpu (ms)", "speedup"
     );
     for &n in &sizes {
         let mut input = vec![0.0f32; n];
@@ -72,17 +91,31 @@ fn main() {
         samples.sort_by(|a, b| a.partial_cmp(b).unwrap());
         let steady_ms = samples[samples.len() / 2];
 
-        // Throughput: we read 4n + write 4n = 8n bytes. 2 transcendentals
-        // + 1 mul + 1 add per elem ≈ 4 flops (transcendentals are 1+
-        // but one-op "flop" is the conservative count).
+        // Throughput: we read 4n + write 4n = 8n bytes per call.
         let bytes = 8.0 * n as f64;
         let gbps = bytes / (steady_ms * 1e6);
-        let flops = 4.0 * n as f64;
-        let gflops = flops / (steady_ms * 1e6);
+
+        // CPU baseline: single-threaded, standard-library trig. Apples
+        // to apples vs the GPU (same algorithm, same precision).
+        // Warmup once, then median of a few runs — keep it quick at
+        // large N since this gets slow.
+        let cpu_iters = if n >= 10_000_000 { 3 } else { 5 };
+        black_box(cpu_sincos(black_box(&input)));
+        let mut cpu_samples = Vec::with_capacity(cpu_iters);
+        for _ in 0..cpu_iters {
+            let t0 = Instant::now();
+            let result = cpu_sincos(black_box(&input));
+            black_box(&result);
+            cpu_samples.push(t0.elapsed().as_secs_f64() * 1000.0);
+        }
+        cpu_samples.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let cpu_ms = cpu_samples[cpu_samples.len() / 2];
+
+        let speedup = cpu_ms / steady_ms;
 
         println!(
-            "{:>10}  {:>12.2}  {:>14.2}  {:>12.2}  {:>12.2}",
-            n, first_ms, steady_ms, gbps, gflops
+            "{:>10}  {:>12.2}  {:>14.2}  {:>10.2}  {:>10.2}  {:>7.1}×",
+            n, first_ms, steady_ms, gbps, cpu_ms, speedup
         );
     }
 }

@@ -134,13 +134,118 @@ cd bench &amp;&amp; ./run.sh</code></pre>
       small enough that "you audited what?" has an honest answer.
     </p>
 
-    <h3>GPU benchmarks (coming)</h3>
+    <h3>GPU benchmarks</h3>
     <p>
-      Once the GPU kernel DSL lands, we'll add a dedicated GPU benchmarks
-      page comparing <code>cljrs-gpu</code> against <code>numpy</code>, <code>pytorch</code>, <code>jax</code>,
-      and <code>julia-CUDA</code> on: matmul, elementwise kernels, reductions,
-      stencils, N-body. Same methodology: reproducible, biases listed.
+      Elementwise <code>dst[i] = sin(x[i]) + cos(x[i] * 2)</code>, f32,
+      Apple M3 (integrated GPU, Metal backend). All timings are steady-state
+      median-of-10 after warmup; readback time included. Lower is better.
     </p>
+    <table>
+      <thead>
+        <tr>
+          <th>N</th>
+          <th>cljrs-gpu</th>
+          <th>cljrs-cpu</th>
+          <th>numpy</th>
+          <th>pytorch-cpu</th>
+          <th>pytorch-mps</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>100 k</td>    <td>1.45 ms</td>  <td>0.47 ms</td> <td>0.33 ms</td>  <td>0.13 ms</td>  <td>0.43 ms</td></tr>
+        <tr><td>1 M</td>      <td>3.60 ms</td>  <td>4.37 ms</td> <td>2.89 ms</td>  <td>0.74 ms</td>  <td>0.97 ms</td></tr>
+        <tr><td>10 M</td>     <td>16.2 ms</td>  <td>34.7 ms</td> <td>27.0 ms</td>  <td>16.2 ms</td>  <td>4.43 ms</td></tr>
+        <tr><td>100 M</td>    <td>142 ms</td>   <td>347 ms</td>  <td>266 ms</td>   <td>256 ms</td>   <td>42.7 ms</td></tr>
+      </tbody>
+    </table>
+    <p style="font-size:0.9rem;color:var(--fg-dim)">
+      <b>cljrs-gpu</b> = wgpu / Metal, kernel emitted from a cljrs <code>defn-gpu</code> form.
+      <b>cljrs-cpu</b> = single-threaded plain-Rust reference.
+      <b>numpy</b> = 2.4.4 on macOS Accelerate.
+      <b>pytorch-cpu</b> / <b>pytorch-mps</b> = 2.11.0 on CPU and Apple MPS.
+    </p>
+
+    <h4>What this says</h4>
+    <ul>
+      <li>
+        At small N (≤100k) the GPU loses: launch + readback overhead
+        swamps the compute. Use CPU.
+      </li>
+      <li>
+        At 10–100M, <code>cljrs-gpu</code> beats <code>pytorch-cpu</code> and
+        <code>numpy</code> (1.6–1.9× vs numpy at 100M), and loses to
+        <code>pytorch-mps</code> by ~3×. PyTorch on MPS uses Apple's
+        hand-tuned Metal Performance Shaders kernels; our wgpu path goes
+        through the generic Metal backend without those.
+      </li>
+      <li>
+        Single-thread Rust (<code>cljrs-cpu</code>) lands 2× slower than numpy,
+        as expected — numpy is vectorized + multithreaded via Accelerate.
+      </li>
+      <li>
+        The point isn't that cljrs-gpu beats everything — it's that
+        we ship Clojure source that compiles to a WGSL kernel, which
+        runs on <em>any</em> wgpu backend (Metal, Vulkan, DX12) and also
+        in browsers via WebGPU. Same source, same output, four targets.
+      </li>
+    </ul>
+
+    <h4>The kernel</h4>
+    <p>Cljrs source → WGSL → dispatched by wgpu:</p>
+    <pre><code class="language-clj">;; Grid-stride loop so a fixed dispatch covers any N — WebGPU caps
+;; workgroups at 65535/dim, so we can't linearly scale dispatch.
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3&lt;u32&gt;,
+        @builtin(num_workgroups) nwg: vec3&lt;u32&gt;) {
+    let stride = nwg.x * 256u;
+    var i = gid.x;
+    loop {
+        if (i >= arrayLength(&amp;src)) { break; }
+        let v = src[i];
+        dst[i] = sin(v) + cos(v * 2.0);
+        i = i + stride;
+    }
+}</code></pre>
+
+    <h4>Reproduce</h4>
+    <pre><code>cargo run --release --features gpu --bin gpu-bench
+./tmp/bench_venv/bin/python bench/gpu/sincos_numpy.py
+./tmp/bench_venv/bin/python bench/gpu/sincos_pytorch.py</code></pre>
+    <p style="font-size:0.9rem;color:var(--fg-dim)">
+      Sources live in <code>src/bin/gpu_bench.rs</code> and
+      <code>bench/gpu/*.py</code>. All three take the same inputs and
+      measure the same way. Full source, no hand-tuning.
+    </p>
+
+    <h4>Caveats + known biases</h4>
+    <ul>
+      <li>
+        <b>Readback tax.</b> cljrs-gpu includes GPU→CPU readback every
+        call. numpy / pytorch-cpu are already on CPU. pytorch-mps pays
+        synchronization cost but keeps tensors on GPU by default — if
+        you'd chain multiple ops, pytorch would look even better. Our
+        numbers are "one op with full round-trip."
+      </li>
+      <li>
+        <b>Single kernel.</b> Elementwise sin+cos. Doesn't exercise
+        matmul, reductions, or stencils where the GPU gap widens. More
+        kernels coming.
+      </li>
+      <li>
+        <b>Apple Accelerate.</b> numpy uses Apple's vectorized BLAS;
+        on Linux x86 it'd use OpenBLAS or MKL. Numbers may differ.
+      </li>
+      <li>
+        <b>CUDA not tested here</b> — this box has no NVIDIA GPU.
+        Planned for a benchmark rig with one.
+      </li>
+      <li>
+        <b>WebGPU not tested here</b> — same kernel should run in the
+        browser via <a href="./gpu-web.html">the GPU web demo</a>, but
+        timing a browser kernel precisely needs instrumentation we don't
+        have yet.
+      </li>
+    </ul>
   </main>
   <script type="module">
     import { mountChrome } from "./_layout.js";

@@ -71,13 +71,18 @@ impl Gpu {
                 .await
                 .ok_or_else(|| "no compatible GPU adapter found".to_string())?;
             let adapter_info = adapter.get_info();
+            // Pull in the adapter's actual limits (e.g. Apple M3 supports
+            // buffers well above wgpu's conservative 256MB default). Keeps
+            // every feature we compile for without demanding optional
+            // GPU features.
+            let limits = adapter.limits();
             let (device, queue) = adapter
                 .request_device(
                     &wgpu::DeviceDescriptor {
                         label: Some("cljrs-gpu"),
                         required_features: wgpu::Features::empty(),
-                        required_limits: wgpu::Limits::default(),
-                        memory_hints: wgpu::MemoryHints::default(),
+                        required_limits: limits,
+                        memory_hints: wgpu::MemoryHints::Performance,
                     },
                     None,
                 )
@@ -857,7 +862,16 @@ fn run_cached(gpu: &Gpu, cached: &CachedPipeline, input: &[f32]) -> Result<Vec<f
         });
         pass.set_pipeline(&cached.pipeline);
         pass.set_bind_group(0, &bind_group, &[]);
-        let groups = ((n as u32) + 63) / 64;
+        // WebGPU caps workgroup count at 65535 per dimension. For
+        // buffers larger than ~4M elements (at workgroup_size 64) a
+        // single-dim dispatch can't cover everything, so we cap the
+        // dispatch and expect the kernel to use a grid-stride loop
+        // (each thread walks the array with stride = total threads).
+        // Kernels that don't grid-stride and process >4M elements
+        // will silently under-compute — fix them to stride if you hit
+        // this. 16384 workgroups × wg_size = plenty of parallelism.
+        let needed = ((n as u32) + 63) / 64;
+        let groups = needed.min(16384);
         pass.dispatch_workgroups(groups, 1, 1);
     }
     encoder.copy_buffer_to_buffer(&dst_buf, 0, &readback, 0, bytes);
