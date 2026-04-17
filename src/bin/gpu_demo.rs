@@ -167,7 +167,10 @@ impl eframe::App for GpuDemo {
                     s3: self.sliders[3],
                     _pad: 0,
                 };
-                match kernel.render_frame(&self.gpu, params) {
+                // TAA blend alpha: 0.22 ≈ ~5-frame effective averaging.
+                // Small enough to kill boundary flicker, large enough
+                // that continuous zoom motion doesn't smear visibly.
+                match kernel.render_frame_taa(&self.gpu, params, 0.22) {
                     Ok(buf) => {
                         unpack_rgba(&buf, &mut self.rgba);
                         self.last_error = None;

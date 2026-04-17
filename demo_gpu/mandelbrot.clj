@@ -44,12 +44,16 @@
         v0          (/ (- (* 2.0 (/ (f32 y) fh)) 1.0) zoom)
         base-re     (+ cx (* u0 aspect))
         base-im     (+ cy v0)
-        ;; Four offsets: (-0.25, -0.25), (+0.25, -0.25), (-0.25, +0.25), (+0.25, +0.25)
-        q           (* 0.25 aspect)
+        ;; Rotated-grid 4x AA sample offsets. Same sample count as
+        ;; axis-aligned (2×2) but covers edges at more angles, so fine
+        ;; detail at the escape boundary reads cleaner. Positions come
+        ;; from the industry-standard "4 rooks" pattern:
+        ;;   (-0.375, -0.125), (+0.125, -0.375),
+        ;;   (-0.125, +0.375), (+0.375, +0.125)
         ;; Per-sample smooth-escape value. Stores it + 1 - log2(log2(|z|²)).
         ;; For `in-set` pixels we use max-iter-f (black via palette).
-        s1v (let [c-re (+ base-re (* px-size (- q)))
-                  c-im (+ base-im (* py-size -0.25))]
+        s1v (let [c-re (+ base-re (* px-size (* -0.375 aspect)))
+                  c-im (+ base-im (* py-size -0.125))]
               (loop [z-re c-re z-im c-im it (i32 0)]
                 (if (>= it max-iter) max-iter-f
                   (let [r2 (+ (* z-re z-re) (* z-im z-im))]
@@ -60,8 +64,8 @@
                       (recur (+ (- (* z-re z-re) (* z-im z-im)) c-re)
                              (+ (* 2.0 (* z-re z-im)) c-im)
                              (+ it (i32 1))))))))
-        s2v (let [c-re (+ base-re (* px-size q))
-                  c-im (+ base-im (* py-size -0.25))]
+        s2v (let [c-re (+ base-re (* px-size (* 0.125 aspect)))
+                  c-im (+ base-im (* py-size -0.375))]
               (loop [z-re c-re z-im c-im it (i32 0)]
                 (if (>= it max-iter) max-iter-f
                   (let [r2 (+ (* z-re z-re) (* z-im z-im))]
@@ -70,8 +74,8 @@
                       (recur (+ (- (* z-re z-re) (* z-im z-im)) c-re)
                              (+ (* 2.0 (* z-re z-im)) c-im)
                              (+ it (i32 1))))))))
-        s3v (let [c-re (+ base-re (* px-size (- q)))
-                  c-im (+ base-im (* py-size 0.25))]
+        s3v (let [c-re (+ base-re (* px-size (* -0.125 aspect)))
+                  c-im (+ base-im (* py-size 0.375))]
               (loop [z-re c-re z-im c-im it (i32 0)]
                 (if (>= it max-iter) max-iter-f
                   (let [r2 (+ (* z-re z-re) (* z-im z-im))]
@@ -80,8 +84,8 @@
                       (recur (+ (- (* z-re z-re) (* z-im z-im)) c-re)
                              (+ (* 2.0 (* z-re z-im)) c-im)
                              (+ it (i32 1))))))))
-        s4v (let [c-re (+ base-re (* px-size q))
-                  c-im (+ base-im (* py-size 0.25))]
+        s4v (let [c-re (+ base-re (* px-size (* 0.375 aspect)))
+                  c-im (+ base-im (* py-size 0.125))]
               (loop [z-re c-re z-im c-im it (i32 0)]
                 (if (>= it max-iter) max-iter-f
                   (let [r2 (+ (* z-re z-re) (* z-im z-im))]

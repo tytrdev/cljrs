@@ -233,6 +233,20 @@ struct Params {
     _pad: [u32; 3],
 }
 
+/// Mirrors WGSL's `struct BlendParams { alpha: f32, _pad: vec3<f32> }`.
+/// vec3 aligns to 16 bytes, so `alpha` (offset 0) gets 12 bytes of
+/// padding before the vec3 (offset 16, size 12). Struct stride rounds
+/// up to 32 bytes. Getting this wrong produces a wgpu validation error
+/// ("buffer is bound with size 16 where shader expects 32").
+#[repr(C)]
+#[derive(Copy, Clone, Pod, Zeroable)]
+struct BlendUniform {
+    alpha: f32,
+    _pad_pre: [f32; 3],
+    _pad_vec: [f32; 3],
+    _pad_post: f32,
+}
+
 /// Uniform block shared by every pixel kernel. Mirrored in WGSL by the
 /// `Params` struct in `emit.rs`. Keep in sync — size and field order
 /// matter for the binding.
@@ -251,12 +265,60 @@ pub struct PixelParams {
 
 /// A compiled pixel-shader-style GPU kernel. Renders a W×H u32 buffer
 /// where each element is 0x00RRGGBB. Caches its pipeline after first
-/// dispatch (amortizes compile cost over frames).
+/// dispatch (amortizes compile cost over frames). Optionally maintains
+/// a history buffer for temporal anti-aliasing.
 pub struct GpuPixelKernel {
     pub name: String,
     pub wgsl: String,
     pipeline: std::sync::Mutex<Option<PixelPipeline>>,
+    taa: std::sync::Mutex<Option<TaaState>>,
 }
+
+/// Persistent state for temporal AA. History buffer + blend pipeline.
+/// Lives on the kernel, rebuilt if resolution changes.
+struct TaaState {
+    width: u32,
+    height: u32,
+    history: wgpu::Buffer,
+    blend_pipeline: wgpu::ComputePipeline,
+    blend_bgl: wgpu::BindGroupLayout,
+    /// t_ms from the previous frame. Used to detect discontinuities
+    /// (e.g. auto-loop reset) — if t jumps backward, we clear history.
+    last_t_ms: i32,
+}
+
+/// Built-in WGSL: EMA blend of `current` with `history`. Writes result
+/// into both `history` (for next frame) and an output buffer. Split 8-bit
+/// channels so we can lerp independently.
+const BLEND_WGSL: &str = r#"
+struct BlendParams { alpha: f32, _pad: vec3<f32> };
+
+@group(0) @binding(0) var<storage, read>       current: array<u32>;
+@group(0) @binding(1) var<storage, read_write> history: array<u32>;
+@group(0) @binding(2) var<storage, read_write> out_buf: array<u32>;
+@group(0) @binding(3) var<uniform>             blend_params: BlendParams;
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if (i >= arrayLength(&current)) { return; }
+    let c = current[i];
+    let h = history[i];
+    let cr = f32((c >> 16u) & 0xffu);
+    let cg = f32((c >> 8u)  & 0xffu);
+    let cb = f32(c & 0xffu);
+    let hr = f32((h >> 16u) & 0xffu);
+    let hg = f32((h >> 8u)  & 0xffu);
+    let hb = f32(h & 0xffu);
+    let a = blend_params.alpha;
+    let nr = u32(clamp(a * cr + (1.0 - a) * hr, 0.0, 255.0));
+    let ng = u32(clamp(a * cg + (1.0 - a) * hg, 0.0, 255.0));
+    let nb = u32(clamp(a * cb + (1.0 - a) * hb, 0.0, 255.0));
+    let packed = (nr << 16u) | (ng << 8u) | nb;
+    history[i] = packed;
+    out_buf[i] = packed;
+}
+"#;
 
 struct PixelPipeline {
     pipeline: wgpu::ComputePipeline,
@@ -269,7 +331,256 @@ impl GpuPixelKernel {
             name: name.into(),
             wgsl: wgsl.into(),
             pipeline: std::sync::Mutex::new(None),
+            taa: std::sync::Mutex::new(None),
         }
+    }
+
+    fn ensure_taa(&self, gpu: &Gpu, width: u32, height: u32) {
+        let mut guard = self.taa.lock().unwrap();
+        let need_rebuild = match &*guard {
+            Some(s) => s.width != width || s.height != height,
+            None => true,
+        };
+        if !need_rebuild {
+            return;
+        }
+        let bytes = (width as u64) * (height as u64) * 4;
+        let history = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("cljrs-gpu::taa-history"),
+            size: bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        // Zero the history so first blend doesn't pick up garbage.
+        gpu.queue.write_buffer(&history, 0, &vec![0u8; bytes as usize]);
+        let module = gpu.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("cljrs-gpu::taa-blend"),
+            source: wgpu::ShaderSource::Wgsl(BLEND_WGSL.into()),
+        });
+        let bgl = gpu.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("cljrs-gpu::taa-bgl"),
+            entries: &[
+                // current (read-only storage)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // history (read-write storage)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // out_buf (read-write storage)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // blend_params (uniform)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let pl = gpu.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("cljrs-gpu::taa-pl"),
+            bind_group_layouts: &[&bgl],
+            push_constant_ranges: &[],
+        });
+        let pipeline = gpu.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("cljrs-gpu::taa-blend"),
+            layout: Some(&pl),
+            module: &module,
+            entry_point: Some("main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            cache: None,
+        });
+        *guard = Some(TaaState {
+            width,
+            height,
+            history,
+            blend_pipeline: pipeline,
+            blend_bgl: bgl,
+            last_t_ms: i32::MIN,
+        });
+    }
+
+    /// Render a frame with temporal anti-aliasing.
+    ///
+    /// Approach: render the kernel as usual, then blend its output with
+    /// a persistent "history" buffer using exponential moving average
+    /// (new = alpha * current + (1 - alpha) * history). Over N frames
+    /// this gives an effective sample count of ~1/alpha, at no extra
+    /// per-frame kernel cost beyond one cheap blend pass.
+    ///
+    /// `alpha` in [0, 1]: 1.0 = no TAA (just current frame), 0.1 ≈ 10
+    /// frames of averaging. For a smoothly zooming fractal 0.15..0.3 is
+    /// a sweet spot — enough averaging to kill aliasing flicker without
+    /// visible motion smear at typical zoom rates.
+    ///
+    /// If `params.t_ms` jumps backward (e.g. loop reset), history is
+    /// automatically cleared so the new cycle starts clean.
+    pub fn render_frame_taa(
+        &self,
+        gpu: &Gpu,
+        params: PixelParams,
+        alpha: f32,
+    ) -> Result<Vec<u32>, String> {
+        self.ensure_pipeline(gpu)?;
+        self.ensure_taa(gpu, params.width, params.height);
+        let pipe_guard = self.pipeline.lock().unwrap();
+        let cached = pipe_guard.as_ref().expect("ensured");
+        let mut taa_guard = self.taa.lock().unwrap();
+        let taa = taa_guard.as_mut().expect("ensured");
+
+        // Detect time discontinuity (loop reset): clear history.
+        let reset = params.t_ms + 1000 < taa.last_t_ms;
+        if reset {
+            let bytes = (taa.width as u64) * (taa.height as u64) * 4;
+            gpu.queue.write_buffer(&taa.history, 0, &vec![0u8; bytes as usize]);
+        }
+        taa.last_t_ms = params.t_ms;
+        // On very first frame (still implies history=0), use alpha=1.0.
+        let effective_alpha = if reset { 1.0_f32 } else { alpha };
+
+        let n = (params.width as usize) * (params.height as usize);
+        let bytes = (n * std::mem::size_of::<u32>()) as u64;
+
+        // Kernel's own uniforms + current (output) buffer.
+        let uniform = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("cljrs-gpu::px-uniform"),
+            contents: bytemuck::bytes_of(&params),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let current = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("cljrs-gpu::taa-current"),
+            size: bytes,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+        let output = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("cljrs-gpu::taa-output"),
+            size: bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let readback = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("cljrs-gpu::taa-readback"),
+            size: bytes,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // Kernel pass: write into `current`.
+        let kernel_bg = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &cached.bgl,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniform.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: current.as_entire_binding(),
+                },
+            ],
+        });
+
+        // Blend pass uniforms.
+        let blend_params = BlendUniform {
+            alpha: effective_alpha,
+            _pad_pre: [0.0; 3],
+            _pad_vec: [0.0; 3],
+            _pad_post: 0.0,
+        };
+        let blend_uniform = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("cljrs-gpu::taa-blend-uniform"),
+            contents: bytemuck::bytes_of(&blend_params),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let blend_bg = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &taa.blend_bgl,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: current.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: taa.history.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: output.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: blend_uniform.as_entire_binding(),
+                },
+            ],
+        });
+
+        let mut enc = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        {
+            let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("taa::kernel"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&cached.pipeline);
+            pass.set_bind_group(0, &kernel_bg, &[]);
+            let gx = (params.width + 7) / 8;
+            let gy = (params.height + 7) / 8;
+            pass.dispatch_workgroups(gx, gy, 1);
+        }
+        {
+            let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("taa::blend"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&taa.blend_pipeline);
+            pass.set_bind_group(0, &blend_bg, &[]);
+            let groups = ((n as u32) + 63) / 64;
+            pass.dispatch_workgroups(groups, 1, 1);
+        }
+        enc.copy_buffer_to_buffer(&output, 0, &readback, 0, bytes);
+        gpu.queue.submit(std::iter::once(enc.finish()));
+        let slice = readback.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |res| { tx.send(res).ok(); });
+        gpu.device.poll(wgpu::Maintain::Wait);
+        rx.recv().map_err(|e| format!("map recv: {e}"))?
+            .map_err(|e| format!("map async: {e}"))?;
+        let mapped = slice.get_mapped_range();
+        let out: Vec<u32> = bytemuck::cast_slice(&mapped).to_vec();
+        drop(mapped);
+        readback.unmap();
+        Ok(out)
     }
 
     fn ensure_pipeline(&self, gpu: &Gpu) -> Result<(), String> {

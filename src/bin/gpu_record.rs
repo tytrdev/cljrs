@@ -153,7 +153,8 @@ fn main() {
             s2: a.sliders[2], s3: a.sliders[3],
             _pad: 0,
         };
-        match kernel.render_frame(&gpu, params) {
+        // Use TAA for smoother video. Matches the live demo's settings.
+        match kernel.render_frame_taa(&gpu, params, 0.22) {
             Ok(buf) => {
                 for (i, &c) in buf.iter().enumerate() {
                     let o = i * 4;
