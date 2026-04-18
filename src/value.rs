@@ -45,6 +45,16 @@ pub enum Value {
     /// dispatch-value to method-fn map. Callable via `apply` like
     /// any other fn.
     Multi(Arc<MultiFn>),
+    /// Deferred sequence with a zero-arg thunk. `first`/`rest`/`seq`
+    /// force it on demand; repeated access uses the cached result.
+    /// Supports infinite sequences when consumers (`take`, etc.)
+    /// walk via first/rest instead of eager collection.
+    LazySeq(Arc<LazySeq>),
+    /// Cons cell: a head element prepended to a tail that may be any
+    /// seq-like value (including a LazySeq). Created by `cons` when
+    /// the tail isn't an eager collection. Walking via first/rest is
+    /// the only correct way to consume; `seq_items` chases the tail.
+    Cons(Arc<Value>, Arc<Value>),
     /// Compiled GPU kernel from `defn-gpu`. Called as a normal fn: takes
     /// one arg (an f32 buffer = vector/list of numbers) and returns a
     /// vector of f32s. Internally dispatches via wgpu.
@@ -102,6 +112,44 @@ pub struct MultiFn {
     pub methods: RwLock<imbl::HashMap<Value, Value>>,
 }
 
+/// Memoized deferred seq. Created by `(lazy-seq body)` which stores the
+/// body as a 0-arg fn thunk. `force` invokes the thunk exactly once;
+/// subsequent forces return the cached value.
+pub struct LazySeq {
+    state: std::sync::Mutex<LazyState>,
+}
+
+enum LazyState {
+    Pending(Value), // 0-arg callable
+    Forced(Value),  // result of the callable (a seq or nil)
+}
+
+impl LazySeq {
+    pub fn new_thunk(thunk: Value) -> Self {
+        LazySeq {
+            state: std::sync::Mutex::new(LazyState::Pending(thunk)),
+        }
+    }
+    /// Realize one step of the lazy seq, returning the inner seq (list,
+    /// vector, nil, or another LazySeq). Caches on first force.
+    pub fn force(&self) -> Result<Value> {
+        // Grab the thunk out (if pending), release the lock, run it,
+        // re-acquire and store. Lets the thunk recursively evaluate
+        // without reentering the same mutex.
+        let thunk = {
+            let guard = self.state.lock().unwrap();
+            match &*guard {
+                LazyState::Forced(v) => return Ok(v.clone()),
+                LazyState::Pending(t) => t.clone(),
+            }
+        };
+        let v = crate::eval::apply(&thunk, &[])?;
+        let mut guard = self.state.lock().unwrap();
+        *guard = LazyState::Forced(v.clone());
+        Ok(v)
+    }
+}
+
 impl Value {
     pub fn truthy(&self) -> bool {
         !matches!(self, Value::Nil | Value::Bool(false))
@@ -127,6 +175,8 @@ impl Value {
             Value::Atom(_) => "atom",
             Value::Regex(_) => "regex",
             Value::Multi(_) => "multi",
+            Value::LazySeq(_) => "lazy-seq",
+            Value::Cons(_, _) => "cons",
             #[cfg(feature = "gpu")]
             Value::GpuKernel(_) => "gpu-kernel",
             #[cfg(feature = "gpu")]
@@ -194,6 +244,8 @@ impl Value {
             Value::Atom(a) => format!("#<atom {}>", a.read().unwrap().to_pr_string()),
             Value::Regex(r) => format!("#\"{}\"", r.as_str()),
             Value::Multi(m) => format!("#<multi {}>", m.name),
+            Value::LazySeq(_) => "#<lazy-seq>".to_string(),
+            Value::Cons(h, t) => format!("(cons {} {})", h.to_pr_string(), t.to_pr_string()),
             #[cfg(feature = "gpu")]
             Value::GpuKernel(k) => format!("#<gpu-kernel {}>", k.name),
             #[cfg(feature = "gpu")]
@@ -258,6 +310,8 @@ impl PartialEq for Value {
             (Atom(a), Atom(b)) => Arc::ptr_eq(a, b),
             (Regex(a), Regex(b)) => a.as_str() == b.as_str(),
             (Multi(a), Multi(b)) => Arc::ptr_eq(a, b),
+            (LazySeq(a), LazySeq(b)) => Arc::ptr_eq(a, b),
+            (Cons(ah, at), Cons(bh, bt)) => ah == bh && at == bt,
             #[cfg(feature = "gpu")]
             (GpuKernel(a), GpuKernel(b)) => Arc::ptr_eq(a, b),
             #[cfg(feature = "gpu")]
@@ -370,6 +424,15 @@ impl Hash for Value {
             Value::Multi(m) => {
                 19u8.hash(state);
                 (Arc::as_ptr(m) as usize).hash(state);
+            }
+            Value::LazySeq(l) => {
+                20u8.hash(state);
+                (Arc::as_ptr(l) as usize).hash(state);
+            }
+            Value::Cons(h, t) => {
+                21u8.hash(state);
+                h.hash(state);
+                t.hash(state);
             }
             #[cfg(feature = "gpu")]
             Value::GpuKernel(k) => {

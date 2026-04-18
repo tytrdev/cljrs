@@ -279,6 +279,33 @@
             specs)
      (quote ~name)))
 
+;; ---------- lazy sequences -----------------------------------------------
+;; (lazy-seq body) defers `body` until first/rest touches it. Works with
+;; take, first, rest, empty? and composes for infinite sequences.
+
+(defmacro lazy-seq
+  [& body]
+  `(__lazy-seq (fn [] (do ~@body))))
+
+;; Infinite seq: x, f(x), f(f(x)), ...
+(defn iterate [f x]
+  (lazy-seq (cons x (iterate f (f x)))))
+
+;; Infinite seq of (f) calls. `f` must be side-effecting or constant.
+(defn repeatedly [f]
+  (lazy-seq (cons (f) (repeatedly f))))
+
+;; Infinite cycle of a collection's elements. The recursive walker is
+;; defined as a top-level helper since we don't have letfn yet.
+(defn cycle-step [xs original]
+  (lazy-seq
+    (if (empty? xs)
+      (cycle-step original original)
+      (cons (first xs) (cycle-step (rest xs) original)))))
+
+(defn cycle [coll]
+  (cycle-step coll coll))
+
 ;; ---------- small utility fns --------------------------------------------
 
 (defn inc-all [xs] (mapv inc xs))

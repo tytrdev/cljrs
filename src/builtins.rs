@@ -205,7 +205,47 @@ fn core_fns() -> Vec<(&'static str, fn(&[Value]) -> Result<Value>)> {
         ("re-matches", re_matches_fn),
         ("re-seq", re_seq_fn),
         ("gensym", gensym_fn),
+        ("__lazy-seq", __lazy_seq_fn),
+        ("force-seq", force_seq_fn),
+        ("realized?", realized_q),
     ]
+}
+
+// ---- Lazy sequences ----------------------------------------------------
+
+/// Internal: wraps a 0-arg fn thunk in a Value::LazySeq. The public
+/// surface is the `(lazy-seq body...)` prelude macro which expands to
+/// `(__lazy-seq (fn [] body))`.
+fn __lazy_seq_fn(args: &[Value]) -> Result<Value> {
+    if args.len() != 1 {
+        return Err(Error::Arity { expected: "1".into(), got: args.len() });
+    }
+    Ok(Value::LazySeq(Arc::new(crate::value::LazySeq::new_thunk(args[0].clone()))))
+}
+
+/// Force a lazy-seq (returning its underlying head), or pass through
+/// for already-eager collections. Mostly useful for tests.
+fn force_seq_fn(args: &[Value]) -> Result<Value> {
+    if args.len() != 1 {
+        return Err(Error::Arity { expected: "1".into(), got: args.len() });
+    }
+    resolve_seq(&args[0])
+}
+
+fn realized_q(args: &[Value]) -> Result<Value> {
+    Ok(Value::Bool(!matches!(&args[0], Value::LazySeq(_))))
+}
+
+/// Force a (possibly nested) lazy-seq down to a concrete head: the
+/// first non-LazySeq value. Returns nil / list / vector / set / map.
+fn resolve_seq(v: &Value) -> Result<Value> {
+    let mut cur = v.clone();
+    loop {
+        match cur {
+            Value::LazySeq(l) => cur = l.force()?,
+            other => return Ok(other),
+        }
+    }
 }
 
 /// (gensym) / (gensym prefix) — produce a fresh unique symbol. Used
@@ -1580,14 +1620,16 @@ fn first_fn(args: &[Value]) -> Result<Value> {
             got: args.len(),
         });
     }
-    match &args[0] {
+    let v = resolve_seq(&args[0])?;
+    match &v {
         Value::Nil => Ok(Value::Nil),
         Value::List(v) => Ok(v.first().cloned().unwrap_or(Value::Nil)),
         Value::Vector(v) => Ok(v.front().cloned().unwrap_or(Value::Nil)),
         Value::Set(s) => Ok(s.iter().next().cloned().unwrap_or(Value::Nil)),
+        Value::Cons(h, _) => Ok((**h).clone()),
         _ => Err(Error::Type(format!(
             "first on non-sequence: {}",
-            args[0].type_name()
+            v.type_name()
         ))),
     }
 }
@@ -1599,7 +1641,8 @@ fn rest_fn(args: &[Value]) -> Result<Value> {
             got: args.len(),
         });
     }
-    match &args[0] {
+    let v = resolve_seq(&args[0])?;
+    match &v {
         Value::Nil => Ok(Value::List(Arc::new(Vec::new()))),
         Value::List(v) => Ok(if v.is_empty() {
             Value::List(Arc::new(Vec::new()))
@@ -1610,9 +1653,10 @@ fn rest_fn(args: &[Value]) -> Result<Value> {
             let items: Vec<Value> = v.iter().skip(1).cloned().collect();
             Ok(Value::List(Arc::new(items)))
         }
+        Value::Cons(_, t) => Ok((**t).clone()),
         _ => Err(Error::Type(format!(
             "rest on non-sequence: {}",
-            args[0].type_name()
+            v.type_name()
         ))),
     }
 }
@@ -1624,10 +1668,20 @@ fn cons_fn(args: &[Value]) -> Result<Value> {
             got: args.len(),
         });
     }
-    let mut out = Vec::new();
-    out.push(args[0].clone());
-    out.extend(seq_items(&args[1])?);
-    Ok(Value::List(Arc::new(out)))
+    // For lazy tails / cons cells, return another Cons cell so the
+    // tail isn't forced. For eager collections, prepend into a list.
+    match &args[1] {
+        Value::LazySeq(_) | Value::Cons(_, _) => Ok(Value::Cons(
+            Arc::new(args[0].clone()),
+            Arc::new(args[1].clone()),
+        )),
+        _ => {
+            let mut out = Vec::new();
+            out.push(args[0].clone());
+            out.extend(seq_items(&args[1])?);
+            Ok(Value::List(Arc::new(out)))
+        }
+    }
 }
 
 fn list_fn(args: &[Value]) -> Result<Value> {
@@ -1783,13 +1837,15 @@ fn empty_q(args: &[Value]) -> Result<Value> {
             got: args.len(),
         });
     }
-    Ok(Value::Bool(match &args[0] {
+    let v = resolve_seq(&args[0])?;
+    Ok(Value::Bool(match &v {
         Value::Nil => true,
         Value::List(v) => v.is_empty(),
         Value::Vector(v) => v.is_empty(),
         Value::Map(m) => m.is_empty(),
         Value::Set(s) => s.is_empty(),
         Value::Str(s) => s.is_empty(),
+        Value::Cons(_, _) => false,
         _ => false,
     }))
 }
@@ -1943,9 +1999,26 @@ fn take_fn(args: &[Value]) -> Result<Value> {
         });
     }
     let n = to_i64(&args[0])?.max(0) as usize;
-    let coll = as_seq(&args[1])?;
-    let taken: Vec<Value> = coll.iter().take(n).cloned().collect();
-    Ok(Value::List(Arc::new(taken)))
+    // Walk via first/rest so infinite lazy seqs don't get eagerly
+    // flattened. One force per element taken, bounded by n.
+    let mut out = Vec::with_capacity(n);
+    let mut cur = args[1].clone();
+    for _ in 0..n {
+        let resolved = resolve_seq(&cur)?;
+        let done = match &resolved {
+            Value::Nil => true,
+            Value::List(v) => v.is_empty(),
+            Value::Vector(v) => v.is_empty(),
+            Value::Set(s) => s.is_empty(),
+            _ => false,
+        };
+        if done {
+            break;
+        }
+        out.push(first_fn(std::slice::from_ref(&resolved))?);
+        cur = rest_fn(std::slice::from_ref(&resolved))?;
+    }
+    Ok(Value::List(Arc::new(out)))
 }
 
 fn drop_fn(args: &[Value]) -> Result<Value> {
