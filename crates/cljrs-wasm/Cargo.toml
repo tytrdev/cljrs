@@ -13,6 +13,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 cljrs = { path = "../.." }
+cljrs-physics = { path = "../cljrs-physics" }
 wasm-bindgen = "0.2"
 console_error_panic_hook = "0.1"
 

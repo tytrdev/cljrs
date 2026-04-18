@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Physics</title>
+  <link rel="stylesheet" href="./style.css">
+  <style>
+    .phys-wrap { display: flex; gap: 1rem; flex-wrap: wrap; }
+    .phys-stage {
+      background: #0f1016;
+      border: 1px solid var(--border, #333);
+      border-radius: 4px;
+      flex: 0 0 auto;
+    }
+    .phys-stage canvas { display: block; }
+    .phys-col { flex: 1 1 320px; min-width: 0; }
+    .phys-col textarea {
+      width: 100%;
+      min-height: 340px;
+      font-family: ui-monospace, Menlo, Consolas, monospace;
+      font-size: 0.8rem;
+      background: #0b0c10;
+      color: #d6dae0;
+      border: 1px solid var(--border, #333);
+      border-radius: 4px;
+      padding: 0.6rem;
+      box-sizing: border-box;
+    }
+    .phys-toolbar {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+      margin-top: 0.5rem;
+      font-size: 0.8rem;
+      color: var(--fg-dim);
+    }
+    .phys-toolbar button { padding: 0.3rem 0.8rem; }
+    .phys-err { color: #ff6666; font-family: monospace; font-size: 0.8rem; margin-top: 0.5rem; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <main>
+    <h2>Physics</h2>
+    <p>
+      <code>rapier2d</code> and <code>rapier3d</code> bound into cljrs as
+      opaque values. Same Clojure source runs natively and in the browser —
+      this page is the WASM build of the cljrs tree-walker driving a
+      rigid-body simulation and drawing the result on a 2D canvas.
+    </p>
+
+    <div class="phys-wrap">
+      <div class="phys-stage">
+        <canvas id="phys-canvas" width="560" height="400"></canvas>
+      </div>
+      <div class="phys-col">
+        <textarea id="phys-src" spellcheck="false">(require '[cljrs.physics.d2 :as p2])
+
+(def world (p2/world {:gravity [0 -20]}))
+
+;; a long fixed floor and two angled walls
+(p2/add-body! world {:type :fixed :position [0 -6]
+                     :collider {:shape :box :half-extents [14 0.4]}})
+(p2/add-body! world {:type :fixed :position [-12 0] :rotation 0.3
+                     :collider {:shape :box :half-extents [6 0.3]}})
+(p2/add-body! world {:type :fixed :position [12 0] :rotation -0.3
+                     :collider {:shape :box :half-extents [6 0.3]}})
+
+;; 18 falling boxes spread across the top
+(def bodies
+  (vec
+    (for [i (range 18)]
+      (p2/add-body! world
+                    {:type :dynamic
+                     :position [(- (* i 1.2) 10)
+                                (+ 6 (mod i 3))]
+                     :rotation (* i 0.13)
+                     :collider {:shape :box
+                                :half-extents [0.5 0.5]
+                                :restitution 0.15
+                                :friction 0.6
+                                :density 1.0}}))))
+
+(defn frame! []
+  (p2/step! world)
+  (mapv (fn [b]
+          (let [[x y] (p2/translation world b)
+                r     (p2/rotation world b)]
+            [x y r]))
+        bodies))</textarea>
+        <div class="phys-toolbar">
+          <button id="phys-run">Apply &amp; Reset</button>
+          <button id="phys-pause">Pause</button>
+          <span id="phys-fps">—</span>
+        </div>
+        <div id="phys-err" class="phys-err"></div>
+      </div>
+    </div>
+  </main>
+  <script type="module">
+    import { mountChrome, loadWasm } from "./_layout.js";
+    mountChrome();
+
+    const canvas = document.getElementById("phys-canvas");
+    const ctx = canvas.getContext("2d");
+    const W = canvas.width, H = canvas.height;
+
+    // World space: roughly [-14..14] x in 28 units → 20 px per unit.
+    // Center the stage on (0, -1).
+    const PPU = 20;
+    const CX = W / 2;
+    const CY = H / 2 + 20;
+
+    function toScreen(x, y) {
+      return [CX + x * PPU, CY - y * PPU];
+    }
+
+    const err = document.getElementById("phys-err");
+    const fpsEl = document.getElementById("phys-fps");
+    const ta = document.getElementById("phys-src");
+    const runBtn = document.getElementById("phys-run");
+    const pauseBtn = document.getElementById("phys-pause");
+
+    let repl = null;
+    let paused = false;
+    let statics = [];
+
+    function drawStatic() {
+      ctx.fillStyle = "#222633";
+      for (const s of statics) {
+        const [x, y, r, hx, hy] = s;
+        const [sx, sy] = toScreen(x, y);
+        ctx.save();
+        ctx.translate(sx, sy);
+        ctx.rotate(-r);
+        ctx.fillRect(-hx * PPU, -hy * PPU, hx * 2 * PPU, hy * 2 * PPU);
+        ctx.restore();
+      }
+    }
+
+    function drawDynamic(floats) {
+      // each body: [x y r], rendered as a 1x1 unit box (0.5 half extent)
+      const S = 0.5 * PPU;
+      ctx.fillStyle = "#6cf";
+      ctx.strokeStyle = "#cde";
+      ctx.lineWidth = 1;
+      for (let i = 0; i < floats.length; i += 3) {
+        const [sx, sy] = toScreen(floats[i], floats[i + 1]);
+        const r = floats[i + 2];
+        ctx.save();
+        ctx.translate(sx, sy);
+        ctx.rotate(-r);
+        ctx.fillRect(-S, -S, S * 2, S * 2);
+        ctx.strokeRect(-S, -S, S * 2, S * 2);
+        ctx.restore();
+      }
+    }
+
+    function resetScene() {
+      err.textContent = "";
+      try {
+        repl.reset();
+        const result = repl.eval(ta.value);
+        if (result.startsWith("read error") || result.startsWith("eval error")) {
+          err.textContent = result;
+        }
+        // Seed the static geometry from the script by eyeballing the
+        // textarea. (Cheap: the statics don't move, so we hardcode the
+        // same layout on the JS side. If the user edits statics they can
+        // update these too — phase 1 keeps it simple.)
+        statics = [
+          [0, -6, 0, 14, 0.4],
+          [-12, 0, 0.3, 6, 0.3],
+          [12, 0, -0.3, 6, 0.3],
+        ];
+      } catch (e) {
+        err.textContent = String(e);
+      }
+    }
+
+    let lastT = performance.now();
+    let emaFps = 60;
+    function tick(now) {
+      const dt = now - lastT;
+      lastT = now;
+      if (dt > 0) emaFps = emaFps * 0.92 + (1000 / dt) * 0.08;
+      fpsEl.textContent = `${emaFps.toFixed(0)} fps`;
+
+      ctx.fillStyle = "#0f1016";
+      ctx.fillRect(0, 0, W, H);
+      drawStatic();
+
+      if (!paused && repl) {
+        try {
+          const floats = repl.eval_floats("(frame!)");
+          drawDynamic(floats);
+        } catch (e) {
+          err.textContent = String(e);
+          paused = true;
+          pauseBtn.textContent = "Resume";
+        }
+      }
+      requestAnimationFrame(tick);
+    }
+
+    runBtn.addEventListener("click", resetScene);
+    pauseBtn.addEventListener("click", () => {
+      paused = !paused;
+      pauseBtn.textContent = paused ? "Resume" : "Pause";
+    });
+
+    (async () => {
+      const mod = await loadWasm();
+      repl = new mod.Repl();
+      resetScene();
+      requestAnimationFrame(tick);
+    })();
+  </script>
+</body>
+</html>

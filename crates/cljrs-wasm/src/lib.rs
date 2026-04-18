@@ -22,6 +22,7 @@ pub fn _start() {
 pub fn eval_source(src: &str) -> String {
     let env = Env::new();
     builtins::install(&env);
+    cljrs_physics::install(&env);
     eval_in(&env, src)
 }
 
@@ -38,6 +39,7 @@ impl Repl {
     pub fn new() -> Repl {
         let env = Env::new();
         builtins::install(&env);
+        cljrs_physics::install(&env);
         Repl { env }
     }
 
@@ -47,10 +49,58 @@ impl Repl {
         eval_in(&self.env, src)
     }
 
+    /// Evaluate source expecting a flat vector of numbers; return them as
+    /// a `Float32Array` for the JS side (fast per-frame state readout in
+    /// demos). Non-numeric elements or a non-vector result returns an
+    /// empty array. Nested numeric vectors are flattened one level so
+    /// `[[x y r] ...]` round-trips.
+    pub fn eval_floats(&self, src: &str) -> Vec<f32> {
+        use cljrs::value::Value;
+        let forms = match reader::read_all(src) {
+            Ok(f) => f,
+            Err(_) => return Vec::new(),
+        };
+        let mut last = Value::Nil;
+        for f in forms {
+            match eval::eval(&f, &self.env) {
+                Ok(v) => last = v,
+                Err(_) => return Vec::new(),
+            }
+        }
+        fn push_num(out: &mut Vec<f32>, v: &Value) -> bool {
+            match v {
+                Value::Float(f) => {
+                    out.push(*f as f32);
+                    true
+                }
+                Value::Int(i) => {
+                    out.push(*i as f32);
+                    true
+                }
+                _ => false,
+            }
+        }
+        let mut out: Vec<f32> = Vec::new();
+        if let Value::Vector(xs) = &last {
+            for x in xs.iter() {
+                if push_num(&mut out, x) {
+                    continue;
+                }
+                if let Value::Vector(inner) = x {
+                    for y in inner.iter() {
+                        push_num(&mut out, y);
+                    }
+                }
+            }
+        }
+        out
+    }
+
     /// Reset to a fresh prelude-initialized env.
     pub fn reset(&mut self) {
         self.env = Env::new();
         builtins::install(&self.env);
+        cljrs_physics::install(&self.env);
     }
 }
 
