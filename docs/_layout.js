@@ -17,7 +17,7 @@ function basename(href) {
   return href.split("/").pop();
 }
 
-async function attachHighlightOverlay(wrapper, ta) {
+export async function attachHighlightOverlay(wrapper, ta) {
   const { highlight } = await import("./_highlight.js");
   // Build the overlay structure: <div class="repl-hl-wrap"> containing
   // <pre class="repl-hl"> and the existing <textarea>. CSS stacks them.

@@ -6,7 +6,7 @@
   <title>Physics</title>
   <link rel="stylesheet" href="./style.css">
   <style>
-    .phys-wrap { display: flex; gap: 1rem; flex-wrap: wrap; }
+    .phys-wrap { display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-start; }
     .phys-stage {
       background: #0f1016;
       border: 1px solid var(--border, #333);
@@ -14,29 +14,32 @@
       flex: 0 0 auto;
     }
     .phys-stage canvas { display: block; }
-    .phys-col { flex: 1 1 320px; min-width: 0; }
-    .phys-col textarea {
-      width: 100%;
-      min-height: 340px;
-      font-family: ui-monospace, Menlo, Consolas, monospace;
-      font-size: 0.8rem;
-      background: #0b0c10;
-      color: #d6dae0;
-      border: 1px solid var(--border, #333);
-      border-radius: 4px;
-      padding: 0.6rem;
-      box-sizing: border-box;
-    }
+    .phys-col { flex: 1 1 340px; min-width: 0; display: flex; flex-direction: column; gap: 0.5rem; }
     .phys-toolbar {
-      display: flex;
-      gap: 0.5rem;
-      align-items: center;
-      margin-top: 0.5rem;
-      font-size: 0.8rem;
-      color: var(--fg-dim);
+      display: flex; gap: 0.5rem; align-items: center;
+      font-size: 0.8rem; color: var(--fg-dim);
+      flex-wrap: wrap;
     }
-    .phys-toolbar button { padding: 0.3rem 0.8rem; }
-    .phys-err { color: #ff6666; font-family: monospace; font-size: 0.8rem; margin-top: 0.5rem; white-space: pre-wrap; }
+    .phys-toolbar select, .phys-toolbar button {
+      font-family: inherit;
+      font-size: 0.8rem;
+      padding: 0.25rem 0.6rem;
+    }
+    .phys-col .repl-hl-wrap { height: 380px; }
+    .phys-col textarea, .phys-col .repl-hl {
+      font-family: ui-monospace, Menlo, Consolas, monospace;
+      font-size: 0.78rem;
+      line-height: 1.35;
+    }
+    .phys-status {
+      font-family: ui-monospace, monospace;
+      font-size: 0.75rem;
+      color: var(--fg-dim);
+      min-height: 1em;
+      white-space: pre-wrap;
+    }
+    .phys-status.err { color: #ff6666; }
+    .phys-status.ok { color: #8ec07c; }
   </style>
 </head>
 <body>
@@ -45,20 +48,41 @@
     <p>
       <code>rapier2d</code> and <code>rapier3d</code> bound into cljrs as
       opaque values. Same Clojure source runs natively and in the browser —
-      this page is the WASM build of the cljrs tree-walker driving a
-      rigid-body simulation and drawing the result on a 2D canvas.
+      this page is the WASM build of the cljrs tree-walker driving
+      rigid-body simulations. Pick a scene or edit the source; it re-applies
+      as you type.
     </p>
 
     <div class="phys-wrap">
       <div class="phys-stage">
-        <canvas id="phys-canvas" width="560" height="400"></canvas>
+        <canvas id="phys-canvas" width="560" height="420"></canvas>
       </div>
       <div class="phys-col">
-        <textarea id="phys-src" spellcheck="false">(require '[cljrs.physics.d2 :as p2])
+        <div class="phys-toolbar">
+          <label for="phys-demo">Scene:</label>
+          <select id="phys-demo"></select>
+          <button id="phys-pause">Pause</button>
+          <button id="phys-reset">Reset</button>
+          <span id="phys-fps">—</span>
+        </div>
+        <div class="repl" id="phys-editor">
+          <textarea id="phys-src" spellcheck="false"></textarea>
+        </div>
+        <div id="phys-status" class="phys-status"></div>
+      </div>
+    </div>
+  </main>
+  <script type="module">
+    import { mountChrome, loadWasm, attachHighlightOverlay } from "./_layout.js";
+    mountChrome();
+
+    // --- demo definitions ------------------------------------------------
+
+    const DEMO_BOXES_2D = `(require '[cljrs.physics.d2 :as p2])
 
 (def world (p2/world {:gravity [0 -20]}))
 
-;; a long fixed floor and two angled walls
+;; floor + angled walls
 (p2/add-body! world {:type :fixed :position [0 -6]
                      :collider {:shape :box :half-extents [14 0.4]}})
 (p2/add-body! world {:type :fixed :position [-12 0] :rotation 0.3
@@ -66,7 +90,7 @@
 (p2/add-body! world {:type :fixed :position [12 0] :rotation -0.3
                      :collider {:shape :box :half-extents [6 0.3]}})
 
-;; 18 falling boxes spread across the top
+;; 18 falling boxes
 (def bodies
   (vec
     (for [i (range 18)]
@@ -78,8 +102,7 @@
                      :collider {:shape :box
                                 :half-extents [0.5 0.5]
                                 :restitution 0.15
-                                :friction 0.6
-                                :density 1.0}}))))
+                                :friction 0.6}}))))
 
 (defn frame! []
   (p2/step! world)
@@ -87,65 +110,160 @@
           (let [[x y] (p2/translation world b)
                 r     (p2/rotation world b)]
             [x y r]))
-        bodies))</textarea>
-        <div class="phys-toolbar">
-          <button id="phys-run">Apply &amp; Reset</button>
-          <button id="phys-pause">Pause</button>
-          <span id="phys-fps">—</span>
-        </div>
-        <div id="phys-err" class="phys-err"></div>
-      </div>
-    </div>
-  </main>
-  <script type="module">
-    import { mountChrome, loadWasm } from "./_layout.js";
-    mountChrome();
+        bodies))`;
 
-    const canvas = document.getElementById("phys-canvas");
-    const ctx = canvas.getContext("2d");
-    const W = canvas.width, H = canvas.height;
+    const DEMO_TOWER_2D = `(require '[cljrs.physics.d2 :as p2])
 
-    // World space: roughly [-14..14] x in 28 units → 20 px per unit.
-    // Center the stage on (0, -1).
-    const PPU = 20;
-    const CX = W / 2;
-    const CY = H / 2 + 20;
+;; a tall Jenga-ish stack. First dynamic box is slightly off-center
+;; so the tower collapses with dramatic flair.
+(def world (p2/world {:gravity [0 -25]}))
 
-    function toScreen(x, y) {
-      return [CX + x * PPU, CY - y * PPU];
-    }
+(p2/add-body! world {:type :fixed :position [0 -6]
+                     :collider {:shape :box :half-extents [14 0.4]}})
 
-    const err = document.getElementById("phys-err");
-    const fpsEl = document.getElementById("phys-fps");
-    const ta = document.getElementById("phys-src");
-    const runBtn = document.getElementById("phys-run");
-    const pauseBtn = document.getElementById("phys-pause");
+(def bodies
+  (vec
+    (for [layer (range 14)
+          col   (range 3)]
+      (let [y  (+ -5 (* layer 1.02))
+            x  (+ (- (* col 1.02) 1.02)
+                  (if (zero? layer) 0.08 0))]
+        (p2/add-body! world
+                      {:type :dynamic
+                       :position [x y]
+                       :collider {:shape :box
+                                  :half-extents [0.5 0.5]
+                                  :friction 0.8
+                                  :restitution 0.0}})))))
 
-    let repl = null;
-    let paused = false;
-    let statics = [];
+(defn frame! []
+  (p2/step! world)
+  (mapv (fn [b]
+          (let [[x y] (p2/translation world b)
+                r     (p2/rotation world b)]
+            [x y r]))
+        bodies))`;
 
-    function drawStatic() {
+    const DEMO_BALLS_2D = `(require '[cljrs.physics.d2 :as p2])
+
+;; a bowl of bouncy balls with varying restitution.
+(def world (p2/world {:gravity [0 -18]}))
+
+(p2/add-body! world {:type :fixed :position [-10 -2] :rotation 0.6
+                     :collider {:shape :box :half-extents [8 0.3]}})
+(p2/add-body! world {:type :fixed :position [10 -2] :rotation -0.6
+                     :collider {:shape :box :half-extents [8 0.3]}})
+(p2/add-body! world {:type :fixed :position [0 -6]
+                     :collider {:shape :box :half-extents [6 0.3]}})
+
+(def balls
+  (vec
+    (for [i (range 24)]
+      (p2/add-body! world
+                    {:type :dynamic
+                     :position [(- (mod i 6) 2.5)
+                                (+ 3 (* 0.8 (quot i 6)))]
+                     :linvel [(* 2 (- 0.5 (/ (mod i 5) 5.0))) 0]
+                     :collider {:shape :ball
+                                :radius 0.42
+                                :restitution (+ 0.4 (* 0.05 (mod i 10)))
+                                :friction 0.15}}))))
+
+(defn frame! []
+  (p2/step! world)
+  (mapv (fn [b]
+          (let [[x y] (p2/translation world b)]
+            [x y 0.42]))
+        balls))`;
+
+    const DEMO_BOXES_3D = `(require '[cljrs.physics.d3 :as p3])
+
+;; a stack of spheres on a 3D floor. We render spheres because we
+;; haven't bound 3D quaternion → screen rotation yet.
+(def world (p3/world {:gravity [0 -15 0]}))
+
+(p3/add-body! world {:type :fixed :position [0 -4 0]
+                     :collider {:shape :box
+                                :half-extents [10 0.5 10]}})
+
+(def bodies
+  (vec
+    (for [i (range 5)
+          j (range 5)]
+      (p3/add-body! world
+                    {:type :dynamic
+                     :position [(- i 2) (+ 1 (* 0.2 i)) (- j 2)]
+                     :collider {:shape :ball
+                                :radius 0.45
+                                :restitution 0.1
+                                :friction 0.4}}))))
+
+(defn frame! []
+  (p3/step! world)
+  (mapv (fn [b]
+          (let [[x y z] (p3/translation world b)]
+            [x y z 0.45]))
+        bodies))`;
+
+    const DEMO_RAIN_3D = `(require '[cljrs.physics.d3 :as p3])
+
+;; raining balls into a square arena with four walls.
+(def world (p3/world {:gravity [0 -18 0]}))
+
+(p3/add-body! world {:type :fixed :position [0 -4 0]
+                     :collider {:shape :box :half-extents [6 0.3 6]}})
+(p3/add-body! world {:type :fixed :position [6 -2 0]
+                     :collider {:shape :box :half-extents [0.3 2 6]}})
+(p3/add-body! world {:type :fixed :position [-6 -2 0]
+                     :collider {:shape :box :half-extents [0.3 2 6]}})
+(p3/add-body! world {:type :fixed :position [0 -2 6]
+                     :collider {:shape :box :half-extents [6 2 0.3]}})
+(p3/add-body! world {:type :fixed :position [0 -2 -6]
+                     :collider {:shape :box :half-extents [6 2 0.3]}})
+
+(def balls
+  (vec
+    (for [i (range 60)]
+      (let [ang (* i 0.73)
+            r   (* 3 (sin (* i 0.3)))]
+        (p3/add-body! world
+                      {:type :dynamic
+                       :position [(* r (cos ang))
+                                  (+ 6 (* 0.2 i))
+                                  (* r (sin ang))]
+                       :collider {:shape :ball
+                                  :radius 0.32
+                                  :restitution 0.55
+                                  :friction 0.2}})))))
+
+(defn frame! []
+  (p3/step! world)
+  (mapv (fn [b]
+          (let [[x y z] (p3/translation world b)]
+            [x y z 0.32]))
+        balls))`;
+
+    // --- rendering -------------------------------------------------------
+
+    const W = 560, H = 420;
+    const CX = W / 2, CY = H / 2 + 20;
+
+    function render2dBoxes(ctx, floats, statics, PPU, halfExt) {
       ctx.fillStyle = "#222633";
-      for (const s of statics) {
-        const [x, y, r, hx, hy] = s;
-        const [sx, sy] = toScreen(x, y);
+      for (const [x, y, r, hx, hy] of statics) {
+        const [sx, sy] = [CX + x * PPU, CY - y * PPU];
         ctx.save();
         ctx.translate(sx, sy);
         ctx.rotate(-r);
         ctx.fillRect(-hx * PPU, -hy * PPU, hx * 2 * PPU, hy * 2 * PPU);
         ctx.restore();
       }
-    }
-
-    function drawDynamic(floats) {
-      // each body: [x y r], rendered as a 1x1 unit box (0.5 half extent)
-      const S = 0.5 * PPU;
+      const S = halfExt * PPU;
       ctx.fillStyle = "#6cf";
       ctx.strokeStyle = "#cde";
       ctx.lineWidth = 1;
       for (let i = 0; i < floats.length; i += 3) {
-        const [sx, sy] = toScreen(floats[i], floats[i + 1]);
+        const [sx, sy] = [CX + floats[i] * PPU, CY - floats[i + 1] * PPU];
         const r = floats[i + 2];
         ctx.save();
         ctx.translate(sx, sy);
@@ -156,26 +274,200 @@
       }
     }
 
-    function resetScene() {
-      err.textContent = "";
-      try {
-        repl.reset();
-        const result = repl.eval(ta.value);
-        if (result.startsWith("read error") || result.startsWith("eval error")) {
-          err.textContent = result;
+    function render2dBalls(ctx, floats, statics, PPU) {
+      ctx.fillStyle = "#222633";
+      for (const [x, y, r, hx, hy] of statics) {
+        const [sx, sy] = [CX + x * PPU, CY - y * PPU];
+        ctx.save();
+        ctx.translate(sx, sy);
+        ctx.rotate(-r);
+        ctx.fillRect(-hx * PPU, -hy * PPU, hx * 2 * PPU, hy * 2 * PPU);
+        ctx.restore();
+      }
+      ctx.fillStyle = "#fc8";
+      ctx.strokeStyle = "#ffe0c0";
+      ctx.lineWidth = 1;
+      for (let i = 0; i < floats.length; i += 3) {
+        const sx = CX + floats[i] * PPU;
+        const sy = CY - floats[i + 1] * PPU;
+        const rad = floats[i + 2] * PPU;
+        ctx.beginPath();
+        ctx.arc(sx, sy, rad, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
+
+    // Oblique projection for 3D: simple, no camera math. z tints depth.
+    // Each body is rendered as a circle (sphere) at projected position.
+    function render3dSpheres(ctx, floats, statics3d, PPU) {
+      // Project: sx = CX + (x - 0.4*z) * PPU,  sy = CY - (y - 0.3*z) * PPU
+      const PX = 0.4, PY = 0.3;
+      function proj(x, y, z) {
+        return [CX + (x - PX * z) * PPU, CY - (y - PY * z) * PPU];
+      }
+      // Draw floor + walls as filled polygons by projecting their corners.
+      ctx.fillStyle = "#1b1d26";
+      ctx.strokeStyle = "#343846";
+      for (const [cx, cy, cz, hx, hy, hz] of statics3d) {
+        // Only draw the top face of each box (cheap but readable).
+        const corners = [
+          [cx - hx, cy + hy, cz - hz],
+          [cx + hx, cy + hy, cz - hz],
+          [cx + hx, cy + hy, cz + hz],
+          [cx - hx, cy + hy, cz + hz],
+        ];
+        ctx.beginPath();
+        for (let i = 0; i < 4; i++) {
+          const [sx, sy] = proj(...corners[i]);
+          if (i === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
         }
-        // Seed the static geometry from the script by eyeballing the
-        // textarea. (Cheap: the statics don't move, so we hardcode the
-        // same layout on the JS side. If the user edits statics they can
-        // update these too — phase 1 keeps it simple.)
-        statics = [
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      }
+      // Sort bodies by projected depth so near bodies draw on top.
+      const n = Math.floor(floats.length / 4);
+      const order = new Array(n);
+      for (let i = 0; i < n; i++) order[i] = i;
+      order.sort((a, b) => {
+        // depth proxy: z - y (further = drawn first)
+        const za = floats[a * 4 + 2] - floats[a * 4 + 1];
+        const zb = floats[b * 4 + 2] - floats[b * 4 + 1];
+        return za - zb;
+      });
+      for (const idx of order) {
+        const x = floats[idx * 4];
+        const y = floats[idx * 4 + 1];
+        const z = floats[idx * 4 + 2];
+        const r = floats[idx * 4 + 3];
+        const [sx, sy] = proj(x, y, z);
+        // depth-tint: far = darker
+        const depth = (z + 6) / 12; // rough 0..1
+        const shade = Math.max(0, Math.min(1, depth));
+        const g = Math.floor(140 + 80 * shade);
+        const b = Math.floor(200 - 60 * shade);
+        ctx.fillStyle = `rgb(100, ${g}, ${b})`;
+        ctx.strokeStyle = "#e0e8f0";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(sx, sy, r * PPU, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
+
+    const DEMOS = {
+      "2d-boxes": {
+        label: "2D · boxes on ramps",
+        source: DEMO_BOXES_2D,
+        statics: [
           [0, -6, 0, 14, 0.4],
           [-12, 0, 0.3, 6, 0.3],
           [12, 0, -0.3, 6, 0.3],
-        ];
+        ],
+        render: (ctx, f, s) => render2dBoxes(ctx, f, s, 20, 0.5),
+      },
+      "2d-tower": {
+        label: "2D · Jenga tower",
+        source: DEMO_TOWER_2D,
+        statics: [[0, -6, 0, 14, 0.4]],
+        render: (ctx, f, s) => render2dBoxes(ctx, f, s, 22, 0.5),
+      },
+      "2d-balls": {
+        label: "2D · bouncing balls",
+        source: DEMO_BALLS_2D,
+        statics: [
+          [-10, -2, 0.6, 8, 0.3],
+          [10, -2, -0.6, 8, 0.3],
+          [0, -6, 0, 6, 0.3],
+        ],
+        render: (ctx, f, s) => render2dBalls(ctx, f, s, 22),
+      },
+      "3d-stack": {
+        label: "3D · sphere pile",
+        source: DEMO_BOXES_3D,
+        statics3d: [[0, -4, 0, 10, 0.5, 10]],
+        render3d: true,
+        render: (ctx, f, s, s3d) => render3dSpheres(ctx, f, s3d, 22),
+      },
+      "3d-rain": {
+        label: "3D · arena rain",
+        source: DEMO_RAIN_3D,
+        statics3d: [
+          [0, -4, 0, 6, 0.3, 6],
+          [6, -2, 0, 0.3, 2, 6],
+          [-6, -2, 0, 0.3, 2, 6],
+          [0, -2, 6, 6, 2, 0.3],
+          [0, -2, -6, 6, 2, 0.3],
+        ],
+        render3d: true,
+        render: (ctx, f, s, s3d) => render3dSpheres(ctx, f, s3d, 22),
+      },
+    };
+
+    // --- page wiring -----------------------------------------------------
+
+    const canvas = document.getElementById("phys-canvas");
+    const ctx = canvas.getContext("2d");
+    const ta = document.getElementById("phys-src");
+    const editorEl = document.getElementById("phys-editor");
+    const select = document.getElementById("phys-demo");
+    const status = document.getElementById("phys-status");
+    const fpsEl = document.getElementById("phys-fps");
+    const pauseBtn = document.getElementById("phys-pause");
+    const resetBtn = document.getElementById("phys-reset");
+
+    for (const key of Object.keys(DEMOS)) {
+      const opt = document.createElement("option");
+      opt.value = key;
+      opt.textContent = DEMOS[key].label;
+      select.appendChild(opt);
+    }
+
+    let repl = null;
+    let paused = false;
+    let currentDemo = null;
+    let lastFloats = new Float32Array(0);
+    let debounceTimer = null;
+
+    function applySource(src) {
+      if (!repl) return;
+      status.className = "phys-status";
+      status.textContent = "…";
+      try {
+        repl.reset();
+        const result = repl.eval(src);
+        if (result.startsWith("read error") || result.startsWith("eval error")) {
+          status.className = "phys-status err";
+          status.textContent = result;
+          lastFloats = new Float32Array(0);
+        } else {
+          status.className = "phys-status ok";
+          status.textContent = "applied.";
+        }
       } catch (e) {
-        err.textContent = String(e);
+        status.className = "phys-status err";
+        status.textContent = String(e);
+        lastFloats = new Float32Array(0);
       }
+    }
+
+    function loadDemo(key) {
+      currentDemo = DEMOS[key];
+      ta.value = currentDemo.source;
+      // Fire highlight overlay update manually.
+      ta.dispatchEvent(new Event("input"));
+      applySource(currentDemo.source);
+    }
+
+    function clearAndDraw() {
+      ctx.fillStyle = "#0f1016";
+      ctx.fillRect(0, 0, W, H);
+      if (!currentDemo) return;
+      const statics2d = currentDemo.statics || [];
+      const statics3d = currentDemo.statics3d || [];
+      currentDemo.render(ctx, lastFloats, statics2d, statics3d);
     }
 
     let lastT = performance.now();
@@ -186,33 +478,47 @@
       if (dt > 0) emaFps = emaFps * 0.92 + (1000 / dt) * 0.08;
       fpsEl.textContent = `${emaFps.toFixed(0)} fps`;
 
-      ctx.fillStyle = "#0f1016";
-      ctx.fillRect(0, 0, W, H);
-      drawStatic();
-
-      if (!paused && repl) {
+      if (!paused && repl && currentDemo) {
         try {
-          const floats = repl.eval_floats("(frame!)");
-          drawDynamic(floats);
+          lastFloats = repl.eval_floats("(frame!)");
         } catch (e) {
-          err.textContent = String(e);
+          status.className = "phys-status err";
+          status.textContent = String(e);
           paused = true;
           pauseBtn.textContent = "Resume";
         }
       }
+      clearAndDraw();
       requestAnimationFrame(tick);
     }
 
-    runBtn.addEventListener("click", resetScene);
+    select.addEventListener("change", () => loadDemo(select.value));
     pauseBtn.addEventListener("click", () => {
       paused = !paused;
       pauseBtn.textContent = paused ? "Resume" : "Pause";
     });
+    resetBtn.addEventListener("click", () => {
+      applySource(ta.value);
+    });
+
+    ta.addEventListener("input", () => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => applySource(ta.value), 450);
+    });
+    ta.addEventListener("keydown", (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        clearTimeout(debounceTimer);
+        applySource(ta.value);
+      }
+    });
 
     (async () => {
+      await attachHighlightOverlay(editorEl, ta);
       const mod = await loadWasm();
       repl = new mod.Repl();
-      resetScene();
+      select.value = "2d-boxes";
+      loadDemo("2d-boxes");
       requestAnimationFrame(tick);
     })();
   </script>
