@@ -986,13 +986,104 @@ fn sf_defn(args: &[Value], env: &Env) -> Result<Value> {
     Ok(fn_val)
 }
 
-/// `(ns name)` / `(in-ns name)` — Arc-1 namespaces are cosmetic. Real
-/// namespace isolation (each ns with its own bindings, :refer/:as) is
-/// Arc 2 work. For now we accept the form so existing Clojure code with
-/// `(ns my.ns)` headers parses and runs; all vars share a single flat
-/// global map.
-fn sf_ns(_args: &[Value], _env: &Env) -> Result<Value> {
+/// `(ns name & ref-specs)` — switch the current namespace. Optional
+/// `(:require [target :as alias] ...)` specs install per-namespace
+/// aliases so qualified lookups through `alias/name` resolve into the
+/// target ns. Unknown ref-keys are ignored (not errors) to stay
+/// forward-compatible with Clojure ns forms that include richer specs.
+fn sf_ns(args: &[Value], env: &Env) -> Result<Value> {
+    if args.is_empty() {
+        return Err(Error::Eval("ns requires a name".into()));
+    }
+    let name = match &args[0] {
+        Value::Symbol(s) => s.to_string(),
+        _ => return Err(Error::Eval("ns name must be a symbol".into())),
+    };
+    env.set_current_ns(&name);
+    // Optional :require specs.
+    for spec in &args[1..] {
+        if let Value::List(xs) = spec
+            && let Some(Value::Keyword(k)) = xs.first()
+            && k.as_ref() == "require"
+        {
+            for req in &xs[1..] {
+                apply_require_spec(env, &name, req)?;
+            }
+        }
+    }
     Ok(Value::Nil)
+}
+
+fn apply_require_spec(env: &Env, consumer: &str, spec: &Value) -> Result<()> {
+    match spec {
+        // Simple (require 'foo.bar) — load only, no alias.
+        Value::Symbol(s) => {
+            try_load_ns(env, s.as_ref())?;
+            Ok(())
+        }
+        Value::List(_) | Value::Vector(_) => {
+            let items: Vec<Value> = match spec {
+                Value::List(v) => v.as_ref().clone(),
+                Value::Vector(v) => v.iter().cloned().collect(),
+                _ => unreachable!(),
+            };
+            if items.is_empty() {
+                return Ok(());
+            }
+            let target = match &items[0] {
+                Value::Symbol(s) => s.to_string(),
+                _ => return Err(Error::Eval("require: target must be a symbol".into())),
+            };
+            try_load_ns(env, &target)?;
+            // Walk key/value pairs for :as / :refer.
+            let mut i = 1;
+            while i + 1 <= items.len() {
+                if i + 1 >= items.len() {
+                    break;
+                }
+                let k = &items[i];
+                let v = &items[i + 1];
+                if let Value::Keyword(kw) = k {
+                    match kw.as_ref() {
+                        "as" => {
+                            if let Value::Symbol(a) = v {
+                                env.add_alias(consumer, a.as_ref(), &target);
+                            }
+                        }
+                        "refer" => {
+                            if let Value::Vector(vs) = v {
+                                for n in vs.iter() {
+                                    if let Value::Symbol(nm) = n {
+                                        let key = format!("{target}/{nm}");
+                                        if let Ok(val) = env.lookup(&key) {
+                                            // Install a copy into consumer's ns.
+                                            let local = format!("{consumer}/{nm}");
+                                            env.define_global(&local, val);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                i += 2;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Try to load a namespace by mapping `foo.bar` to `foo/bar.clj` via
+/// load-file. Failure is soft: if the file isn't found we assume the
+/// namespace was established some other way.
+fn try_load_ns(env: &Env, ns: &str) -> Result<()> {
+    let path = ns.replace('.', "/").replace('-', "_") + ".clj";
+    if std::path::Path::new(&path).exists() {
+        sf_load_file(&[Value::Str(Arc::from(path.as_str()))], env)?;
+    }
+    Ok(())
 }
 
 /// `(load-file "path")` — read the given cljrs source file and evaluate

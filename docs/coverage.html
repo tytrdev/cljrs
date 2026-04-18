@@ -30,7 +30,7 @@
         <tr><td><code>dotimes</code>, <code>doseq</code></td><td class="ok">supported</td><td><code>for</code> generator missing</td></tr>
         <tr><td><code>defmacro</code>, quote, syntax-quote</td><td class="ok">supported</td><td>No auto-gensym yet</td></tr>
         <tr><td><code>try</code>, <code>catch</code>, <code>finally</code>, <code>throw</code></td><td class="ok">supported</td><td><code>ex-info</code>, <code>ex-message</code>, <code>ex-data</code></td></tr>
-        <tr><td><code>ns</code>, <code>require</code>, <code>load-file</code></td><td class="partial">partial</td><td>Single global namespace</td></tr>
+        <tr><td><code>ns</code>, <code>require</code>, <code>load-file</code></td><td class="ok">supported</td><td>Per-namespace bindings, qualified <code>ns/name</code> lookups, <code>:as</code> aliases, <code>:refer</code></td></tr>
         <tr><td><code>defmulti</code>, <code>defmethod</code></td><td class="ok">supported</td><td>Open dispatch on dispatch-fn result; <code>:default</code> fallback</td></tr>
         <tr><td><code>defprotocol</code></td><td class="ok">supported</td><td>Sugar over defmulti dispatching on type keyword</td></tr>
         <tr><td><code>defrecord</code></td><td class="ok">supported</td><td>Tagged map; <code>->Name</code>, <code>map->Name</code>, <code>Name?</code> auto-generated</td></tr>

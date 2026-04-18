@@ -65,20 +65,19 @@ fn seq_items(v: &Value) -> Result<Vec<Value>> {
 }
 
 pub fn install(env: &Env) {
+    // Builtins + prelude live in cljrs.core. Start there; switch to
+    // `user` after so user code doesn't accidentally extend core.
+    env.set_current_ns(crate::env::CORE_NS);
     for (name, f) in core_fns() {
         env.define_global(name, Value::Builtin(Builtin::new_static(name, f)));
     }
-    // Internal aliases for builtins we want the prelude to wrap with
-    // multi-arity overloads (so the 1-arg form returns a transducer
-    // while the 2-arg form keeps the existing eager behavior). We
-    // install the original under both names; the prelude then shadows
-    // the public name.
     for (alias, original) in TRANSDUCER_BUILTIN_ALIASES {
         if let Ok(v) = env.lookup(original) {
             env.define_global(alias, v);
         }
     }
     install_prelude(env);
+    env.set_current_ns(crate::env::USER_NS);
 }
 
 const TRANSDUCER_BUILTIN_ALIASES: &[(&str, &str)] = &[
