@@ -355,6 +355,7 @@ dependencies = [
  "melior",
  "pollster",
  "rayon",
+ "regex",
  "wgpu",
 ]
 

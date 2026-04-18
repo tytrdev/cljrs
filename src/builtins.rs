@@ -200,7 +200,148 @@ fn core_fns() -> Vec<(&'static str, fn(&[Value]) -> Result<Value>)> {
         ("ex-info", ex_info_fn),
         ("ex-message", ex_message_fn),
         ("ex-data", ex_data_fn),
+        ("re-pattern", re_pattern_fn),
+        ("re-find", re_find_fn),
+        ("re-matches", re_matches_fn),
+        ("re-seq", re_seq_fn),
+        ("gensym", gensym_fn),
     ]
+}
+
+/// (gensym) / (gensym prefix) — produce a fresh unique symbol. Used
+/// inside macros to share a hygienic name across multiple syntax-
+/// quoted forms within one expansion.
+fn gensym_fn(args: &[Value]) -> Result<Value> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let prefix = match args.first() {
+        Some(Value::Str(s)) => s.to_string(),
+        Some(Value::Symbol(s)) => s.to_string(),
+        None => "G__".to_string(),
+        Some(other) => return Err(Error::Type(format!(
+            "gensym: expected string or symbol prefix, got {}",
+            other.type_name()
+        ))),
+    };
+    Ok(Value::Symbol(Arc::from(format!("{prefix}{n}").as_str())))
+}
+
+// ---- Regex -------------------------------------------------------------
+
+fn re_pattern_fn(args: &[Value]) -> Result<Value> {
+    if args.len() != 1 {
+        return Err(Error::Arity { expected: "1".into(), got: args.len() });
+    }
+    let pat = match &args[0] {
+        Value::Str(s) => s.clone(),
+        Value::Regex(r) => return Ok(Value::Regex(r.clone())),
+        _ => return Err(Error::Type("re-pattern: expected string".into())),
+    };
+    match regex::Regex::new(pat.as_ref()) {
+        Ok(r) => Ok(Value::Regex(Arc::new(r))),
+        Err(e) => Err(Error::Eval(format!("re-pattern: {e}"))),
+    }
+}
+
+fn as_regex(v: &Value) -> Result<Arc<regex::Regex>> {
+    match v {
+        Value::Regex(r) => Ok(r.clone()),
+        Value::Str(s) => regex::Regex::new(s.as_ref())
+            .map(Arc::new)
+            .map_err(|e| Error::Eval(format!("regex: {e}"))),
+        _ => Err(Error::Type("expected regex or string".into())),
+    }
+}
+
+/// First match as a string. When the pattern has capture groups, returns
+/// a vector [whole-match, g1, g2, ...]. Matches Clojure's re-find shape.
+fn re_find_fn(args: &[Value]) -> Result<Value> {
+    if args.len() != 2 {
+        return Err(Error::Arity { expected: "2".into(), got: args.len() });
+    }
+    let r = as_regex(&args[0])?;
+    let s = match &args[1] {
+        Value::Str(s) => s.clone(),
+        _ => return Err(Error::Type("re-find: haystack must be a string".into())),
+    };
+    match r.captures(s.as_ref()) {
+        Some(caps) => {
+            if caps.len() == 1 {
+                let m = caps.get(0).unwrap().as_str();
+                Ok(Value::Str(Arc::from(m)))
+            } else {
+                let mut out: imbl::Vector<Value> = imbl::Vector::new();
+                for i in 0..caps.len() {
+                    match caps.get(i) {
+                        Some(m) => out.push_back(Value::Str(Arc::from(m.as_str()))),
+                        None => out.push_back(Value::Nil),
+                    }
+                }
+                Ok(Value::Vector(out))
+            }
+        }
+        None => Ok(Value::Nil),
+    }
+}
+
+/// Match only if the pattern anchors the entire string.
+fn re_matches_fn(args: &[Value]) -> Result<Value> {
+    if args.len() != 2 {
+        return Err(Error::Arity { expected: "2".into(), got: args.len() });
+    }
+    let r = as_regex(&args[0])?;
+    let s = match &args[1] {
+        Value::Str(s) => s.clone(),
+        _ => return Err(Error::Type("re-matches: haystack must be a string".into())),
+    };
+    let Some(caps) = r.captures(s.as_ref()) else {
+        return Ok(Value::Nil);
+    };
+    let whole = caps.get(0).unwrap();
+    if whole.start() != 0 || whole.end() != s.len() {
+        return Ok(Value::Nil);
+    }
+    if caps.len() == 1 {
+        Ok(Value::Str(Arc::from(whole.as_str())))
+    } else {
+        let mut out: imbl::Vector<Value> = imbl::Vector::new();
+        for i in 0..caps.len() {
+            match caps.get(i) {
+                Some(m) => out.push_back(Value::Str(Arc::from(m.as_str()))),
+                None => out.push_back(Value::Nil),
+            }
+        }
+        Ok(Value::Vector(out))
+    }
+}
+
+/// All non-overlapping matches as a list of strings (or vectors with groups).
+fn re_seq_fn(args: &[Value]) -> Result<Value> {
+    if args.len() != 2 {
+        return Err(Error::Arity { expected: "2".into(), got: args.len() });
+    }
+    let r = as_regex(&args[0])?;
+    let s = match &args[1] {
+        Value::Str(s) => s.clone(),
+        _ => return Err(Error::Type("re-seq: haystack must be a string".into())),
+    };
+    let mut out: Vec<Value> = Vec::new();
+    for caps in r.captures_iter(s.as_ref()) {
+        if caps.len() == 1 {
+            out.push(Value::Str(Arc::from(caps.get(0).unwrap().as_str())));
+        } else {
+            let mut v: imbl::Vector<Value> = imbl::Vector::new();
+            for i in 0..caps.len() {
+                match caps.get(i) {
+                    Some(m) => v.push_back(Value::Str(Arc::from(m.as_str()))),
+                    None => v.push_back(Value::Nil),
+                }
+            }
+            out.push(Value::Vector(v));
+        }
+    }
+    Ok(Value::List(Arc::new(out)))
 }
 
 // ---- Atoms -------------------------------------------------------------

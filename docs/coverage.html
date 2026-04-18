@@ -23,6 +23,8 @@
         <tr><td><code>loop</code>, <code>recur</code></td><td class="ok">supported</td><td>Tree walker and native paths</td></tr>
         <tr><td><code>if</code>, <code>do</code>, <code>when</code>, <code>when-not</code></td><td class="ok">supported</td><td></td></tr>
         <tr><td><code>cond</code>, <code>if-let</code>, <code>when-let</code></td><td class="ok">supported</td><td>Prelude macros</td></tr>
+        <tr><td><code>some-&gt;</code>, <code>some-&gt;&gt;</code>, <code>cond-&gt;</code>, <code>cond-&gt;&gt;</code></td><td class="ok">supported</td><td>Prelude macros</td></tr>
+        <tr><td><code>for</code></td><td class="partial">partial</td><td>Single binding + <code>:when</code>; <code>:let</code>/<code>:while</code> not yet</td></tr>
         <tr><td><code>case</code></td><td class="partial">partial</td><td>Literals only, no jump table</td></tr>
         <tr><td><code>and</code>, <code>or</code></td><td class="ok">supported</td><td></td></tr>
         <tr><td><code>dotimes</code>, <code>doseq</code></td><td class="ok">supported</td><td><code>for</code> generator missing</td></tr>
@@ -42,8 +44,8 @@
         <tr><td><code>^Tag</code></td><td class="ok">supported</td></tr>
         <tr><td><code>#()</code>, <code>#_</code>, <code>#{}</code>, <code>@</code></td><td class="ok">supported</td></tr>
         <tr><td><code>#'</code></td><td class="partial">partial</td></tr>
-        <tr><td><code>#"regex"</code></td><td class="missing">missing</td></tr>
-        <tr><td><code>x#</code> auto-gensym</td><td class="missing">missing</td></tr>
+        <tr><td><code>x#</code> auto-gensym</td><td class="ok">supported</td><td>Per-syntax-quote sharing; cross-quote uses <code>(gensym)</code></td></tr>
+        <tr><td><code>#"regex"</code></td><td class="ok">supported</td><td>Backed by Rust <code>regex</code> crate</td></tr>
         <tr><td>Tagged literals</td><td class="missing">missing</td></tr>
       </tbody>
     </table>

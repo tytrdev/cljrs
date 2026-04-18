@@ -38,6 +38,9 @@ pub enum Value {
     /// state cljrs currently exposes to user code — everything else is
     /// persistent.
     Atom(Arc<RwLock<Value>>),
+    /// Compiled regex pattern from `#"..."`. Wraps the regex crate's
+    /// Regex; lookups go through `re-find`, `re-matches`, `re-seq`.
+    Regex(Arc<regex::Regex>),
     /// Compiled GPU kernel from `defn-gpu`. Called as a normal fn: takes
     /// one arg (an f32 buffer = vector/list of numbers) and returns a
     /// vector of f32s. Internally dispatches via wgpu.
@@ -109,6 +112,7 @@ impl Value {
             Value::Builtin(_) => "builtin",
             Value::Native(_) => "native",
             Value::Atom(_) => "atom",
+            Value::Regex(_) => "regex",
             #[cfg(feature = "gpu")]
             Value::GpuKernel(_) => "gpu-kernel",
             #[cfg(feature = "gpu")]
@@ -174,6 +178,7 @@ impl Value {
             Value::Builtin(b) => format!("#<builtin {}>", b.name),
             Value::Native(nf) => format!("#<native {}>", nf.name),
             Value::Atom(a) => format!("#<atom {}>", a.read().unwrap().to_pr_string()),
+            Value::Regex(r) => format!("#\"{}\"", r.as_str()),
             #[cfg(feature = "gpu")]
             Value::GpuKernel(k) => format!("#<gpu-kernel {}>", k.name),
             #[cfg(feature = "gpu")]
@@ -236,6 +241,7 @@ impl PartialEq for Value {
             (Map(a), Map(b)) => a == b,
             (Set(a), Set(b)) => a == b,
             (Atom(a), Atom(b)) => Arc::ptr_eq(a, b),
+            (Regex(a), Regex(b)) => a.as_str() == b.as_str(),
             #[cfg(feature = "gpu")]
             (GpuKernel(a), GpuKernel(b)) => Arc::ptr_eq(a, b),
             #[cfg(feature = "gpu")]
@@ -340,6 +346,10 @@ impl Hash for Value {
             Value::Atom(a) => {
                 15u8.hash(state);
                 (Arc::as_ptr(a) as usize).hash(state);
+            }
+            Value::Regex(r) => {
+                18u8.hash(state);
+                r.as_str().hash(state);
             }
             #[cfg(feature = "gpu")]
             Value::GpuKernel(k) => {

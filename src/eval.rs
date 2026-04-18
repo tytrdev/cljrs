@@ -201,7 +201,8 @@ pub fn eval(form: &Value, env: &Env) -> Result<Value> {
         | Value::Macro(_)
         | Value::Builtin(_)
         | Value::Native(_)
-        | Value::Atom(_) => Ok(form.clone()),
+        | Value::Atom(_)
+        | Value::Regex(_) => Ok(form.clone()),
         #[cfg(feature = "gpu")]
         Value::GpuKernel(_) | Value::GpuPixelKernel(_) => Ok(form.clone()),
         Value::Symbol(s) => env.lookup(s),

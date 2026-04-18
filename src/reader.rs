@@ -1,7 +1,18 @@
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::error::{Error, Result};
 use crate::value::Value;
+
+/// Process-wide counter for auto-gensym symbols created by syntax-quote
+/// forms (`foo#`). Each syntax-quoted form gets a fresh suffix so that
+/// macros expanded multiple times produce distinct hygienic names.
+static GENSYM_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+fn next_gensym_id() -> u64 {
+    GENSYM_COUNTER.fetch_add(1, Ordering::Relaxed)
+}
 
 pub fn read_all(src: &str) -> Result<Vec<Value>> {
     let mut p = Parser::new(src);
@@ -23,14 +34,85 @@ fn list_of(items: Vec<Value>) -> Value {
 }
 
 /// Reader-time transformation of a `syntax-quoted` form into code that,
-/// when evaluated, reconstructs the form — with `~x` evaluating `x` and
-/// `~@xs` splicing `xs` into the enclosing sequence.
+/// when evaluated, reconstructs the form. `~x` evaluates `x` and `~@xs`
+/// splices `xs` into the enclosing sequence.
+///
+/// Auto-gensym: any symbol ending in `#` (and not starting with `#'`)
+/// inside a syntax-quoted form is replaced with a fresh unique symbol,
+/// with the substitution shared across every occurrence of the same
+/// `name#` within a single `` `form `` invocation. That gives hygienic
+/// macro-local temporaries without manual gensym plumbing.
 ///
 /// Limitation: nested syntax-quote (``form) does NOT increase the unquote
-/// level the way Clojure's does — we expand eagerly. Works for the common
-/// single-level macro pattern; deeply nested quoting is a known gap.
-/// Auto-gensym (`foo#`) is not yet implemented.
+/// level the way Clojure's does. Works for the common single-level
+/// macro pattern; deeply nested quoting is a known gap.
 pub fn syntax_quote(form: &Value) -> Value {
+    let id = next_gensym_id();
+    let mut mapping: HashMap<Arc<str>, Arc<str>> = HashMap::new();
+    let rewritten = rewrite_gensyms(form, &mut mapping, id);
+    quote_form(&rewritten)
+}
+
+/// Walk `form`, replacing each `foo#` symbol with a fresh `foo__N__auto`
+/// shared across that invocation. Leaves unquoted sub-forms alone.
+fn rewrite_gensyms(
+    form: &Value,
+    mapping: &mut HashMap<Arc<str>, Arc<str>>,
+    id: u64,
+) -> Value {
+    match form {
+        Value::Symbol(s) => {
+            let name = s.as_ref();
+            if name.len() > 1 && name.ends_with('#') && !name.starts_with("#'") {
+                if let Some(existing) = mapping.get(s) {
+                    Value::Symbol(Arc::clone(existing))
+                } else {
+                    let base = &name[..name.len() - 1];
+                    let fresh: Arc<str> = Arc::from(format!("{base}__{id}__auto").as_str());
+                    mapping.insert(Arc::clone(s), Arc::clone(&fresh));
+                    Value::Symbol(fresh)
+                }
+            } else {
+                form.clone()
+            }
+        }
+        Value::List(xs) => {
+            // Don't descend into (quote ...) — quoted symbols aren't code.
+            if xs.len() == 2
+                && matches!(&xs[0], Value::Symbol(h) if h.as_ref() == "quote")
+            {
+                return form.clone();
+            }
+            let new: Vec<Value> = xs
+                .iter()
+                .map(|f| rewrite_gensyms(f, mapping, id))
+                .collect();
+            Value::List(Arc::new(new))
+        }
+        Value::Vector(xs) => Value::Vector(
+            xs.iter().map(|f| rewrite_gensyms(f, mapping, id)).collect(),
+        ),
+        Value::Set(xs) => Value::Set(
+            xs.iter().map(|f| rewrite_gensyms(f, mapping, id)).collect(),
+        ),
+        Value::Map(m) => {
+            let pairs: imbl::HashMap<Value, Value> = m
+                .iter()
+                .map(|(k, v)| {
+                    (
+                        rewrite_gensyms(k, mapping, id),
+                        rewrite_gensyms(v, mapping, id),
+                    )
+                })
+                .collect();
+            Value::Map(pairs)
+        }
+        _ => form.clone(),
+    }
+}
+
+/// Build the quoting expression for an already-gensym-rewritten form.
+fn quote_form(form: &Value) -> Value {
     match form {
         Value::Symbol(_) => list_of(vec![sym("quote"), form.clone()]),
         Value::List(xs) => wrap_seq(xs, /* vector */ false),
@@ -38,7 +120,6 @@ pub fn syntax_quote(form: &Value) -> Value {
             let tmp: Vec<Value> = xs.iter().cloned().collect();
             wrap_seq(&tmp, /* vector */ true)
         }
-        // maps, sets, and self-evaluating literals pass through quoted whole.
         Value::Map(_) => list_of(vec![sym("quote"), form.clone()]),
         _ => form.clone(),
     }
@@ -119,7 +200,7 @@ fn quoted_item(e: &Value) -> Value {
             _ => {}
         }
     }
-    list_of(vec![sym("list"), syntax_quote(e)])
+    list_of(vec![sym("list"), quote_form(e)])
 }
 
 pub fn read_one(src: &str) -> Result<Value> {
@@ -255,6 +336,45 @@ impl<'a> Parser<'a> {
                 self.pos += 1;
                 let items = self.read_seq(b'}')?;
                 Ok(Value::Set(items.into_iter().collect()))
+            }
+            b'"' => {
+                // #"pattern" — regex literal. The contents are taken
+                // verbatim; only `\"` is an escape (to embed a double-
+                // quote). Every other `\` is passed to the regex engine.
+                self.pos += 1; // consume opening "
+                let mut buf = Vec::new();
+                loop {
+                    let Some(&c) = self.src.get(self.pos) else {
+                        return Err(Error::Read("unterminated regex literal".into()));
+                    };
+                    if c == b'"' {
+                        self.pos += 1;
+                        break;
+                    }
+                    if c == b'\\' {
+                        let Some(&n) = self.src.get(self.pos + 1) else {
+                            return Err(Error::Read("bad escape in regex".into()));
+                        };
+                        if n == b'"' {
+                            buf.push(b'"');
+                            self.pos += 2;
+                            continue;
+                        }
+                        // Pass the backslash through to the regex engine.
+                        buf.push(b'\\');
+                        buf.push(n);
+                        self.pos += 2;
+                        continue;
+                    }
+                    buf.push(c);
+                    self.pos += 1;
+                }
+                let pat = String::from_utf8(buf)
+                    .map_err(|e| Error::Read(format!("invalid utf8 in regex: {e}")))?;
+                match regex::Regex::new(&pat) {
+                    Ok(r) => Ok(Value::Regex(Arc::new(r))),
+                    Err(e) => Err(Error::Read(format!("bad regex /{pat}/: {e}"))),
+                }
             }
             b'_' => {
                 self.pos += 1;

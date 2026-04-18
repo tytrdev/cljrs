@@ -26,6 +26,7 @@ gpu-demo = ["gpu", "dep:eframe"]
 # Hand-rolling these is a multi-thousand-line project; imbl is battle-
 # tested, dependency-light, and matches Clojure's semantics closely.
 imbl = "3"
+regex = "1"
 melior = { version = "0.27", optional = true }
 # Demo window + UI: eframe bundles egui + winit + a renderer; gives us
 # real sliders for live-coded params without hand-rolling widgets.
