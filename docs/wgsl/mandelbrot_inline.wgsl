@@ -17,247 +17,247 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (gid.x >= params.width || gid.y >= params.height) { return; }
     let k_x: i32 = i32(gid.x);
     let k_y: i32 = i32(gid.y);
-    let v_rate_0: f32 = (f32(0.05) + (f32(0.3) * (f32(params.s0) / f32(1000.0))));
-    let v_t_sec_1: f32 = (f32(0.001) * f32(params.t_ms));
-    let v_period_2: f32 = f32(30.0);
-    let v_t_cycle_3: f32 = (v_t_sec_1 - (v_period_2 * floor((v_t_sec_1 / v_period_2))));
-    let v_zoom_4: f32 = exp((v_rate_0 * v_t_cycle_3));
-    let v_tx_5: f32 = f32(-0.7436438870371587);
-    let v_ty_6: f32 = f32(0.1318259042053119);
-    let v_dx_7: f32 = (f32(0.001) * ((f32(2.0) * (f32(params.s1) / f32(1000.0))) - f32(1.0)));
-    let v_dy_8: f32 = (f32(0.001) * ((f32(2.0) * (f32(params.s2) / f32(1000.0))) - f32(1.0)));
-    let v_cx_9: f32 = (v_tx_5 + v_dx_7);
-    let v_cy_10: f32 = (v_ty_6 + v_dy_8);
-    let v_shift_11: f32 = (f32(6.2831853) * (f32(params.s3) / f32(1000.0)));
-    let v_aspect_12: f32 = (f32(i32(params.width)) / f32(i32(params.height)));
-    let v_fw_13: f32 = f32(i32(params.width));
-    let v_fh_14: f32 = f32(i32(params.height));
-    let v_iter_float_15: f32 = (f32(100.0) + (f32(40.0) * (log(v_zoom_4) / f32(0.6931))));
-    let v_max_iter_16: i32 = min(i32((2000i)), max(i32((64i)), i32(v_iter_float_15)));
-    let v_max_iter_f_17: f32 = f32(v_max_iter_16);
-    let v_px_size_18: f32 = (f32(2.0) / (v_fw_13 * v_zoom_4));
-    let v_py_size_19: f32 = (f32(2.0) / (v_fh_14 * v_zoom_4));
-    let v_u0_20: f32 = (((f32(2.0) * (f32(k_x) / v_fw_13)) - f32(1.0)) / v_zoom_4);
-    let v_v0_21: f32 = (((f32(2.0) * (f32(k_y) / v_fh_14)) - f32(1.0)) / v_zoom_4);
-    let v_base_re_22: f32 = (v_cx_9 + (v_u0_20 * v_aspect_12));
-    let v_base_im_23: f32 = (v_cy_10 + v_v0_21);
-    let v_c_re__24: f32 = (v_base_re_22 + (v_px_size_18 * (f32(-0.4375) * v_aspect_12)));
-    let v_c_im__25: f32 = (v_base_im_23 + (v_py_size_19 * f32(-0.0625)));
-    var _lv26_z_re: f32 = v_c_re__24;
-    var _lv27_z_im: f32 = v_c_im__25;
-    var _lv28_it: i32 = i32((0i));
-    var _lr29: f32 = 0.0;
+    let rate: f32 = 0.05 + (0.3 * (f32(params.s0) / 1000.0));
+    let t_sec: f32 = 0.001 * f32(params.t_ms);
+    let period: f32 = 30.0;
+    let t_cycle: f32 = t_sec - (period * floor((t_sec / period)));
+    let zoom: f32 = exp((rate * t_cycle));
+    let tx: f32 = -0.7436438870371587;
+    let ty: f32 = 0.1318259042053119;
+    let dx: f32 = 0.001 * ((2.0 * (f32(params.s1) / 1000.0)) - 1.0);
+    let dy: f32 = 0.001 * ((2.0 * (f32(params.s2) / 1000.0)) - 1.0);
+    let cx: f32 = tx + dx;
+    let cy: f32 = ty + dy;
+    let shift: f32 = 6.2831853 * (f32(params.s3) / 1000.0);
+    let aspect: f32 = f32(i32(params.width)) / f32(i32(params.height));
+    let fw: f32 = f32(i32(params.width));
+    let fh: f32 = f32(i32(params.height));
+    let iter_float: f32 = 100.0 + (40.0 * (log(zoom) / 0.6931));
+    let max_iter: i32 = min(2000i, max(64i, i32(iter_float)));
+    let max_iter_f: f32 = f32(max_iter);
+    let px_size: f32 = 2.0 / (fw * zoom);
+    let py_size: f32 = 2.0 / (fh * zoom);
+    let u0: f32 = ((2.0 * (f32(k_x) / fw)) - 1.0) / zoom;
+    let v0: f32 = ((2.0 * (f32(k_y) / fh)) - 1.0) / zoom;
+    let base_re: f32 = cx + (u0 * aspect);
+    let base_im: f32 = cy + v0;
+    let c_re_: f32 = base_re + (px_size * ((-0.4375) * aspect));
+    let c_im_: f32 = base_im + (py_size * (-0.0625));
+    var _lv0_z_re: f32 = c_re_;
+    var _lv1_z_im: f32 = c_im_;
+    var _lv2_it: i32 = 0i;
+    var _lr3: f32 = 0.0;
     loop {
-    if ((_lv28_it >= v_max_iter_16)) {
-    _lr29 = v_max_iter_f_17;
+    if ((_lv2_it >= max_iter)) {
+    _lr3 = max_iter_f;
     break;
     } else {
-    if ((((_lv26_z_re * _lv26_z_re) + (_lv27_z_im * _lv27_z_im)) >= f32(4.0))) {
-    _lr29 = (f32(_lv28_it) + (f32(1.0) - (log(log(((_lv26_z_re * _lv26_z_re) + (_lv27_z_im * _lv27_z_im)))) / f32(0.6931))));
+    if ((((_lv0_z_re * _lv0_z_re) + (_lv1_z_im * _lv1_z_im)) >= 4.0)) {
+    _lr3 = (f32(_lv2_it) + (1.0 - (log(log(((_lv0_z_re * _lv0_z_re) + (_lv1_z_im * _lv1_z_im)))) / 0.6931)));
     break;
     } else {
-    let _rt30: f32 = (((_lv26_z_re * _lv26_z_re) - (_lv27_z_im * _lv27_z_im)) + v_c_re__24);
-    let _rt31: f32 = ((f32(2.0) * (_lv26_z_re * _lv27_z_im)) + v_c_im__25);
-    let _rt32: i32 = (_lv28_it + i32((1i)));
-    _lv26_z_re = _rt30;
-    _lv27_z_im = _rt31;
-    _lv28_it = _rt32;
+    let _rt4: f32 = (((_lv0_z_re * _lv0_z_re) - (_lv1_z_im * _lv1_z_im)) + c_re_);
+    let _rt5: f32 = ((2.0 * (_lv0_z_re * _lv1_z_im)) + c_im_);
+    let _rt6: i32 = (_lv2_it + 1i);
+    _lv0_z_re = _rt4;
+    _lv1_z_im = _rt5;
+    _lv2_it = _rt6;
     continue;
     }
     }
     }
-    let v_s1v_33: f32 = _lr29;
-    let v_c_re__34: f32 = (v_base_re_22 + (v_px_size_18 * (f32(-0.1875) * v_aspect_12)));
-    let v_c_im__35: f32 = (v_base_im_23 + (v_py_size_19 * f32(-0.3125)));
-    var _lv36_z_re: f32 = v_c_re__34;
-    var _lv37_z_im: f32 = v_c_im__35;
-    var _lv38_it: i32 = i32((0i));
-    var _lr39: f32 = 0.0;
+    let s1v: f32 = _lr3;
+    let c_re__2: f32 = base_re + (px_size * ((-0.1875) * aspect));
+    let c_im__2: f32 = base_im + (py_size * (-0.3125));
+    var _lv7_z_re: f32 = c_re__2;
+    var _lv8_z_im: f32 = c_im__2;
+    var _lv9_it: i32 = 0i;
+    var _lr10: f32 = 0.0;
     loop {
-    if ((_lv38_it >= v_max_iter_16)) {
-    _lr39 = v_max_iter_f_17;
+    if ((_lv9_it >= max_iter)) {
+    _lr10 = max_iter_f;
     break;
     } else {
-    if ((((_lv36_z_re * _lv36_z_re) + (_lv37_z_im * _lv37_z_im)) >= f32(4.0))) {
-    _lr39 = (f32(_lv38_it) + (f32(1.0) - (log(log(((_lv36_z_re * _lv36_z_re) + (_lv37_z_im * _lv37_z_im)))) / f32(0.6931))));
+    if ((((_lv7_z_re * _lv7_z_re) + (_lv8_z_im * _lv8_z_im)) >= 4.0)) {
+    _lr10 = (f32(_lv9_it) + (1.0 - (log(log(((_lv7_z_re * _lv7_z_re) + (_lv8_z_im * _lv8_z_im)))) / 0.6931)));
     break;
     } else {
-    let _rt40: f32 = (((_lv36_z_re * _lv36_z_re) - (_lv37_z_im * _lv37_z_im)) + v_c_re__34);
-    let _rt41: f32 = ((f32(2.0) * (_lv36_z_re * _lv37_z_im)) + v_c_im__35);
-    let _rt42: i32 = (_lv38_it + i32((1i)));
-    _lv36_z_re = _rt40;
-    _lv37_z_im = _rt41;
-    _lv38_it = _rt42;
+    let _rt11: f32 = (((_lv7_z_re * _lv7_z_re) - (_lv8_z_im * _lv8_z_im)) + c_re__2);
+    let _rt12: f32 = ((2.0 * (_lv7_z_re * _lv8_z_im)) + c_im__2);
+    let _rt13: i32 = (_lv9_it + 1i);
+    _lv7_z_re = _rt11;
+    _lv8_z_im = _rt12;
+    _lv9_it = _rt13;
     continue;
     }
     }
     }
-    let v_s2v_43: f32 = _lr39;
-    let v_c_re__44: f32 = (v_base_re_22 + (v_px_size_18 * (f32(0.0625) * v_aspect_12)));
-    let v_c_im__45: f32 = (v_base_im_23 + (v_py_size_19 * f32(-0.4375)));
-    var _lv46_z_re: f32 = v_c_re__44;
-    var _lv47_z_im: f32 = v_c_im__45;
-    var _lv48_it: i32 = i32((0i));
-    var _lr49: f32 = 0.0;
+    let s2v: f32 = _lr10;
+    let c_re__3: f32 = base_re + (px_size * (0.0625 * aspect));
+    let c_im__3: f32 = base_im + (py_size * (-0.4375));
+    var _lv14_z_re: f32 = c_re__3;
+    var _lv15_z_im: f32 = c_im__3;
+    var _lv16_it: i32 = 0i;
+    var _lr17: f32 = 0.0;
     loop {
-    if ((_lv48_it >= v_max_iter_16)) {
-    _lr49 = v_max_iter_f_17;
+    if ((_lv16_it >= max_iter)) {
+    _lr17 = max_iter_f;
     break;
     } else {
-    if ((((_lv46_z_re * _lv46_z_re) + (_lv47_z_im * _lv47_z_im)) >= f32(4.0))) {
-    _lr49 = (f32(_lv48_it) + (f32(1.0) - (log(log(((_lv46_z_re * _lv46_z_re) + (_lv47_z_im * _lv47_z_im)))) / f32(0.6931))));
+    if ((((_lv14_z_re * _lv14_z_re) + (_lv15_z_im * _lv15_z_im)) >= 4.0)) {
+    _lr17 = (f32(_lv16_it) + (1.0 - (log(log(((_lv14_z_re * _lv14_z_re) + (_lv15_z_im * _lv15_z_im)))) / 0.6931)));
     break;
     } else {
-    let _rt50: f32 = (((_lv46_z_re * _lv46_z_re) - (_lv47_z_im * _lv47_z_im)) + v_c_re__44);
-    let _rt51: f32 = ((f32(2.0) * (_lv46_z_re * _lv47_z_im)) + v_c_im__45);
-    let _rt52: i32 = (_lv48_it + i32((1i)));
-    _lv46_z_re = _rt50;
-    _lv47_z_im = _rt51;
-    _lv48_it = _rt52;
+    let _rt18: f32 = (((_lv14_z_re * _lv14_z_re) - (_lv15_z_im * _lv15_z_im)) + c_re__3);
+    let _rt19: f32 = ((2.0 * (_lv14_z_re * _lv15_z_im)) + c_im__3);
+    let _rt20: i32 = (_lv16_it + 1i);
+    _lv14_z_re = _rt18;
+    _lv15_z_im = _rt19;
+    _lv16_it = _rt20;
     continue;
     }
     }
     }
-    let v_s3v_53: f32 = _lr49;
-    let v_c_re__54: f32 = (v_base_re_22 + (v_px_size_18 * (f32(0.3125) * v_aspect_12)));
-    let v_c_im__55: f32 = (v_base_im_23 + (v_py_size_19 * f32(-0.1875)));
-    var _lv56_z_re: f32 = v_c_re__54;
-    var _lv57_z_im: f32 = v_c_im__55;
-    var _lv58_it: i32 = i32((0i));
-    var _lr59: f32 = 0.0;
+    let s3v: f32 = _lr17;
+    let c_re__4: f32 = base_re + (px_size * (0.3125 * aspect));
+    let c_im__4: f32 = base_im + (py_size * (-0.1875));
+    var _lv21_z_re: f32 = c_re__4;
+    var _lv22_z_im: f32 = c_im__4;
+    var _lv23_it: i32 = 0i;
+    var _lr24: f32 = 0.0;
     loop {
-    if ((_lv58_it >= v_max_iter_16)) {
-    _lr59 = v_max_iter_f_17;
+    if ((_lv23_it >= max_iter)) {
+    _lr24 = max_iter_f;
     break;
     } else {
-    if ((((_lv56_z_re * _lv56_z_re) + (_lv57_z_im * _lv57_z_im)) >= f32(4.0))) {
-    _lr59 = (f32(_lv58_it) + (f32(1.0) - (log(log(((_lv56_z_re * _lv56_z_re) + (_lv57_z_im * _lv57_z_im)))) / f32(0.6931))));
+    if ((((_lv21_z_re * _lv21_z_re) + (_lv22_z_im * _lv22_z_im)) >= 4.0)) {
+    _lr24 = (f32(_lv23_it) + (1.0 - (log(log(((_lv21_z_re * _lv21_z_re) + (_lv22_z_im * _lv22_z_im)))) / 0.6931)));
     break;
     } else {
-    let _rt60: f32 = (((_lv56_z_re * _lv56_z_re) - (_lv57_z_im * _lv57_z_im)) + v_c_re__54);
-    let _rt61: f32 = ((f32(2.0) * (_lv56_z_re * _lv57_z_im)) + v_c_im__55);
-    let _rt62: i32 = (_lv58_it + i32((1i)));
-    _lv56_z_re = _rt60;
-    _lv57_z_im = _rt61;
-    _lv58_it = _rt62;
+    let _rt25: f32 = (((_lv21_z_re * _lv21_z_re) - (_lv22_z_im * _lv22_z_im)) + c_re__4);
+    let _rt26: f32 = ((2.0 * (_lv21_z_re * _lv22_z_im)) + c_im__4);
+    let _rt27: i32 = (_lv23_it + 1i);
+    _lv21_z_re = _rt25;
+    _lv22_z_im = _rt26;
+    _lv23_it = _rt27;
     continue;
     }
     }
     }
-    let v_s4v_63: f32 = _lr59;
-    let v_c_re__64: f32 = (v_base_re_22 + (v_px_size_18 * (f32(0.4375) * v_aspect_12)));
-    let v_c_im__65: f32 = (v_base_im_23 + (v_py_size_19 * f32(0.0625)));
-    var _lv66_z_re: f32 = v_c_re__64;
-    var _lv67_z_im: f32 = v_c_im__65;
-    var _lv68_it: i32 = i32((0i));
-    var _lr69: f32 = 0.0;
+    let s4v: f32 = _lr24;
+    let c_re__5: f32 = base_re + (px_size * (0.4375 * aspect));
+    let c_im__5: f32 = base_im + (py_size * 0.0625);
+    var _lv28_z_re: f32 = c_re__5;
+    var _lv29_z_im: f32 = c_im__5;
+    var _lv30_it: i32 = 0i;
+    var _lr31: f32 = 0.0;
     loop {
-    if ((_lv68_it >= v_max_iter_16)) {
-    _lr69 = v_max_iter_f_17;
+    if ((_lv30_it >= max_iter)) {
+    _lr31 = max_iter_f;
     break;
     } else {
-    if ((((_lv66_z_re * _lv66_z_re) + (_lv67_z_im * _lv67_z_im)) >= f32(4.0))) {
-    _lr69 = (f32(_lv68_it) + (f32(1.0) - (log(log(((_lv66_z_re * _lv66_z_re) + (_lv67_z_im * _lv67_z_im)))) / f32(0.6931))));
+    if ((((_lv28_z_re * _lv28_z_re) + (_lv29_z_im * _lv29_z_im)) >= 4.0)) {
+    _lr31 = (f32(_lv30_it) + (1.0 - (log(log(((_lv28_z_re * _lv28_z_re) + (_lv29_z_im * _lv29_z_im)))) / 0.6931)));
     break;
     } else {
-    let _rt70: f32 = (((_lv66_z_re * _lv66_z_re) - (_lv67_z_im * _lv67_z_im)) + v_c_re__64);
-    let _rt71: f32 = ((f32(2.0) * (_lv66_z_re * _lv67_z_im)) + v_c_im__65);
-    let _rt72: i32 = (_lv68_it + i32((1i)));
-    _lv66_z_re = _rt70;
-    _lv67_z_im = _rt71;
-    _lv68_it = _rt72;
+    let _rt32: f32 = (((_lv28_z_re * _lv28_z_re) - (_lv29_z_im * _lv29_z_im)) + c_re__5);
+    let _rt33: f32 = ((2.0 * (_lv28_z_re * _lv29_z_im)) + c_im__5);
+    let _rt34: i32 = (_lv30_it + 1i);
+    _lv28_z_re = _rt32;
+    _lv29_z_im = _rt33;
+    _lv30_it = _rt34;
     continue;
     }
     }
     }
-    let v_s5v_73: f32 = _lr69;
-    let v_c_re__74: f32 = (v_base_re_22 + (v_px_size_18 * (f32(0.1875) * v_aspect_12)));
-    let v_c_im__75: f32 = (v_base_im_23 + (v_py_size_19 * f32(0.3125)));
-    var _lv76_z_re: f32 = v_c_re__74;
-    var _lv77_z_im: f32 = v_c_im__75;
-    var _lv78_it: i32 = i32((0i));
-    var _lr79: f32 = 0.0;
+    let s5v: f32 = _lr31;
+    let c_re__6: f32 = base_re + (px_size * (0.1875 * aspect));
+    let c_im__6: f32 = base_im + (py_size * 0.3125);
+    var _lv35_z_re: f32 = c_re__6;
+    var _lv36_z_im: f32 = c_im__6;
+    var _lv37_it: i32 = 0i;
+    var _lr38: f32 = 0.0;
     loop {
-    if ((_lv78_it >= v_max_iter_16)) {
-    _lr79 = v_max_iter_f_17;
+    if ((_lv37_it >= max_iter)) {
+    _lr38 = max_iter_f;
     break;
     } else {
-    if ((((_lv76_z_re * _lv76_z_re) + (_lv77_z_im * _lv77_z_im)) >= f32(4.0))) {
-    _lr79 = (f32(_lv78_it) + (f32(1.0) - (log(log(((_lv76_z_re * _lv76_z_re) + (_lv77_z_im * _lv77_z_im)))) / f32(0.6931))));
+    if ((((_lv35_z_re * _lv35_z_re) + (_lv36_z_im * _lv36_z_im)) >= 4.0)) {
+    _lr38 = (f32(_lv37_it) + (1.0 - (log(log(((_lv35_z_re * _lv35_z_re) + (_lv36_z_im * _lv36_z_im)))) / 0.6931)));
     break;
     } else {
-    let _rt80: f32 = (((_lv76_z_re * _lv76_z_re) - (_lv77_z_im * _lv77_z_im)) + v_c_re__74);
-    let _rt81: f32 = ((f32(2.0) * (_lv76_z_re * _lv77_z_im)) + v_c_im__75);
-    let _rt82: i32 = (_lv78_it + i32((1i)));
-    _lv76_z_re = _rt80;
-    _lv77_z_im = _rt81;
-    _lv78_it = _rt82;
+    let _rt39: f32 = (((_lv35_z_re * _lv35_z_re) - (_lv36_z_im * _lv36_z_im)) + c_re__6);
+    let _rt40: f32 = ((2.0 * (_lv35_z_re * _lv36_z_im)) + c_im__6);
+    let _rt41: i32 = (_lv37_it + 1i);
+    _lv35_z_re = _rt39;
+    _lv36_z_im = _rt40;
+    _lv37_it = _rt41;
     continue;
     }
     }
     }
-    let v_s6v_83: f32 = _lr79;
-    let v_c_re__84: f32 = (v_base_re_22 + (v_px_size_18 * (f32(-0.0625) * v_aspect_12)));
-    let v_c_im__85: f32 = (v_base_im_23 + (v_py_size_19 * f32(0.4375)));
-    var _lv86_z_re: f32 = v_c_re__84;
-    var _lv87_z_im: f32 = v_c_im__85;
-    var _lv88_it: i32 = i32((0i));
-    var _lr89: f32 = 0.0;
+    let s6v: f32 = _lr38;
+    let c_re__7: f32 = base_re + (px_size * ((-0.0625) * aspect));
+    let c_im__7: f32 = base_im + (py_size * 0.4375);
+    var _lv42_z_re: f32 = c_re__7;
+    var _lv43_z_im: f32 = c_im__7;
+    var _lv44_it: i32 = 0i;
+    var _lr45: f32 = 0.0;
     loop {
-    if ((_lv88_it >= v_max_iter_16)) {
-    _lr89 = v_max_iter_f_17;
+    if ((_lv44_it >= max_iter)) {
+    _lr45 = max_iter_f;
     break;
     } else {
-    if ((((_lv86_z_re * _lv86_z_re) + (_lv87_z_im * _lv87_z_im)) >= f32(4.0))) {
-    _lr89 = (f32(_lv88_it) + (f32(1.0) - (log(log(((_lv86_z_re * _lv86_z_re) + (_lv87_z_im * _lv87_z_im)))) / f32(0.6931))));
+    if ((((_lv42_z_re * _lv42_z_re) + (_lv43_z_im * _lv43_z_im)) >= 4.0)) {
+    _lr45 = (f32(_lv44_it) + (1.0 - (log(log(((_lv42_z_re * _lv42_z_re) + (_lv43_z_im * _lv43_z_im)))) / 0.6931)));
     break;
     } else {
-    let _rt90: f32 = (((_lv86_z_re * _lv86_z_re) - (_lv87_z_im * _lv87_z_im)) + v_c_re__84);
-    let _rt91: f32 = ((f32(2.0) * (_lv86_z_re * _lv87_z_im)) + v_c_im__85);
-    let _rt92: i32 = (_lv88_it + i32((1i)));
-    _lv86_z_re = _rt90;
-    _lv87_z_im = _rt91;
-    _lv88_it = _rt92;
+    let _rt46: f32 = (((_lv42_z_re * _lv42_z_re) - (_lv43_z_im * _lv43_z_im)) + c_re__7);
+    let _rt47: f32 = ((2.0 * (_lv42_z_re * _lv43_z_im)) + c_im__7);
+    let _rt48: i32 = (_lv44_it + 1i);
+    _lv42_z_re = _rt46;
+    _lv43_z_im = _rt47;
+    _lv44_it = _rt48;
     continue;
     }
     }
     }
-    let v_s7v_93: f32 = _lr89;
-    let v_c_re__94: f32 = (v_base_re_22 + (v_px_size_18 * (f32(-0.3125) * v_aspect_12)));
-    let v_c_im__95: f32 = (v_base_im_23 + (v_py_size_19 * f32(0.1875)));
-    var _lv96_z_re: f32 = v_c_re__94;
-    var _lv97_z_im: f32 = v_c_im__95;
-    var _lv98_it: i32 = i32((0i));
-    var _lr99: f32 = 0.0;
+    let s7v: f32 = _lr45;
+    let c_re__8: f32 = base_re + (px_size * ((-0.3125) * aspect));
+    let c_im__8: f32 = base_im + (py_size * 0.1875);
+    var _lv49_z_re: f32 = c_re__8;
+    var _lv50_z_im: f32 = c_im__8;
+    var _lv51_it: i32 = 0i;
+    var _lr52: f32 = 0.0;
     loop {
-    if ((_lv98_it >= v_max_iter_16)) {
-    _lr99 = v_max_iter_f_17;
+    if ((_lv51_it >= max_iter)) {
+    _lr52 = max_iter_f;
     break;
     } else {
-    if ((((_lv96_z_re * _lv96_z_re) + (_lv97_z_im * _lv97_z_im)) >= f32(4.0))) {
-    _lr99 = (f32(_lv98_it) + (f32(1.0) - (log(log(((_lv96_z_re * _lv96_z_re) + (_lv97_z_im * _lv97_z_im)))) / f32(0.6931))));
+    if ((((_lv49_z_re * _lv49_z_re) + (_lv50_z_im * _lv50_z_im)) >= 4.0)) {
+    _lr52 = (f32(_lv51_it) + (1.0 - (log(log(((_lv49_z_re * _lv49_z_re) + (_lv50_z_im * _lv50_z_im)))) / 0.6931)));
     break;
     } else {
-    let _rt100: f32 = (((_lv96_z_re * _lv96_z_re) - (_lv97_z_im * _lv97_z_im)) + v_c_re__94);
-    let _rt101: f32 = ((f32(2.0) * (_lv96_z_re * _lv97_z_im)) + v_c_im__95);
-    let _rt102: i32 = (_lv98_it + i32((1i)));
-    _lv96_z_re = _rt100;
-    _lv97_z_im = _rt101;
-    _lv98_it = _rt102;
+    let _rt53: f32 = (((_lv49_z_re * _lv49_z_re) - (_lv50_z_im * _lv50_z_im)) + c_re__8);
+    let _rt54: f32 = ((2.0 * (_lv49_z_re * _lv50_z_im)) + c_im__8);
+    let _rt55: i32 = (_lv51_it + 1i);
+    _lv49_z_re = _rt53;
+    _lv50_z_im = _rt54;
+    _lv51_it = _rt55;
     continue;
     }
     }
     }
-    let v_s8v_103: f32 = _lr99;
-    let v_avg_104: f32 = (f32(0.125) * (((v_s1v_33 + v_s2v_43) + (v_s3v_53 + v_s4v_63)) + ((v_s5v_73 + v_s6v_83) + (v_s7v_93 + v_s8v_103))));
-    let v_frac_in_105: f32 = (f32(0.125) * (((select(f32(0.0), f32(1.0), (v_s1v_33 >= v_max_iter_f_17)) + select(f32(0.0), f32(1.0), (v_s2v_43 >= v_max_iter_f_17))) + (select(f32(0.0), f32(1.0), (v_s3v_53 >= v_max_iter_f_17)) + select(f32(0.0), f32(1.0), (v_s4v_63 >= v_max_iter_f_17)))) + ((select(f32(0.0), f32(1.0), (v_s5v_73 >= v_max_iter_f_17)) + select(f32(0.0), f32(1.0), (v_s6v_83 >= v_max_iter_f_17))) + (select(f32(0.0), f32(1.0), (v_s7v_93 >= v_max_iter_f_17)) + select(f32(0.0), f32(1.0), (v_s8v_103 >= v_max_iter_f_17))))));
-    let v_cval_106: f32 = sqrt((v_avg_104 / v_max_iter_f_17));
-    let v_keep_107: f32 = (f32(1.0) - v_frac_in_105);
-    let v_r_108: f32 = (v_keep_107 * (f32(0.5) * (f32(1.0) + sin(((v_cval_106 * f32(12.0)) + v_shift_11)))));
-    let v_g_109: f32 = (v_keep_107 * (f32(0.5) * (f32(1.0) + sin(((v_cval_106 * f32(12.0)) + (v_shift_11 + f32(2.1)))))));
-    let v_b_110: f32 = (v_keep_107 * (f32(0.5) * (f32(1.0) + sin(((v_cval_106 * f32(12.0)) + (v_shift_11 + f32(4.2)))))));
-    let v_ri_111: u32 = u32(min(i32((255i)), max(i32((0i)), i32((f32(255.0) * v_r_108)))));
-    let v_gi_112: u32 = u32(min(i32((255i)), max(i32((0i)), i32((f32(255.0) * v_g_109)))));
-    let v_bi_113: u32 = u32(min(i32((255i)), max(i32((0i)), i32((f32(255.0) * v_b_110)))));
-    dst[gid.y * params.width + gid.x] = (((v_ri_111 << u32((16i))) | (v_gi_112 << u32((8i)))) | v_bi_113);
+    let s8v: f32 = _lr52;
+    let avg: f32 = 0.125 * (((s1v + s2v) + (s3v + s4v)) + ((s5v + s6v) + (s7v + s8v)));
+    let frac_in: f32 = 0.125 * (((select(0.0, 1.0, (s1v >= max_iter_f)) + select(0.0, 1.0, (s2v >= max_iter_f))) + (select(0.0, 1.0, (s3v >= max_iter_f)) + select(0.0, 1.0, (s4v >= max_iter_f)))) + ((select(0.0, 1.0, (s5v >= max_iter_f)) + select(0.0, 1.0, (s6v >= max_iter_f))) + (select(0.0, 1.0, (s7v >= max_iter_f)) + select(0.0, 1.0, (s8v >= max_iter_f)))));
+    let cval: f32 = sqrt((avg / max_iter_f));
+    let keep: f32 = 1.0 - frac_in;
+    let r: f32 = keep * (0.5 * (1.0 + sin(((cval * 12.0) + shift))));
+    let g: f32 = keep * (0.5 * (1.0 + sin(((cval * 12.0) + (shift + 2.1)))));
+    let b: f32 = keep * (0.5 * (1.0 + sin(((cval * 12.0) + (shift + 4.2)))));
+    let ri: u32 = u32(min(255i, max(0i, i32((255.0 * r)))));
+    let gi: u32 = u32(min(255i, max(0i, i32((255.0 * g)))));
+    let bi: u32 = u32(min(255i, max(0i, i32((255.0 * b)))));
+    dst[gid.y * params.width + gid.x] = (((ri << 16u) | (gi << 8u)) | bi);
 }

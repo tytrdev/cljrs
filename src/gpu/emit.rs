@@ -79,6 +79,35 @@ pub fn parse_gpu_type(name: &str) -> Result<Ty> {
     }
 }
 
+/// Strip one layer of matched outer parens, if the entire expression
+/// is wrapped in them. Example: `(a + b)` -> `a + b`. Preserves
+/// expressions that only happen to start with `(` (like `(a + b) * c`)
+/// by checking matching depth.
+fn trim_outer_parens(s: &str) -> String {
+    let s = s.trim();
+    if !s.starts_with('(') || !s.ends_with(')') {
+        return s.to_string();
+    }
+    let bytes = s.as_bytes();
+    let mut depth = 0i32;
+    for (i, &b) in bytes.iter().enumerate() {
+        if b == b'(' {
+            depth += 1;
+        } else if b == b')' {
+            depth -= 1;
+            // If we hit depth 0 before the last char, the outer
+            // parens don't enclose the whole expression.
+            if depth == 0 && i < bytes.len() - 1 {
+                return s.to_string();
+            }
+        }
+    }
+    if depth == 0 && bytes.len() >= 2 {
+        return s[1..s.len() - 1].to_string();
+    }
+    s.to_string()
+}
+
 /// WGSL identifiers can't use `-` (or other Clojure-legal symbol chars).
 /// Loop vars get prefixed with `_lv<counter>_` anyway, so we just need
 /// to strip the unfriendly chars to keep WGSL parsers happy while
@@ -268,6 +297,10 @@ struct Ctx {
     body: String,
     counter: usize,
     opts: EmitOptions,
+    /// WGSL identifiers already emitted. Used in readable mode to
+    /// append a shadow suffix only when a user let name collides with
+    /// an earlier binding.
+    used_names: std::collections::HashSet<String>,
 }
 
 impl Ctx {
@@ -279,7 +312,24 @@ impl Ctx {
             body: String::new(),
             counter: 0,
             opts,
+            used_names: std::collections::HashSet::new(),
         }
+    }
+
+    fn claim_name(&mut self, desired: &str) -> String {
+        let base = sanitize_ident(desired);
+        if !self.used_names.contains(&base) {
+            self.used_names.insert(base.clone());
+            return base;
+        }
+        for n in 2.. {
+            let cand = format!("{base}_{n}");
+            if !self.used_names.contains(&cand) {
+                self.used_names.insert(cand.clone());
+                return cand;
+            }
+        }
+        unreachable!()
     }
     fn fresh(&mut self) -> String {
         let n = self.counter;
@@ -309,19 +359,33 @@ impl Ctx {
 
     fn emit(&mut self, form: &Value, scope: &Scope) -> Result<Val> {
         match form {
+            // Negative int literals need a leading unary minus *outside*
+            // the suffix (WGSL disallows `-5i`, wants `-(5i)`). Positive
+            // literals emit bare `5i` without enclosing parens so the
+            // readable output isn't drowned in them.
             Value::Int(n) => Ok(Val {
-                expr: format!("({}i)", n),
+                expr: if *n < 0 {
+                    format!("-({}i)", -n)
+                } else {
+                    format!("{}i", n)
+                },
                 ty: Ty::I32,
             }),
+            // Float literals: emit a plain decimal (WGSL auto-promotes
+            // abstract float to f32 in arithmetic). No `f32(...)` wrap
+            // needed — that was this emitter's biggest visual noise.
             Value::Float(f) => {
-                // Always emit a decimal so WGSL parses as f32.
                 let lit = if f.is_finite() && f.fract() == 0.0 {
                     format!("{f:.1}")
                 } else {
                     format!("{f}")
                 };
                 Ok(Val {
-                    expr: format!("f32({lit})"),
+                    expr: if *f < 0.0 {
+                        format!("({lit})")
+                    } else {
+                        lit
+                    },
                     ty: Ty::F32,
                 })
             }
@@ -496,15 +560,15 @@ impl Ctx {
             };
             let val = self.emit(&bindings[i + 1], &cur)?;
             // Readable mode: keep the user's name in the WGSL output so
-            // the structure mirrors the cljrs source. Optimized mode:
-            // fall through to the anonymous SSA `_sN` path.
+            // the structure mirrors the cljrs source. A shadow suffix
+            // only appears if the same name is re-bound later.
+            // Optimized mode: fall through to the anonymous SSA `_sN`.
             let bound = if self.opts.inline {
-                let wgsl_name = format!("v_{}_{}", sanitize_ident(&name), self.counter);
-                self.counter += 1;
+                let wgsl_name = self.claim_name(&name);
                 self.line(&format!(
                     "let {wgsl_name}: {} = {};",
                     val.ty.as_str(),
-                    val.expr
+                    trim_outer_parens(&val.expr)
                 ));
                 Val { expr: wgsl_name, ty: val.ty }
             } else {
@@ -538,7 +602,22 @@ impl Ctx {
                 got: xs.len() - 1,
             });
         }
+        // Peephole: a cast of an integer literal to u32 folds to a
+        // WGSL u-suffixed literal (16u), and no-op casts (f32 to f32)
+        // drop the wrapper entirely.
+        if let Value::Int(n) = &xs[1]
+            && matches!(to, Ty::U32)
+            && *n >= 0
+        {
+            return Ok(Val {
+                expr: format!("{}u", n),
+                ty: Ty::U32,
+            });
+        }
         let v = self.emit(&xs[1], scope)?;
+        if v.ty == to {
+            return Ok(v);
+        }
         Ok(Val {
             expr: format!("{}({})", to.as_str(), v.expr),
             ty: to,
