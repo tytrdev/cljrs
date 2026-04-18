@@ -145,6 +145,10 @@
 
 (def PLAYER-START {:x 50 :y 300 :vx 0 :vy 0 :on-ground? false})
 
+;; History = vec of {:state s :input [L R J]} frames.
+;; Replay uses :input so the ghost shows "what would have happened
+;; from this past point with today's constants and the same key press
+;; sequence" — change JUMP-V while rewound and the arc redraws.
 (defonce state   (atom {:player PLAYER-START :frame 0}))
 (defonce history (atom []))
 
@@ -195,57 +199,66 @@
                 :on-ground? (if landed? true false))
         (update :frame inc))))
 
-(defn- push-history [h s]
-  (let [h' (conj h s) n (count h')]
+(defn- push-history [h entry]
+  (let [h' (conj h entry) n (count h')]
     (if (> n HISTORY-LEN) (vec (drop (- n HISTORY-LEN) h')) h')))
 
 (defn tick! [L R J]
   (swap! state step (= L 1) (= R 1) (= J 1))
-  (swap! history push-history @state)
+  (swap! history push-history {:state @state :input [L R J]})
   nil)
 
 (defn respawn! []
   (swap! state assoc :player PLAYER-START)
   nil)
 
-(defn- state-readout [s]
-  (let [p (:player s)]
-    [(:x p) (:y p)
-     (if (:on-ground? p) 1.0 0.0)
-     (:vx p) (:vy p)
-     (:frame s)]))
-
-(defn player-state [] (state-readout @state))
-(defn history-size [] [(count @history)])
-
-(defn snapshot-at [k]
-  (let [h @history n (count h)]
-    (if (or (< k 0) (>= k n))
-      (state-readout @state)
-      (state-readout (nth h k)))))
-
 (defn fork-from! [k]
   (let [h @history n (count h)]
     (when (and (>= k 0) (< k n))
-      (reset! state (nth h k)))
+      (reset! state (:state (nth h k))))
     nil))
 
-(defn- predict-from [w L? R? J? n]
-  (loop [w w i 0 out []]
-    (if (= i n)
+;; Pure forward simulation from a state, consuming a sequence of
+;; [L R J] triples. Returns a flat [x y x y ...] vector.
+(defn- predict-from [w inputs]
+  (loop [w w xs inputs out []]
+    (if (empty? xs)
       out
-      (let [w' (step w L? R? J?)
+      (let [[L R J] (first xs)
+            w' (step w (= L 1) (= R 1) (= J 1))
             p  (:player w')]
-        (recur w' (inc i) (-> out (conj (:x p)) (conj (:y p))))))))
+        (recur w' (rest xs) (-> out (conj (:x p)) (conj (:y p))))))))
 
-(defn predict [L R J]
-  (predict-from @state (= L 1) (= R 1) (= J 1) PREDICT-LEN))
-
-(defn predict-at [k L R J]
+;; One call per render tick: optionally advance the live sim, then
+;; return a flat vector of [display-x display-y on-ground vx vy frame
+;;                          history-size live-x live-y  ...ghost xy pairs].
+;; advance 1 = run live tick; k = -1 means live, else index into history.
+(defn frame-step! [advance k L R J]
+  (when (= advance 1) (tick! L R J))
   (let [h @history
         n (count h)
-        base (if (and (>= k 0) (< k n)) (nth h k) @state)]
-    (predict-from base (= L 1) (= R 1) (= J 1) PREDICT-LEN)))
+        live? (< k 0)
+        entry (when (and (not live?) (< k n)) (nth h k))
+        s (if live? @state (if entry (:state entry) @state))
+        p (:player s)
+        ;; Inputs used for the ghost:
+        ;; - live: repeat currently-held keys PREDICT-LEN times
+        ;; - scrubbed: take the actually-recorded inputs AFTER k
+        inputs (if live?
+                 (vec (repeat PREDICT-LEN [L R J]))
+                 (vec (take PREDICT-LEN
+                            (map :input
+                                 (drop (inc k) h)))))
+        ghost (predict-from s inputs)
+        lp (:player @state)
+        live-xy [(:x lp) (:y lp)]]
+    (-> [(:x p) (:y p)
+         (if (:on-ground? p) 1.0 0.0)
+         (:vx p) (:vy p)
+         (:frame s)
+         n
+         (first live-xy) (second live-xy)]
+        (into ghost))))
 
 (defn level-flat []
   (vec (mapcat identity LEVEL)))
@@ -412,36 +425,18 @@
 
       try {
         const L = keys.L ? 1 : 0, R = keys.R ? 1 : 0, J = keys.J ? 1 : 0;
-
-        // advance sim unless paused or scrubbing
-        if (!paused && !scrubbing) {
-          repl.eval(`(tick! ${L} ${R} ${J})`);
+        const advance = (!paused && !scrubbing) ? 1 : 0;
+        const k = scrubbing ? scrubIndex : -1;
+        // ONE Clojure call per frame: ticks + returns state + ghost.
+        // Layout: [px py og vx vy frame  hsize  lx ly  ...ghostXY pairs]
+        const out = repl.eval_floats(`(frame-step! ${advance} ${k} ${L} ${R} ${J})`);
+        if (out.length >= 9) {
+          lastPlayer = [out[0], out[1], out[2], out[3], out[4], out[5]];
+          historySize = out[6] | 0;
+          lastLivePlayer = scrubbing ? [out[7], out[8]] : null;
+          predicted = ghostOn ? out.slice(9) : new Float32Array(0);
         }
 
-        // pull latest history size
-        const hs = repl.eval_floats("(history-size)");
-        if (hs.length >= 1) historySize = hs[0] | 0;
-
-        // display state + predicted trail
-        if (scrubbing) {
-          const ps = repl.eval_floats(`(snapshot-at ${scrubIndex})`);
-          if (ps.length >= 6) lastPlayer = Array.from(ps);
-          if (ghostOn) {
-            predicted = repl.eval_floats(`(predict-at ${scrubIndex} ${L} ${R} ${J})`);
-          }
-          const liveFrame = historySize > 0 ? historySize - 1 : 0;
-          const livePs = repl.eval_floats("(player-state)");
-          lastLivePlayer = livePs.length >= 2 ? Array.from(livePs) : null;
-        } else {
-          const ps = repl.eval_floats("(player-state)");
-          if (ps.length >= 6) lastPlayer = Array.from(ps);
-          if (ghostOn) {
-            predicted = repl.eval_floats(`(predict ${L} ${R} ${J})`);
-          }
-          lastLivePlayer = null;
-        }
-
-        // keep scrubber max in sync; if live, slider tracks right edge
         scrub.max = Math.max(1, historySize);
         if (!scrubbing) {
           scrub.value = historySize;

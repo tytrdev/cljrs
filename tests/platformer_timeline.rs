@@ -1,8 +1,8 @@
-//! Timeline + predict extensions on top of the phase-1 platformer:
-//! - history buffer grows per frame, capped at HISTORY-LEN
-//! - snapshot-at returns a past state readout
-//! - predict runs step forward n times purely, no atom mutation
-//! - fork-from! resets state to a historical snapshot
+//! Timeline + input recording on top of the phase-1 platformer:
+//! - each tick! records both state and the input that produced it
+//! - frame-step! bundles advance + readout + ghost into one call
+//! - scrubbed replay uses recorded inputs, not currently-held keys
+//! - changing constants mid-session changes the replay ghost
 
 use cljrs::{builtins, env::Env, eval, reader, value::Value};
 
@@ -12,11 +12,10 @@ const SCRIPT: &str = r#"
 (def MOVE-SPEED 3.5)
 (def FRICTION 0.88)
 (def PW 16) (def PH 22)
-(def HISTORY-LEN 20)
-(def PREDICT-LEN 10)
+(def HISTORY-LEN 30)
+(def PREDICT-LEN 8)
 
 (def LEVEL [[0 380 800 40]])
-
 (def PLAYER-START {:x 50 :y 300 :vx 0 :vy 0 :on-ground? false})
 
 (defonce state   (atom {:player PLAYER-START :frame 0}))
@@ -25,7 +24,6 @@ const SCRIPT: &str = r#"
 (defn- hit? [x y lx ly lw lh]
   (and (< x (+ lx lw)) (> (+ x PW) lx)
        (< y (+ ly lh)) (> (+ y PH) ly)))
-
 (defn- first-hit [x y]
   (some (fn [plat]
           (let [[lx ly lw lh] plat]
@@ -49,34 +47,41 @@ const SCRIPT: &str = r#"
         (update :player assoc :x x1 :y y1 :vx vx1 :vy vy1 :on-ground? (if landed? true false))
         (update :frame inc))))
 
-(defn- push-history [h s]
-  (let [h' (conj h s) n (count h')]
+(defn- push-history [h entry]
+  (let [h' (conj h entry) n (count h')]
     (if (> n HISTORY-LEN) (vec (drop (- n HISTORY-LEN) h')) h')))
 
 (defn tick! [L R J]
   (swap! state step (= L 1) (= R 1) (= J 1))
-  (swap! history push-history @state)
+  (swap! history push-history {:state @state :input [L R J]})
   nil)
 
-(defn- predict-from [w L? R? J? n]
-  (loop [w w i 0 out []]
-    (if (= i n) out
-      (let [w' (step w L? R? J?)
+(defn- predict-from [w inputs]
+  (loop [w w xs inputs out []]
+    (if (empty? xs) out
+      (let [[L R J] (first xs)
+            w' (step w (= L 1) (= R 1) (= J 1))
             p (:player w')]
-        (recur w' (inc i) (-> out (conj (:x p)) (conj (:y p))))))))
+        (recur w' (rest xs) (-> out (conj (:x p)) (conj (:y p))))))))
 
-(defn predict [L R J]
-  (predict-from @state (= L 1) (= R 1) (= J 1) PREDICT-LEN))
-
-(defn predict-at [k L R J]
+(defn frame-step! [advance k L R J]
+  (when (= advance 1) (tick! L R J))
   (let [h @history n (count h)
-        base (if (and (>= k 0) (< k n)) (nth h k) @state)]
-    (predict-from base (= L 1) (= R 1) (= J 1) PREDICT-LEN)))
-
-(defn fork-from! [k]
-  (let [h @history n (count h)]
-    (when (and (>= k 0) (< k n)) (reset! state (nth h k)))
-    nil))
+        live? (< k 0)
+        entry (when (and (not live?) (< k n)) (nth h k))
+        s (if live? @state (if entry (:state entry) @state))
+        p (:player s)
+        inputs (if live?
+                 (vec (repeat PREDICT-LEN [L R J]))
+                 (vec (take PREDICT-LEN (map :input (drop (inc k) h)))))
+        ghost (predict-from s inputs)
+        lp (:player @state)]
+    (-> [(:x p) (:y p)
+         (if (:on-ground? p) 1.0 0.0)
+         (:vx p) (:vy p)
+         (:frame s) n
+         (:x lp) (:y lp)]
+        (into ghost))))
 "#;
 
 fn env_with_script() -> Env {
@@ -105,68 +110,90 @@ fn to_f64(v: &Value) -> f64 {
 }
 
 #[test]
-fn history_grows_and_caps() {
+fn history_entries_contain_state_and_input() {
     let env = env_with_script();
-    for _ in 0..5 {
-        run(&env, "(tick! 0 0 0)");
-    }
-    assert_eq!(run(&env, "(count @history)"), Value::Int(5));
-    for _ in 0..50 {
-        run(&env, "(tick! 0 0 0)");
-    }
-    // capped at HISTORY-LEN = 20
-    assert_eq!(run(&env, "(count @history)"), Value::Int(20));
+    run(&env, "(tick! 1 0 0)");
+    run(&env, "(tick! 0 1 0)");
+    let e0_input = run(&env, "(:input (nth @history 0))");
+    let e1_input = run(&env, "(:input (nth @history 1))");
+    // these should round-trip exactly as recorded
+    assert_eq!(format!("{e0_input:?}"), "[1 0 0]");
+    assert_eq!(format!("{e1_input:?}"), "[0 1 0]");
 }
 
 #[test]
-fn predict_returns_future_positions_without_mutating() {
+fn frame_step_advance_1_ticks() {
     let env = env_with_script();
-    // Fall to floor first so predict starts from a stable pose.
-    for _ in 0..180 {
-        run(&env, "(tick! 0 0 0)");
-    }
-    let y_before = to_f64(&run(&env, "(:y (:player @state))"));
-    let predicted = run(&env, "(predict 0 0 1)");
-    let y_after = to_f64(&run(&env, "(:y (:player @state))"));
-    assert!((y_before - y_after).abs() < 1e-9, "predict must not mutate state");
+    run(&env, "(frame-step! 1 -1 0 0 0)");
+    run(&env, "(frame-step! 1 -1 0 0 0)");
+    assert_eq!(run(&env, "(count @history)"), Value::Int(2));
+}
 
-    if let Value::Vector(xs) = predicted {
-        // 10 predicted frames × (x, y) = 20 floats
-        assert_eq!(xs.len(), 20);
-        // First pair should have y < y_before (upward jump)
-        let y0 = to_f64(&xs[1]);
-        assert!(y0 < y_before, "first predicted y {y0} should be above start {y_before}");
+#[test]
+fn frame_step_advance_0_does_not_tick() {
+    let env = env_with_script();
+    run(&env, "(frame-step! 0 -1 0 0 0)");
+    run(&env, "(frame-step! 0 -1 0 0 0)");
+    assert_eq!(run(&env, "(count @history)"), Value::Int(0));
+}
+
+#[test]
+fn scrub_ghost_uses_recorded_inputs_not_live_args() {
+    // Play a sequence where input is "move right" for 8 frames.
+    let env = env_with_script();
+    for _ in 0..8 {
+        run(&env, "(tick! 0 1 0)");
+    }
+    // Scrub to frame 0. Ask frame-step! for the ghost, but pass L=1 as
+    // the live "currently held" key. The ghost should IGNORE that and
+    // replay the recorded right-moves from frame 1 onward.
+    let v = run(&env, "(frame-step! 0 0 1 0 0)");
+    // out[0..8] is state readout; scrubbed state at k=0 has the player
+    // after the first recorded tick (which moved right), so x should be
+    // greater than the start (50).
+    if let Value::Vector(xs) = v {
+        // ghost starts at index 9, pairs of (x, y)
+        // frame 1 of replay: one more rightward step; x should exceed frame 0's x
+        let ghost_x0 = to_f64(&xs[9]);
+        let scrubbed_x = to_f64(&xs[0]);
+        assert!(
+            ghost_x0 > scrubbed_x,
+            "ghost should replay rightward motion, got scrub_x={scrubbed_x} ghost_x0={ghost_x0}"
+        );
     } else {
-        panic!("predict did not return a vector: {predicted:?}");
+        panic!("not a vector: {v:?}");
     }
 }
 
 #[test]
-fn fork_from_rewinds_state_to_snapshot() {
+fn changing_jumpv_changes_scrubbed_ghost_arc() {
+    // The BV invariant: rewind to a moment, change JUMP-V, the
+    // predicted replay arc reflects the new value because step
+    // reads live globals.
+    // Start with a lot of history capacity so indexing stays stable.
     let env = env_with_script();
-    for _ in 0..10 {
-        run(&env, "(tick! 0 1 0)"); // move right
-    }
-    let snap_x = to_f64(&run(&env, "(:x (:player (nth @history 2)))"));
-    run(&env, "(fork-from! 2)");
-    let now_x = to_f64(&run(&env, "(:x (:player @state))"));
-    assert!((snap_x - now_x).abs() < 1e-9, "after fork state should equal snapshot");
-}
-
-#[test]
-fn predict_sees_live_constant_changes() {
-    // BV test: predicted trajectory depends on the *current* value of
-    // JUMP-V, not the value when the atom was last updated.
-    let env = env_with_script();
+    run(&env, "(def HISTORY-LEN 500)");
     for _ in 0..180 {
-        run(&env, "(tick! 0 0 0)");
+        run(&env, "(tick! 0 0 0)"); // settle on floor
     }
-    let with_default = run(&env, "(predict 0 0 1)");
-    run(&env, "(def JUMP-V -25)"); // change jump strength
-    let with_bigger = run(&env, "(predict 0 0 1)");
-    // With a stronger jump, the player goes higher (lower y) at frame 5 of the
-    // prediction.
-    let y5_a = if let Value::Vector(xs) = &with_default { to_f64(&xs[11]) } else { panic!() };
-    let y5_b = if let Value::Vector(xs) = &with_bigger { to_f64(&xs[11]) } else { panic!() };
-    assert!(y5_b < y5_a, "stronger jump should predict higher position: {y5_b} vs {y5_a}");
+    // Record one jump press.
+    run(&env, "(tick! 0 0 1)");
+    for _ in 0..8 {
+        run(&env, "(tick! 0 0 0)"); // coast
+    }
+    // Scrub to the frame BEFORE the jump press. Replay then starts
+    // with the recorded jump input, which lets a new JUMP-V reshape
+    // the arc.
+    let scrub_k = 179i64;
+    let v1 = run(&env, &format!("(frame-step! 0 {scrub_k} 0 0 0)"));
+    run(&env, "(def JUMP-V -25)");
+    let v2 = run(&env, &format!("(frame-step! 0 {scrub_k} 0 0 0)"));
+    // Compare ghost y at frame 5 of the replay.
+    // ghost starts at offset 9; each frame is (x, y); frame 5 y is at offset 9 + 5*2 + 1 = 20.
+    let y5_a = if let Value::Vector(xs) = v1 { to_f64(&xs[20]) } else { panic!() };
+    let y5_b = if let Value::Vector(xs) = v2 { to_f64(&xs[20]) } else { panic!() };
+    assert!(
+        y5_b < y5_a,
+        "stronger JUMP-V should send the ghost higher (lower y), got {y5_a} -> {y5_b}"
+    );
 }

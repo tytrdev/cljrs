@@ -2136,29 +2136,31 @@ fn conj_fn(args: &[Value]) -> Result<Value> {
 }
 
 fn nth_fn(args: &[Value]) -> Result<Value> {
-    if args.len() != 2 {
+    if args.len() < 2 || args.len() > 3 {
         return Err(Error::Arity {
-            expected: "2".into(),
+            expected: "2 or 3".into(),
             got: args.len(),
         });
     }
+    let default = args.get(2).cloned();
     let idx = match &args[1] {
         Value::Int(i) => *i,
         _ => return Err(Error::Type("nth index must be int".into())),
     };
     if idx < 0 {
-        return Err(Error::Eval("nth: negative index".into()));
+        return match default {
+            Some(d) => Ok(d),
+            None => Err(Error::Eval("nth: negative index".into())),
+        };
     }
     let i = idx as usize;
+    let oob = || match default.clone() {
+        Some(d) => Ok(d),
+        None => Err(Error::Eval(format!("nth: index {idx} out of range"))),
+    };
     match &args[0] {
-        Value::List(v) => v
-            .get(i)
-            .cloned()
-            .ok_or_else(|| Error::Eval(format!("nth: index {idx} out of range"))),
-        Value::Vector(v) => v
-            .get(i)
-            .cloned()
-            .ok_or_else(|| Error::Eval(format!("nth: index {idx} out of range"))),
+        Value::List(v) => v.get(i).cloned().map_or_else(oob, Ok),
+        Value::Vector(v) => v.get(i).cloned().map_or_else(oob, Ok),
         _ => Err(Error::Type("nth on non-sequence".into())),
     }
 }
