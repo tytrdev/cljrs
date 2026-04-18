@@ -88,6 +88,9 @@ const TRANSDUCER_BUILTIN_ALIASES: &[(&str, &str)] = &[
     ("__take-while-coll", "take-while"),
     ("__drop-while-coll", "drop-while"),
     ("__mapcat-coll", "mapcat"),
+    ("__partition-coll", "partition"),
+    ("__distinct-coll", "distinct"),
+    ("__interpose-coll", "interpose"),
 ];
 
 /// Evaluate the cljrs-authored prelude (threading macros, conditional
@@ -273,7 +276,97 @@ fn core_fns() -> Vec<(&'static str, fn(&[Value]) -> Result<Value>)> {
         ("reduced?", reduced_q),
         ("unreduced", unreduced_fn),
         ("transduce", transduce_fn),
+        ("__partition-all-coll", partition_all_coll_fn),
+        ("__dedupe-coll", dedupe_coll_fn),
+        ("__take-nth-coll", take_nth_coll_fn),
+        ("__keep-coll", keep_coll_fn),
+        ("__keep-indexed-coll", keep_indexed_coll_fn),
+        ("__map-indexed-coll", map_indexed_coll_fn),
     ]
+}
+
+fn partition_all_coll_fn(args: &[Value]) -> Result<Value> {
+    if args.len() != 2 {
+        return Err(Error::Arity { expected: "2".into(), got: args.len() });
+    }
+    let n = to_i64(&args[0])?.max(1) as usize;
+    let coll = seq_items(&args[1])?;
+    let mut out: Vec<Value> = Vec::new();
+    for chunk in coll.chunks(n) {
+        out.push(Value::List(Arc::new(chunk.to_vec())));
+    }
+    Ok(Value::List(Arc::new(out)))
+}
+
+fn dedupe_coll_fn(args: &[Value]) -> Result<Value> {
+    if args.len() != 1 {
+        return Err(Error::Arity { expected: "1".into(), got: args.len() });
+    }
+    let coll = seq_items(&args[0])?;
+    let mut out = Vec::with_capacity(coll.len());
+    let mut last: Option<Value> = None;
+    for v in coll {
+        if last.as_ref() != Some(&v) {
+            last = Some(v.clone());
+            out.push(v);
+        }
+    }
+    Ok(Value::List(Arc::new(out)))
+}
+
+fn take_nth_coll_fn(args: &[Value]) -> Result<Value> {
+    if args.len() != 2 {
+        return Err(Error::Arity { expected: "2".into(), got: args.len() });
+    }
+    let n = to_i64(&args[0])?.max(1) as usize;
+    let coll = seq_items(&args[1])?;
+    let out: Vec<Value> = coll.into_iter().step_by(n).collect();
+    Ok(Value::List(Arc::new(out)))
+}
+
+fn keep_coll_fn(args: &[Value]) -> Result<Value> {
+    if args.len() != 2 {
+        return Err(Error::Arity { expected: "2".into(), got: args.len() });
+    }
+    let f = &args[0];
+    let coll = seq_items(&args[1])?;
+    let mut out = Vec::new();
+    for item in coll {
+        let v = eval::apply(f, std::slice::from_ref(&item))?;
+        if !matches!(v, Value::Nil) {
+            out.push(v);
+        }
+    }
+    Ok(Value::List(Arc::new(out)))
+}
+
+fn keep_indexed_coll_fn(args: &[Value]) -> Result<Value> {
+    if args.len() != 2 {
+        return Err(Error::Arity { expected: "2".into(), got: args.len() });
+    }
+    let f = &args[0];
+    let coll = seq_items(&args[1])?;
+    let mut out = Vec::new();
+    for (i, item) in coll.into_iter().enumerate() {
+        let v = eval::apply(f, &[Value::Int(i as i64), item])?;
+        if !matches!(v, Value::Nil) {
+            out.push(v);
+        }
+    }
+    Ok(Value::List(Arc::new(out)))
+}
+
+fn map_indexed_coll_fn(args: &[Value]) -> Result<Value> {
+    if args.len() != 2 {
+        return Err(Error::Arity { expected: "2".into(), got: args.len() });
+    }
+    let f = &args[0];
+    let coll = seq_items(&args[1])?;
+    let mut out = Vec::with_capacity(coll.len());
+    for (i, item) in coll.into_iter().enumerate() {
+        out.push(eval::apply(f, &[Value::Int(i as i64), item])?);
+    }
+    Ok(Value::List(Arc::new(out)))
 }
 
 fn reduced_fn(args: &[Value]) -> Result<Value> {
@@ -1650,16 +1743,18 @@ fn read_string_fn(args: &[Value]) -> Result<Value> {
     crate::reader::read_one(s)
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 enum Num {
     I(i64),
     F(f64),
+    R(i64, i64), // numerator, denominator (denom > 0, reduced)
 }
 
 fn to_num(v: &Value) -> Result<Num> {
     match v {
         Value::Int(i) => Ok(Num::I(*i)),
         Value::Float(f) => Ok(Num::F(*f)),
+        Value::Ratio(n, d) => Ok(Num::R(*n, *d)),
         _ => Err(Error::Type(format!(
             "expected number, got {}",
             v.type_name()
@@ -1671,82 +1766,110 @@ fn num_to_value(n: Num) -> Value {
     match n {
         Num::I(i) => Value::Int(i),
         Num::F(f) => Value::Float(f),
+        Num::R(n, d) => crate::reader::reduce_ratio(n, d),
     }
 }
 
-fn fold_num<F, G>(args: &[Value], init: Num, fi: F, ff: G) -> Result<Value>
-where
-    F: Fn(i64, i64) -> Option<i64>,
-    G: Fn(f64, f64) -> f64,
-{
+fn ratio_to_f64(n: i64, d: i64) -> f64 {
+    n as f64 / d as f64
+}
+
+/// Numeric op kind. Used by fold_num to promote/combine across
+/// int/float/ratio without hard-coding a single + behavior.
+#[derive(Copy, Clone)]
+enum NumOp { Add, Sub, Mul, Div }
+
+fn ratio_combine(op: NumOp, an: i64, ad: i64, bn: i64, bd: i64) -> Num {
+    match op {
+        NumOp::Add => Num::R(an * bd + bn * ad, ad * bd),
+        NumOp::Sub => Num::R(an * bd - bn * ad, ad * bd),
+        NumOp::Mul => Num::R(an * bn, ad * bd),
+        NumOp::Div => Num::R(an * bd, ad * bn),
+    }
+}
+
+fn fold_num(args: &[Value], init: Num, op: NumOp) -> Result<Value> {
     let mut acc = init;
     for a in args {
         let n = to_num(a)?;
         acc = match (acc, n) {
-            (Num::I(x), Num::I(y)) => match fi(x, y) {
-                Some(r) => Num::I(r),
-                None => Num::F(ff(x as f64, y as f64)),
+            (Num::F(x), other) => Num::F(apply_float(op, x, other.as_f64())),
+            (other, Num::F(y)) => Num::F(apply_float(op, other.as_f64(), y)),
+            (Num::I(x), Num::I(y)) => match op {
+                NumOp::Add => x.checked_add(y).map(Num::I).unwrap_or(Num::F((x as f64) + (y as f64))),
+                NumOp::Sub => x.checked_sub(y).map(Num::I).unwrap_or(Num::F((x as f64) - (y as f64))),
+                NumOp::Mul => x.checked_mul(y).map(Num::I).unwrap_or(Num::F((x as f64) * (y as f64))),
+                NumOp::Div => {
+                    if y == 0 {
+                        return Err(Error::Eval("integer divide by zero".into()));
+                    }
+                    if x % y == 0 { Num::I(x / y) } else { ratio_combine(NumOp::Div, x, 1, y, 1) }
+                }
             },
-            (Num::I(x), Num::F(y)) => Num::F(ff(x as f64, y)),
-            (Num::F(x), Num::I(y)) => Num::F(ff(x, y as f64)),
-            (Num::F(x), Num::F(y)) => Num::F(ff(x, y)),
+            (Num::I(x), Num::R(yn, yd)) => ratio_combine(op, x, 1, yn, yd),
+            (Num::R(xn, xd), Num::I(y)) => ratio_combine(op, xn, xd, y, 1),
+            (Num::R(xn, xd), Num::R(yn, yd)) => ratio_combine(op, xn, xd, yn, yd),
         };
     }
     Ok(num_to_value(acc))
 }
 
+fn apply_float(op: NumOp, a: f64, b: f64) -> f64 {
+    match op {
+        NumOp::Add => a + b,
+        NumOp::Sub => a - b,
+        NumOp::Mul => a * b,
+        NumOp::Div => a / b,
+    }
+}
+
+impl Num {
+    fn as_f64(self) -> f64 {
+        match self {
+            Num::I(i) => i as f64,
+            Num::F(f) => f,
+            Num::R(n, d) => ratio_to_f64(n, d),
+        }
+    }
+}
+
 fn add(args: &[Value]) -> Result<Value> {
-    fold_num(args, Num::I(0), |a, b| a.checked_add(b), |a, b| a + b)
+    fold_num(args, Num::I(0), NumOp::Add)
 }
 
 fn sub(args: &[Value]) -> Result<Value> {
     if args.is_empty() {
-        return Err(Error::Arity {
-            expected: ">= 1".into(),
-            got: 0,
-        });
+        return Err(Error::Arity { expected: ">= 1".into(), got: 0 });
     }
     if args.len() == 1 {
         return match to_num(&args[0])? {
             Num::I(i) => Ok(Value::Int(-i)),
             Num::F(f) => Ok(Value::Float(-f)),
+            Num::R(n, d) => Ok(crate::reader::reduce_ratio(-n, d)),
         };
     }
     let first = to_num(&args[0])?;
-    fold_num(&args[1..], first, |a, b| a.checked_sub(b), |a, b| a - b)
+    fold_num(&args[1..], first, NumOp::Sub)
 }
 
 fn mul(args: &[Value]) -> Result<Value> {
-    fold_num(args, Num::I(1), |a, b| a.checked_mul(b), |a, b| a * b)
+    fold_num(args, Num::I(1), NumOp::Mul)
 }
 
 fn div(args: &[Value]) -> Result<Value> {
     if args.is_empty() {
-        return Err(Error::Arity {
-            expected: ">= 1".into(),
-            got: 0,
-        });
+        return Err(Error::Arity { expected: ">= 1".into(), got: 0 });
     }
     if args.len() == 1 {
         return match to_num(&args[0])? {
-            Num::I(i) if i != 0 && 1 % i == 0 => Ok(Value::Int(1 / i)),
-            Num::I(i) => Ok(Value::Float(1.0 / i as f64)),
+            Num::I(i) if i != 0 => Ok(crate::reader::reduce_ratio(1, i)),
             Num::F(f) => Ok(Value::Float(1.0 / f)),
+            Num::R(n, d) => Ok(crate::reader::reduce_ratio(d, n)),
+            Num::I(_) => Err(Error::Eval("integer divide by zero".into())),
         };
     }
     let first = to_num(&args[0])?;
-    fold_num(
-        &args[1..],
-        first,
-        |a, b| {
-            if b != 0 && a % b == 0 {
-                Some(a / b)
-            } else {
-                None
-            }
-        },
-        |a, b| a / b,
-    )
+    fold_num(&args[1..], first, NumOp::Div)
 }
 
 fn eq(args: &[Value]) -> Result<Value> {
@@ -1784,6 +1907,7 @@ fn as_f64(v: &Value) -> Result<f64> {
     match to_num(v)? {
         Num::I(i) => Ok(i as f64),
         Num::F(x) => Ok(x),
+        Num::R(n, d) => Ok(n as f64 / d as f64),
     }
 }
 
@@ -2109,6 +2233,7 @@ fn inc_fn(args: &[Value]) -> Result<Value> {
     match to_num(&args[0])? {
         Num::I(i) => Ok(i.checked_add(1).map(Value::Int).unwrap_or_else(|| Value::Float(i as f64 + 1.0))),
         Num::F(f) => Ok(Value::Float(f + 1.0)),
+        Num::R(n, d) => Ok(crate::reader::reduce_ratio(n + d, d)),
     }
 }
 
@@ -2122,6 +2247,7 @@ fn dec_fn(args: &[Value]) -> Result<Value> {
     match to_num(&args[0])? {
         Num::I(i) => Ok(i.checked_sub(1).map(Value::Int).unwrap_or_else(|| Value::Float(i as f64 - 1.0))),
         Num::F(f) => Ok(Value::Float(f - 1.0)),
+        Num::R(n, d) => Ok(crate::reader::reduce_ratio(n - d, d)),
     }
 }
 

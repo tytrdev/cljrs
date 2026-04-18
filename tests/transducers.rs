@@ -104,3 +104,62 @@ fn sequence_of_xform() {
         run("[1 3 5]")
     );
 }
+
+#[test]
+fn partition_all_xform() {
+    let v = run("(into [] (partition-all 2) [1 2 3 4 5])");
+    // `[(1 2) (3 4) (5)]` would evaluate the inner lists; quote it.
+    assert_eq!(v, run("'[(1 2) (3 4) (5)]"));
+}
+
+#[test]
+fn dedupe_xform() {
+    assert_eq!(
+        run("(into [] (dedupe) [1 1 2 2 2 3 1 1])"),
+        run("[1 2 3 1]")
+    );
+}
+
+#[test]
+fn keep_drops_nils() {
+    assert_eq!(
+        run("(into [] (keep (fn [x] (if (even? x) x nil))) (range 6))"),
+        run("[0 2 4]")
+    );
+}
+
+#[test]
+fn map_indexed_passes_index() {
+    assert_eq!(
+        run("(into [] (map-indexed (fn [i v] [i v])) [:a :b :c])"),
+        run("[[0 :a] [1 :b] [2 :c]]")
+    );
+}
+
+#[test]
+fn cat_splices_sub_seqs() {
+    assert_eq!(
+        run("(into [] cat [[1 2] [3 4] [5]])"),
+        run("[1 2 3 4 5]")
+    );
+}
+
+#[test]
+fn as_arrow_threads_explicit_position() {
+    let src = r#"
+      (as-> 10 v
+        (- 100 v)        ; v in second position via prefix style
+        (* v 2)
+        (+ v 1))
+    "#;
+    // (- 100 10) = 90; (* 90 2) = 180; (+ 180 1) = 181
+    assert_eq!(run(src), Value::Int(181));
+}
+
+#[test]
+fn lazy_cat_concatenates_lazily() {
+    assert_eq!(
+        run("(take 5 (lazy-cat [1 2] (iterate inc 10)))"),
+        run("'(1 2 10 11 12)")
+    );
+}

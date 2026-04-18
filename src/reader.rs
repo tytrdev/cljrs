@@ -14,6 +14,33 @@ fn next_gensym_id() -> u64 {
     GENSYM_COUNTER.fetch_add(1, Ordering::Relaxed)
 }
 
+/// Build a Value from a numerator/denominator pair. If the denominator
+/// is 1 (or divides evenly) the result is an Int; otherwise a Ratio in
+/// reduced canonical form (denom > 0, gcd(|num|, denom) = 1).
+pub fn reduce_ratio(mut n: i64, mut d: i64) -> Value {
+    if d < 0 {
+        n = -n;
+        d = -d;
+    }
+    let g = gcd(n.unsigned_abs(), d.unsigned_abs()) as i64;
+    if g != 0 {
+        n /= g;
+        d /= g;
+    }
+    if d == 1 {
+        Value::Int(n)
+    } else {
+        Value::Ratio(n, d)
+    }
+}
+
+fn gcd(mut a: u64, mut b: u64) -> u64 {
+    while b != 0 {
+        (a, b) = (b, a % b);
+    }
+    a
+}
+
 pub fn read_all(src: &str) -> Result<Vec<Value>> {
     let mut p = Parser::new(src);
     let mut forms = Vec::new();
@@ -515,6 +542,15 @@ impl<'a> Parser<'a> {
         }
         if let Ok(f) = tok.parse::<f64>() {
             return Ok(Value::Float(f));
+        }
+        // Ratio literal `n/d`. Only matches when both halves parse as
+        // i64 — otherwise fall through (so symbols with `/` like
+        // `clj.core/foo` aren't shadowed by this branch).
+        if let Some((n_s, d_s)) = tok.split_once('/')
+            && let (Ok(n), Ok(d)) = (n_s.parse::<i64>(), d_s.parse::<i64>())
+            && d != 0
+        {
+            return Ok(reduce_ratio(n, d));
         }
         Err(Error::Read(format!("bad number: {tok}")))
     }

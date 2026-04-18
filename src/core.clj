@@ -441,6 +441,139 @@
   ([coll] (vec (seq coll)))
   ([xform coll] (transduce xform conj [] coll)))
 
+;; Additional transducer-aware fns. Each follows the same shape: 1-arg
+;; returns a transducer, 2-arg delegates to a __*-coll builtin.
+
+(defn partition-all
+  ([n]
+   (fn [rf]
+     (let [chunk (atom [])]
+       (fn
+         ([] (rf))
+         ([result]
+          (let [pending @chunk]
+            (if (empty? pending)
+              (rf result)
+              (rf (rf result pending)))))
+         ([result input]
+          (swap! chunk conj input)
+          (if (= (count @chunk) n)
+            (let [c @chunk]
+              (reset! chunk [])
+              (rf result c))
+            result))))))
+  ([n coll] (__partition-all-coll n coll)))
+
+(defn dedupe
+  ([]
+   (fn [rf]
+     (let [last (atom ::none)]
+       (fn
+         ([] (rf))
+         ([result] (rf result))
+         ([result input]
+          (let [prev @last]
+            (reset! last input)
+            (if (= prev input) result (rf result input))))))))
+  ([coll] (__dedupe-coll coll)))
+
+(defn take-nth
+  ([n]
+   (fn [rf]
+     (let [counter (atom 0)]
+       (fn
+         ([] (rf))
+         ([result] (rf result))
+         ([result input]
+          (let [i @counter]
+            (swap! counter inc)
+            (if (zero? (mod i n)) (rf result input) result)))))))
+  ([n coll] (__take-nth-coll n coll)))
+
+(defn keep
+  ([f]
+   (fn [rf]
+     (fn
+       ([] (rf))
+       ([result] (rf result))
+       ([result input]
+        (let [v (f input)]
+          (if (nil? v) result (rf result v)))))))
+  ([f coll] (__keep-coll f coll)))
+
+(defn keep-indexed
+  ([f]
+   (fn [rf]
+     (let [idx (atom 0)]
+       (fn
+         ([] (rf))
+         ([result] (rf result))
+         ([result input]
+          (let [i @idx]
+            (swap! idx inc)
+            (let [v (f i input)]
+              (if (nil? v) result (rf result v)))))))))
+  ([f coll] (__keep-indexed-coll f coll)))
+
+(defn map-indexed
+  ([f]
+   (fn [rf]
+     (let [idx (atom 0)]
+       (fn
+         ([] (rf))
+         ([result] (rf result))
+         ([result input]
+          (let [i @idx]
+            (swap! idx inc)
+            (rf result (f i input))))))))
+  ([f coll] (__map-indexed-coll f coll)))
+
+;; cat: a transducer that splices each step's input collection into
+;; the result. (transduce (comp (map identity) cat) conj [] [[1 2] [3 4]])
+;; -> [1 2 3 4]
+(def cat
+  (fn [rf]
+    (fn
+      ([] (rf))
+      ([result] (rf result))
+      ([result input] (reduce rf result input)))))
+
+;; ---------- threading: as-> ---------------------------------------------
+;; Bind `name` to expr, then thread it through subsequent forms with
+;; explicit positional control.
+
+(defmacro as->
+  [expr name & forms]
+  (if (empty? forms)
+    expr
+    `(let [~name ~expr]
+       (as-> ~(first forms) ~name ~@(rest forms)))))
+
+;; ---------- defn- (private) --------------------------------------------
+;; Same as defn for now — namespace privacy is informational only since
+;; we don't enforce visibility, but the form is accepted for compat.
+
+(defmacro defn-
+  [name & body]
+  `(defn ~name ~@body))
+
+;; ---------- lazy-cat ---------------------------------------------------
+;; Lazily concat an arbitrary number of collections. Each one is wrapped
+;; in lazy-seq so the whole chain is forced incrementally.
+
+(defmacro lazy-cat
+  [& colls]
+  (if (empty? colls)
+    `(lazy-seq nil)
+    `(lazy-cat-helper (lazy-seq ~(first colls))
+                      (fn [] (lazy-cat ~@(rest colls))))))
+
+(defn lazy-cat-helper [head rest-fn]
+  (lazy-seq
+    (if (empty? head)
+      (rest-fn)
+      (cons (first head) (lazy-cat-helper (rest head) rest-fn)))))
+
 ;; ---------- small utility fns --------------------------------------------
 
 (defn inc-all [xs] (mapv inc xs))

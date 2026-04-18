@@ -58,6 +58,11 @@ pub enum Value {
     /// Wraps a value to signal "stop reducing now". `reduce` and
     /// `transduce` unwrap and return the inner value when they see one.
     Reduced(Arc<Value>),
+    /// Exact rational (num / den) in reduced form, denominator positive.
+    /// Produced by `/` when the result isn't an integer; preserved
+    /// through `+ - *` against ints and other ratios. Mixing with
+    /// floats demotes to float.
+    Ratio(i64, i64),
     /// Compiled GPU kernel from `defn-gpu`. Called as a normal fn: takes
     /// one arg (an f32 buffer = vector/list of numbers) and returns a
     /// vector of f32s. Internally dispatches via wgpu.
@@ -181,6 +186,7 @@ impl Value {
             Value::LazySeq(_) => "lazy-seq",
             Value::Cons(_, _) => "cons",
             Value::Reduced(_) => "reduced",
+            Value::Ratio(_, _) => "ratio",
             #[cfg(feature = "gpu")]
             Value::GpuKernel(_) => "gpu-kernel",
             #[cfg(feature = "gpu")]
@@ -251,6 +257,7 @@ impl Value {
             Value::LazySeq(_) => "#<lazy-seq>".to_string(),
             Value::Cons(h, t) => format!("(cons {} {})", h.to_pr_string(), t.to_pr_string()),
             Value::Reduced(v) => format!("#<reduced {}>", v.to_pr_string()),
+            Value::Ratio(n, d) => format!("{n}/{d}"),
             #[cfg(feature = "gpu")]
             Value::GpuKernel(k) => format!("#<gpu-kernel {}>", k.name),
             #[cfg(feature = "gpu")]
@@ -318,6 +325,11 @@ impl PartialEq for Value {
             (LazySeq(a), LazySeq(b)) => Arc::ptr_eq(a, b),
             (Cons(ah, at), Cons(bh, bt)) => ah == bh && at == bt,
             (Reduced(a), Reduced(b)) => a == b,
+            (Ratio(an, ad), Ratio(bn, bd)) => an == bn && ad == bd,
+            (Ratio(n, d), Int(i)) | (Int(i), Ratio(n, d)) => *n == *i * *d,
+            (Ratio(n, d), Float(f)) | (Float(f), Ratio(n, d)) => {
+                (*n as f64 / *d as f64) == *f
+            }
             #[cfg(feature = "gpu")]
             (GpuKernel(a), GpuKernel(b)) => Arc::ptr_eq(a, b),
             #[cfg(feature = "gpu")]
@@ -443,6 +455,11 @@ impl Hash for Value {
             Value::Reduced(v) => {
                 22u8.hash(state);
                 v.hash(state);
+            }
+            Value::Ratio(n, d) => {
+                23u8.hash(state);
+                n.hash(state);
+                d.hash(state);
             }
             #[cfg(feature = "gpu")]
             Value::GpuKernel(k) => {
