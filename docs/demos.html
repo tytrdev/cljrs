@@ -17,56 +17,53 @@
 
     <h3>GPU (defn-gpu-pixel)</h3>
     <p>
-      Kernels compile to WGSL and run on wgpu. Same source, four targets:
-      Metal on macOS, Vulkan on Linux, DX12 on Windows, WebGPU in browsers.
-      Numbers below are render throughput on an integrated Apple M3 at 640x360.
+      Kernels compile to WGSL and run on wgpu: Metal on macOS, Vulkan on
+      Linux, DX12 on Windows, WebGPU in browsers. Numbers below are render
+      throughput on an integrated Apple M3 at 640x360.
     </p>
     <div class="demo-gallery">
-      <figure>
-        <video src="./media/gpu_plasma.mp4" autoplay muted loop playsinline></video>
-        <figcaption>Plasma (<code>demo_gpu/plasma.clj</code>) &middot; 252 fps</figcaption>
-      </figure>
-      <figure>
-        <video src="./media/gpu_waves.mp4" autoplay muted loop playsinline></video>
-        <figcaption>Waves (<code>demo_gpu/waves.clj</code>) &middot; 402 fps</figcaption>
-      </figure>
-      <figure>
-        <video src="./media/gpu_mandelbrot.mp4" autoplay muted loop playsinline></video>
-        <figcaption>Mandelbrot (<code>demo_gpu/mandelbrot.clj</code>) &middot; 150 fps with 8x SSAA</figcaption>
-      </figure>
-      <figure>
-        <video src="./media/gpu_raymarch3d.mp4" autoplay muted loop playsinline></video>
-        <figcaption>Raymarched 3D scene (<code>demo_gpu/raymarch3d.clj</code>) &middot; 494 fps</figcaption>
-      </figure>
-      <figure>
-        <video src="./media/gpu_raytrace.mp4" autoplay muted loop playsinline></video>
-        <figcaption>Ray tracer (<code>demo_gpu/raytrace.clj</code>) &middot; 421 fps with reflections + shadows</figcaption>
-      </figure>
+      <figure><video src="./media/gpu_plasma.mp4" autoplay muted loop playsinline></video><figcaption>Plasma (<code>demo_gpu/plasma.clj</code>) &middot; 252 fps</figcaption></figure>
+      <figure><video src="./media/gpu_waves.mp4" autoplay muted loop playsinline></video><figcaption>Waves (<code>demo_gpu/waves.clj</code>) &middot; 402 fps</figcaption></figure>
+      <figure><video src="./media/gpu_mandelbrot.mp4" autoplay muted loop playsinline></video><figcaption>Mandelbrot (<code>demo_gpu/mandelbrot.clj</code>) &middot; 150 fps with 8x SSAA</figcaption></figure>
+      <figure><video src="./media/gpu_raymarch3d.mp4" autoplay muted loop playsinline></video><figcaption>Raymarched 3D scene (<code>demo_gpu/raymarch3d.clj</code>) &middot; 494 fps</figcaption></figure>
+      <figure><video src="./media/gpu_raytrace.mp4" autoplay muted loop playsinline></video><figcaption>Ray tracer (<code>demo_gpu/raytrace.clj</code>) &middot; 421 fps with reflections + shadows</figcaption></figure>
+      <figure><video src="./media/gpu_clouds.mp4" autoplay muted loop playsinline></video><figcaption>Volumetric clouds (<code>demo_gpu/clouds.clj</code>) &middot; 287 fps</figcaption></figure>
+      <figure><video src="./media/gpu_flowfield.mp4" autoplay muted loop playsinline></video><figcaption>Curl-noise flow field (<code>demo_gpu/flowfield.clj</code>) &middot; 135 fps</figcaption></figure>
     </div>
     <pre><code>cargo run --release --features gpu-demo --bin gpu-demo -- demo_gpu/plasma.clj</code></pre>
     <p>
       Edit the <code>.clj</code> file while the window is open, the kernel
-      recompiles on save. See the <a href="./gpu-web.html">GPU page</a>
-      to run these in your browser.
+      recompiles on save. Run any of these in the browser on the
+      <a href="./gpu-web.html">GPU page</a>.
     </p>
 
     <h3>CPU (defn-native)</h3>
     <p>
-      21 kernels, each JIT-compiled to machine code via MLIR and LLVM.
+      JIT-compiled to machine code via MLIR and LLVM. One call per pixel
+      per frame, run in parallel across CPU cores with rayon.
     </p>
     <div class="demo-gallery">
       <figure><video src="./media/fractal.mp4" autoplay muted loop playsinline></video><figcaption>Mandelbrot</figcaption></figure>
+      <figure><video src="./media/burning_ship.mp4" autoplay muted loop playsinline></video><figcaption>Burning ship fractal</figcaption></figure>
+      <figure><video src="./media/julia.mp4" autoplay muted loop playsinline></video><figcaption>Julia set</figcaption></figure>
+      <figure><video src="./media/newton.mp4" autoplay muted loop playsinline></video><figcaption>Newton fractal</figcaption></figure>
       <figure><video src="./media/raymarch.mp4" autoplay muted loop playsinline></video><figcaption>Raymarched spheres</figcaption></figure>
       <figure><video src="./media/sdf_scene.mp4" autoplay muted loop playsinline></video><figcaption>SDF scene</figcaption></figure>
       <figure><video src="./media/raytrace.mp4" autoplay muted loop playsinline></video><figcaption>Ray tracer</figcaption></figure>
       <figure><video src="./media/rasterizer.mp4" autoplay muted loop playsinline></video><figcaption>Software rasterizer</figcaption></figure>
       <figure><video src="./media/lorenz.mp4" autoplay muted loop playsinline></video><figcaption>Lorenz attractor</figcaption></figure>
       <figure><video src="./media/double_pendulum.mp4" autoplay muted loop playsinline></video><figcaption>Double pendulum</figcaption></figure>
-      <figure><video src="./media/julia.mp4" autoplay muted loop playsinline></video><figcaption>Julia set</figcaption></figure>
+      <figure><video src="./media/clifford.mp4" autoplay muted loop playsinline></video><figcaption>Clifford attractor</figcaption></figure>
       <figure><video src="./media/plasma.mp4" autoplay muted loop playsinline></video><figcaption>Plasma</figcaption></figure>
       <figure><video src="./media/voronoi.mp4" autoplay muted loop playsinline></video><figcaption>Voronoi cells</figcaption></figure>
       <figure><video src="./media/metaballs.mp4" autoplay muted loop playsinline></video><figcaption>Metaballs</figcaption></figure>
+      <figure><video src="./media/charges.mp4" autoplay muted loop playsinline></video><figcaption>Electric charges</figcaption></figure>
       <figure><video src="./media/domain_warp.mp4" autoplay muted loop playsinline></video><figcaption>Domain warping</figcaption></figure>
+      <figure><video src="./media/waves.mp4" autoplay muted loop playsinline></video><figcaption>Waves</figcaption></figure>
+      <figure><video src="./media/moire.mp4" autoplay muted loop playsinline></video><figcaption>Moiré</figcaption></figure>
+      <figure><video src="./media/kaleidoscope.mp4" autoplay muted loop playsinline></video><figcaption>Kaleidoscope</figcaption></figure>
+      <figure><video src="./media/truchet.mp4" autoplay muted loop playsinline></video><figcaption>Truchet tiles</figcaption></figure>
+      <figure><video src="./media/phyllotaxis.mp4" autoplay muted loop playsinline></video><figcaption>Phyllotaxis</figcaption></figure>
     </div>
     <pre><code>cargo run --release --features demo --bin demo -- demo/fractal.clj</code></pre>
 

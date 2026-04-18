@@ -141,6 +141,8 @@
       <button data-kernel="mandelbrot">mandelbrot</button>
       <button data-kernel="raymarch3d">raymarch 3D</button>
       <button data-kernel="raytrace">raytrace</button>
+      <button data-kernel="clouds">clouds</button>
+      <button data-kernel="flowfield">flowfield</button>
     </div>
 
     <div class="gpu-stage">
@@ -222,6 +224,8 @@
       mandelbrot: { wgsl: "./wgsl/mandelbrot.wgsl", inline: "./wgsl/mandelbrot_inline.wgsl", clj: "./kernels/mandelbrot.clj" },
       raymarch3d: { wgsl: "./wgsl/raymarch3d.wgsl", inline: "./wgsl/raymarch3d_inline.wgsl", clj: "./kernels/raymarch3d.clj" },
       raytrace:   { wgsl: "./wgsl/raytrace.wgsl",   inline: "./wgsl/raytrace_inline.wgsl",   clj: "./kernels/raytrace.clj" },
+      clouds:     { wgsl: "./wgsl/clouds.wgsl",     inline: "./wgsl/clouds_inline.wgsl",     clj: "./kernels/clouds.clj" },
+      flowfield:  { wgsl: "./wgsl/flowfield.wgsl",  inline: "./wgsl/flowfield_inline.wgsl",  clj: "./kernels/flowfield.clj" },
     };
 
     let currentKernel = "plasma";
