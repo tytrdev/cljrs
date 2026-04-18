@@ -23,6 +23,40 @@ fn seq_items(v: &Value) -> Result<Vec<Value>> {
             .chars()
             .map(|c| Value::Str(Arc::from(c.to_string().as_str())))
             .collect()),
+        // Walk Cons + LazySeq chains. WARNING: this fully realizes a
+        // lazy seq, so don't pass an infinite one (use take first).
+        Value::Cons(_, _) | Value::LazySeq(_) => {
+            let mut out = Vec::new();
+            let mut cur = v.clone();
+            loop {
+                let resolved = match cur {
+                    Value::LazySeq(l) => l.force()?,
+                    other => other,
+                };
+                match resolved {
+                    Value::Cons(h, t) => {
+                        out.push((*h).clone());
+                        cur = (*t).clone();
+                    }
+                    Value::Nil => break,
+                    Value::List(xs) => {
+                        out.extend(xs.iter().cloned());
+                        break;
+                    }
+                    Value::Vector(xs) => {
+                        out.extend(xs.iter().cloned());
+                        break;
+                    }
+                    other => {
+                        return Err(Error::Type(format!(
+                            "lazy-seq tail produced {}",
+                            other.type_name()
+                        )));
+                    }
+                }
+            }
+            Ok(out)
+        }
         _ => Err(Error::Type(format!(
             "expected sequence, got {}",
             v.type_name()
@@ -208,7 +242,146 @@ fn core_fns() -> Vec<(&'static str, fn(&[Value]) -> Result<Value>)> {
         ("__lazy-seq", __lazy_seq_fn),
         ("force-seq", force_seq_fn),
         ("realized?", realized_q),
+        ("seq", seq_fn),
+        ("mapcat", mapcat_fn),
+        ("flatten", flatten_fn),
+        ("zipmap", zipmap_fn),
+        ("max-key", max_key_fn),
+        ("min-key", min_key_fn),
+        ("update-vals", update_vals_fn),
+        ("update-keys", update_keys_fn),
     ]
+}
+
+/// (seq coll) -> nil if empty, otherwise the seq itself (as a list).
+/// Idiomatic Clojure: `(if (seq xs) ...)` to test non-emptiness.
+fn seq_fn(args: &[Value]) -> Result<Value> {
+    if args.len() != 1 {
+        return Err(Error::Arity { expected: "1".into(), got: args.len() });
+    }
+    let v = resolve_seq(&args[0])?;
+    let empty = match &v {
+        Value::Nil => true,
+        Value::List(v) => v.is_empty(),
+        Value::Vector(v) => v.is_empty(),
+        Value::Map(m) => m.is_empty(),
+        Value::Set(s) => s.is_empty(),
+        Value::Str(s) => s.is_empty(),
+        Value::Cons(_, _) => false,
+        _ => return Err(Error::Type(format!("seq on {}", v.type_name()))),
+    };
+    if empty { Ok(Value::Nil) } else { Ok(v) }
+}
+
+/// (mapcat f coll): map then concat. Common enough to warrant a builtin.
+fn mapcat_fn(args: &[Value]) -> Result<Value> {
+    if args.len() != 2 {
+        return Err(Error::Arity { expected: "2".into(), got: args.len() });
+    }
+    let f = &args[0];
+    let coll = seq_items(&args[1])?;
+    let mut out = Vec::new();
+    for item in coll {
+        let r = eval::apply(f, std::slice::from_ref(&item))?;
+        out.extend(seq_items(&r)?);
+    }
+    Ok(Value::List(Arc::new(out)))
+}
+
+/// (flatten coll): one-level deep recursive concat.
+fn flatten_fn(args: &[Value]) -> Result<Value> {
+    let mut out = Vec::new();
+    fn walk(v: &Value, out: &mut Vec<Value>) {
+        match v {
+            Value::List(xs) => { for x in xs.iter() { walk(x, out); } }
+            Value::Vector(xs) => { for x in xs.iter() { walk(x, out); } }
+            Value::Cons(h, t) => { walk(h, out); walk(t, out); }
+            other => out.push(other.clone()),
+        }
+    }
+    walk(&args[0], &mut out);
+    Ok(Value::List(Arc::new(out)))
+}
+
+fn zipmap_fn(args: &[Value]) -> Result<Value> {
+    if args.len() != 2 {
+        return Err(Error::Arity { expected: "2".into(), got: args.len() });
+    }
+    let ks = seq_items(&args[0])?;
+    let vs = seq_items(&args[1])?;
+    let mut m: imbl::HashMap<Value, Value> = imbl::HashMap::new();
+    for (k, v) in ks.into_iter().zip(vs.into_iter()) {
+        m.insert(k, v);
+    }
+    Ok(Value::Map(m))
+}
+
+fn max_key_fn(args: &[Value]) -> Result<Value> {
+    if args.len() < 2 {
+        return Err(Error::Arity { expected: ">= 2".into(), got: args.len() });
+    }
+    let f = &args[0];
+    let mut best = args[1].clone();
+    let mut best_k = as_f64(&eval::apply(f, std::slice::from_ref(&best))?)?;
+    for v in &args[2..] {
+        let k = as_f64(&eval::apply(f, std::slice::from_ref(v))?)?;
+        if k > best_k {
+            best_k = k;
+            best = v.clone();
+        }
+    }
+    Ok(best)
+}
+
+fn min_key_fn(args: &[Value]) -> Result<Value> {
+    if args.len() < 2 {
+        return Err(Error::Arity { expected: ">= 2".into(), got: args.len() });
+    }
+    let f = &args[0];
+    let mut best = args[1].clone();
+    let mut best_k = as_f64(&eval::apply(f, std::slice::from_ref(&best))?)?;
+    for v in &args[2..] {
+        let k = as_f64(&eval::apply(f, std::slice::from_ref(v))?)?;
+        if k < best_k {
+            best_k = k;
+            best = v.clone();
+        }
+    }
+    Ok(best)
+}
+
+fn update_vals_fn(args: &[Value]) -> Result<Value> {
+    if args.len() != 2 {
+        return Err(Error::Arity { expected: "2".into(), got: args.len() });
+    }
+    let f = &args[1];
+    match &args[0] {
+        Value::Map(m) => {
+            let mut out = imbl::HashMap::new();
+            for (k, v) in m.iter() {
+                out.insert(k.clone(), eval::apply(f, std::slice::from_ref(v))?);
+            }
+            Ok(Value::Map(out))
+        }
+        _ => Err(Error::Type("update-vals: expected map".into())),
+    }
+}
+
+fn update_keys_fn(args: &[Value]) -> Result<Value> {
+    if args.len() != 2 {
+        return Err(Error::Arity { expected: "2".into(), got: args.len() });
+    }
+    let f = &args[1];
+    match &args[0] {
+        Value::Map(m) => {
+            let mut out = imbl::HashMap::new();
+            for (k, v) in m.iter() {
+                out.insert(eval::apply(f, std::slice::from_ref(k))?, v.clone());
+            }
+            Ok(Value::Map(out))
+        }
+        _ => Err(Error::Type("update-keys: expected map".into())),
+    }
 }
 
 // ---- Lazy sequences ----------------------------------------------------

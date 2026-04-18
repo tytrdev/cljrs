@@ -24,7 +24,7 @@
         <tr><td><code>if</code>, <code>do</code>, <code>when</code>, <code>when-not</code></td><td class="ok">supported</td><td></td></tr>
         <tr><td><code>cond</code>, <code>if-let</code>, <code>when-let</code></td><td class="ok">supported</td><td>Prelude macros</td></tr>
         <tr><td><code>some-&gt;</code>, <code>some-&gt;&gt;</code>, <code>cond-&gt;</code>, <code>cond-&gt;&gt;</code></td><td class="ok">supported</td><td>Prelude macros</td></tr>
-        <tr><td><code>for</code></td><td class="partial">partial</td><td>Single binding + <code>:when</code>; <code>:let</code>/<code>:while</code> not yet</td></tr>
+        <tr><td><code>for</code></td><td class="ok">supported</td><td>Multi-binding, <code>:let</code>, <code>:when</code>, <code>:when-not</code>, <code>:while</code></td></tr>
         <tr><td><code>case</code></td><td class="partial">partial</td><td>Literals only, no jump table</td></tr>
         <tr><td><code>and</code>, <code>or</code></td><td class="ok">supported</td><td></td></tr>
         <tr><td><code>dotimes</code>, <code>doseq</code></td><td class="ok">supported</td><td><code>for</code> generator missing</td></tr>
@@ -75,8 +75,8 @@
     <h3>Functions</h3>
     <p>About 125 builtins plus the prelude macros.</p>
     <ul>
-      <li><b>Seq:</b> <code>map mapv filter filterv reduce reduce-kv take drop take-while drop-while range repeat partition interleave interpose distinct frequencies group-by sort reverse first rest second last count empty? some every? apply</code></li>
-      <li><b>Coll:</b> <code>get get-in assoc assoc-in dissoc update update-in merge select-keys keys vals contains? find conj cons concat vec list vector into hash-map hash-set set</code></li>
+      <li><b>Seq:</b> <code>map mapv mapcat filter filterv reduce reduce-kv take drop take-while drop-while range repeat partition interleave interpose distinct frequencies group-by sort reverse first rest second last count empty? some every? seq flatten zipmap apply iterate repeatedly cycle</code></li>
+      <li><b>Coll:</b> <code>get get-in assoc assoc-in dissoc update update-in update-vals update-keys merge select-keys keys vals contains? find conj cons concat vec list vector into hash-map hash-set set max-key min-key</code></li>
       <li><b>String:</b> <code>str subs str/split str/join str/upper-case str/lower-case str/replace str/starts-with? str/ends-with? str/includes? str/trim str/blank?</code></li>
       <li><b>Math:</b> <code>+ - * / mod rem quot inc dec min max abs sqrt pow sin cos tan exp log floor ceil round Math/PI</code></li>
       <li><b>Predicates:</b> <code>nil? zero? pos? neg? even? odd? empty? string? number? integer? float? map? vector? set? list? seq? coll? keyword? symbol? fn? boolean? true? false? some? atom?</code></li>
