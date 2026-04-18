@@ -52,19 +52,31 @@
       padding: 0 4px; border-radius: 3px;
       font-family: inherit;
     }
+    .pf-timeline {
+      display: flex; gap: 0.5rem; align-items: center;
+      font: 0.75rem ui-monospace, monospace; color: var(--fg-dim);
+      margin-top: 4px;
+    }
+    .pf-timeline input[type="range"] { flex: 1; }
+    .pf-timeline-label {
+      min-width: 6.5rem; text-align: right;
+    }
+    .pf-timeline-label.past { color: #ffbf66; }
+    .pf-timeline-label.live { color: #8ec07c; }
   </style>
 </head>
 <body>
   <main>
     <h2>Platformer — live coded</h2>
     <p>
-      A 2D platformer whose entire logic lives in the editor below. Physics
-      (kinematic AABB), gameplay constants, and level geometry are all
-      Clojure data. Edit anything — <code>JUMP-V</code>, <code>GRAVITY</code>,
-      platforms, the <code>step</code> fn itself — and it takes effect
-      <em>immediately without resetting the player's position</em>, because
-      the state atom is declared with <code>defonce</code>. Click the stage
-      to focus, then control with the keys below.
+      A 2D platformer whose entire logic lives in the editor below.
+      Edit <code>JUMP-V</code>, <code>GRAVITY</code>, platforms, or
+      <code>step</code> itself — it takes effect next frame without
+      resetting the player. The faint yellow dots are a
+      <b>predicted trajectory</b>: 45 frames into the future, replayed
+      from the current state with the keys you're holding. Change
+      <code>JUMP-V</code> mid-jump and watch the arc redraw.
+      Drag the timeline to <b>rewind</b> to any past frame (up to 5s back).
     </p>
     <p class="pf-hint">
       <kbd>←</kbd>/<kbd>A</kbd> + <kbd>→</kbd>/<kbd>D</kbd> move ·
@@ -81,10 +93,17 @@
         <div class="pf-toolbar">
           <button id="pf-pause">Pause</button>
           <button id="pf-respawn">Respawn</button>
+          <button id="pf-fork" title="Branch: continue playing from the scrubbed state">Fork here</button>
+          <button id="pf-ghost">Ghost: on</button>
           <span id="pf-fps">—</span>
         </div>
+        <div class="pf-timeline">
+          <span>timeline</span>
+          <input type="range" id="pf-scrub" min="0" max="300" value="300" step="1">
+          <span class="pf-timeline-label live" id="pf-scrub-label">live</span>
+        </div>
         <div class="repl" id="pf-editor">
-          <textarea id="pf-src" spellcheck="false" style="min-height:420px"></textarea>
+          <textarea id="pf-src" spellcheck="false" style="min-height:380px"></textarea>
         </div>
         <div id="pf-status" class="pf-status"></div>
       </div>
@@ -93,9 +112,9 @@
     <h3>What's happening</h3>
     <ul>
       <li><code>(defonce state ...)</code> creates the world state atom exactly once. Re-evaluating the source doesn't touch it.</li>
-      <li><code>(def JUMP-V -13) ...</code> are ordinary <code>def</code>s — editing them redefines the constants live. Move the player off a platform, then change <code>GRAVITY</code> to <code>0.2</code>: the next frame's fall is gentler.</li>
-      <li><code>(defn step [w L? R? J?] ...)</code> is pure: takes state + input, returns new state. Swapping the body changes behavior on the very next tick.</li>
-      <li>Because state is plain data and <code>step</code> is pure, the door is open for pause / rewind / future-trajectory scrubbing — next phase.</li>
+      <li><code>(defonce history ...)</code> is a bounded vector of past states — one per frame, last 300. The scrubber reads this to rewind.</li>
+      <li><code>(defn predict ...)</code> runs <code>step</code> forward 45 times from whatever the current display state is, returning <code>[x1 y1 x2 y2 ...]</code>. The JS draws those as dots. Because <code>step</code> is pure and reads live <code>JUMP-V</code>/<code>GRAVITY</code>, editing a constant redraws the dots instantly.</li>
+      <li>Every user-facing behavior — physics, gameplay, history, prediction — is Clojure data flowing through a pure function. No hidden state, no hot-reload magic.</li>
     </ul>
   </main>
   <script type="module">
@@ -111,6 +130,9 @@
 (def PW 16)            ; player width
 (def PH 22)            ; player height
 
+(def HISTORY-LEN 300)  ; frames kept for rewind
+(def PREDICT-LEN 45)   ; frames simulated for the future ghost
+
 ;; Level: each platform is [x y w h] in canvas pixels.
 (def LEVEL
   [[0    380 800 40]   ; floor
@@ -123,8 +145,8 @@
 
 (def PLAYER-START {:x 50 :y 300 :vx 0 :vy 0 :on-ground? false})
 
-(defonce state
-  (atom {:player PLAYER-START :frame 0}))
+(defonce state   (atom {:player PLAYER-START :frame 0}))
+(defonce history (atom []))
 
 (defn- hit? [x y lx ly lw lh]
   (and (< x  (+ lx lw))
@@ -140,15 +162,12 @@
 
 (defn step [w L? R? J?]
   (let [p   (:player w)
-        ;; horizontal velocity
         vx0 (cond L? (- MOVE-SPEED)
                   R? MOVE-SPEED
                   :else (* FRICTION (:vx p)))
-        ;; vertical velocity: gravity + optional jump
         vyg (+ (:vy p) GRAVITY)
         vy0 (if (and (:on-ground? p) J?) JUMP-V vyg)
 
-        ;; resolve horizontal motion first
         x-try (+ (:x p) vx0)
         hx    (first-hit x-try (:y p))
         x1    (if hx
@@ -157,7 +176,6 @@
                 x-try)
         vx1   (if hx 0 vx0)
 
-        ;; then vertical at the new x
         y-try (+ (:y p) vy0)
         hy    (first-hit x1 y-try)
         landed? (and hy (pos? vy0))
@@ -167,7 +185,6 @@
                 y-try)
         vy1   (if hy 0 vy0)
 
-        ;; fall off the bottom = respawn
         [x2 y2 vx2 vy2]
         (if (> y1 460)
           [(:x PLAYER-START) (:y PLAYER-START) 0 0]
@@ -178,49 +195,95 @@
                 :on-ground? (if landed? true false))
         (update :frame inc))))
 
+(defn- push-history [h s]
+  (let [h' (conj h s) n (count h')]
+    (if (> n HISTORY-LEN) (vec (drop (- n HISTORY-LEN) h')) h')))
+
 (defn tick! [L R J]
   (swap! state step (= L 1) (= R 1) (= J 1))
+  (swap! history push-history @state)
   nil)
 
 (defn respawn! []
   (swap! state assoc :player PLAYER-START)
   nil)
 
-;; JS calls these each frame for fast state readout.
-(defn player-state []
-  (let [p (:player @state)]
+(defn- state-readout [s]
+  (let [p (:player s)]
     [(:x p) (:y p)
      (if (:on-ground? p) 1.0 0.0)
      (:vx p) (:vy p)
-     (:frame @state)]))
+     (:frame s)]))
+
+(defn player-state [] (state-readout @state))
+(defn history-size [] [(count @history)])
+
+(defn snapshot-at [k]
+  (let [h @history n (count h)]
+    (if (or (< k 0) (>= k n))
+      (state-readout @state)
+      (state-readout (nth h k)))))
+
+(defn fork-from! [k]
+  (let [h @history n (count h)]
+    (when (and (>= k 0) (< k n))
+      (reset! state (nth h k)))
+    nil))
+
+(defn- predict-from [w L? R? J? n]
+  (loop [w w i 0 out []]
+    (if (= i n)
+      out
+      (let [w' (step w L? R? J?)
+            p  (:player w')]
+        (recur w' (inc i) (-> out (conj (:x p)) (conj (:y p))))))))
+
+(defn predict [L R J]
+  (predict-from @state (= L 1) (= R 1) (= J 1) PREDICT-LEN))
+
+(defn predict-at [k L R J]
+  (let [h @history
+        n (count h)
+        base (if (and (>= k 0) (< k n)) (nth h k) @state)]
+    (predict-from base (= L 1) (= R 1) (= J 1) PREDICT-LEN)))
 
 (defn level-flat []
   (vec (mapcat identity LEVEL)))
 `;
 
-    // --- rendering -------------------------------------------------------
+    // --- elements --------------------------------------------------------
 
-    const canvas = document.getElementById("pf-canvas");
-    const ctx = canvas.getContext("2d");
+    const canvas    = document.getElementById("pf-canvas");
+    const ctx       = canvas.getContext("2d");
     const W = canvas.width, H = canvas.height;
-
-    const ta = document.getElementById("pf-src");
-    const stage = document.getElementById("pf-stage");
-    const editorEl = document.getElementById("pf-editor");
-    const status = document.getElementById("pf-status");
-    const overlay = document.getElementById("pf-overlay");
-    const fpsEl = document.getElementById("pf-fps");
-    const pauseBtn = document.getElementById("pf-pause");
+    const ta        = document.getElementById("pf-src");
+    const stage     = document.getElementById("pf-stage");
+    const editorEl  = document.getElementById("pf-editor");
+    const status    = document.getElementById("pf-status");
+    const overlay   = document.getElementById("pf-overlay");
+    const fpsEl     = document.getElementById("pf-fps");
+    const pauseBtn  = document.getElementById("pf-pause");
     const respawnBtn = document.getElementById("pf-respawn");
+    const forkBtn   = document.getElementById("pf-fork");
+    const ghostBtn  = document.getElementById("pf-ghost");
+    const scrub     = document.getElementById("pf-scrub");
+    const scrubLabel = document.getElementById("pf-scrub-label");
 
     ta.value = INITIAL_SOURCE;
 
+    // --- state -----------------------------------------------------------
+
     let repl = null;
     let paused = false;
+    let ghostOn = true;
     let platformsFlat = [];
     let debounceTimer = null;
     let playerPW = 16, playerPH = 22;
     let lastPlayer = [50, 300, 0, 0, 0, 0];
+    let predicted = new Float32Array(0);
+    let scrubbing = false;       // true: render from scrub index; false: render live
+    let scrubIndex = 0;
+    let historySize = 0;
 
     function setStatus(msg, cls) {
       status.className = cls ? `pf-status ${cls}` : "pf-status";
@@ -236,7 +299,6 @@
         return false;
       }
       setStatus("applied.", "ok");
-      // Pull geometry + player dims once per apply.
       platformsFlat = repl.eval_floats("(level-flat)");
       const dims = repl.eval_floats("[PW PH]");
       if (dims.length >= 2) {
@@ -267,10 +329,9 @@
     stage.addEventListener("keydown", (e) => setKey(e, true));
     stage.addEventListener("keyup",   (e) => setKey(e, false));
     stage.addEventListener("mousedown", () => stage.focus());
-    // Focus the stage on load so the keys work without clicking.
     setTimeout(() => stage.focus(), 50);
 
-    // --- loop ------------------------------------------------------------
+    // --- rendering -------------------------------------------------------
 
     function drawPlatforms() {
       ctx.fillStyle = "#2a2f3d";
@@ -282,22 +343,36 @@
       }
     }
 
+    function drawGhost() {
+      if (!ghostOn || predicted.length < 2) return;
+      const cx = playerPW / 2, cy = playerPH / 2;
+      const n = predicted.length / 2;
+      for (let i = 0; i < n; i++) {
+        const t = i / n;
+        const alpha = 0.55 * (1 - t) + 0.05;
+        const sz = 3 * (1 - t) + 1;
+        ctx.fillStyle = `rgba(255, 204, 96, ${alpha})`;
+        const x = predicted[i * 2] + cx;
+        const y = predicted[i * 2 + 1] + cy;
+        ctx.beginPath();
+        ctx.arc(x, y, sz, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
     function drawPlayer(px, py, onGround) {
       ctx.fillStyle = onGround ? "#7cd98a" : "#9abfff";
       ctx.strokeStyle = "#fff";
       ctx.lineWidth = 1;
       ctx.fillRect(px, py, playerPW, playerPH);
       ctx.strokeRect(px + 0.5, py + 0.5, playerPW, playerPH);
-      // eyes
       ctx.fillStyle = "#0b0d14";
       ctx.fillRect(px + 4, py + 6, 2, 2);
       ctx.fillRect(px + 10, py + 6, 2, 2);
     }
 
     function drawFrame() {
-      ctx.fillStyle = "#0b0d14";
-      ctx.fillRect(0, 0, W, H);
-      // subtle gradient sky
+      // background gradient
       const grad = ctx.createLinearGradient(0, 0, 0, H);
       grad.addColorStop(0, "#11131c");
       grad.addColorStop(1, "#0b0d14");
@@ -305,35 +380,85 @@
       ctx.fillRect(0, 0, W, H);
 
       drawPlatforms();
+      drawGhost();
       const [px, py, og, vx, vy, frame] = lastPlayer;
+      // if scrubbing, show a faded "live" ghost of the true present
+      if (scrubbing && lastLivePlayer) {
+        const [lpx, lpy] = lastLivePlayer;
+        ctx.globalAlpha = 0.25;
+        drawPlayer(lpx, lpy, false);
+        ctx.globalAlpha = 1;
+      }
       drawPlayer(px, py, og >= 0.5);
+      const timeLabel = scrubbing ? `@frame ${frame | 0} (rewound)` : `frame ${frame | 0}`;
       overlay.textContent =
-        `frame ${frame | 0}  pos (${px.toFixed(0)}, ${py.toFixed(0)})  vel (${vx.toFixed(2)}, ${vy.toFixed(2)})` +
-        (og >= 0.5 ? "  grounded" : "");
+        `${timeLabel}   pos (${px.toFixed(0)}, ${py.toFixed(0)})   vel (${vx.toFixed(2)}, ${vy.toFixed(2)})` +
+        (og >= 0.5 && !scrubbing ? "   grounded" : "");
     }
 
+    // --- loop ------------------------------------------------------------
+
+    let lastLivePlayer = null;
     let lastT = performance.now();
     let emaFps = 60;
+
     function tick(now) {
       const dt = now - lastT;
       lastT = now;
       if (dt > 0) emaFps = emaFps * 0.92 + (1000 / dt) * 0.08;
       fpsEl.textContent = `${emaFps.toFixed(0)} fps`;
 
-      if (!paused && repl) {
-        try {
-          repl.eval(`(tick! ${keys.L ? 1 : 0} ${keys.R ? 1 : 0} ${keys.J ? 1 : 0})`);
+      if (!repl) { requestAnimationFrame(tick); return; }
+
+      try {
+        const L = keys.L ? 1 : 0, R = keys.R ? 1 : 0, J = keys.J ? 1 : 0;
+
+        // advance sim unless paused or scrubbing
+        if (!paused && !scrubbing) {
+          repl.eval(`(tick! ${L} ${R} ${J})`);
+        }
+
+        // pull latest history size
+        const hs = repl.eval_floats("(history-size)");
+        if (hs.length >= 1) historySize = hs[0] | 0;
+
+        // display state + predicted trail
+        if (scrubbing) {
+          const ps = repl.eval_floats(`(snapshot-at ${scrubIndex})`);
+          if (ps.length >= 6) lastPlayer = Array.from(ps);
+          if (ghostOn) {
+            predicted = repl.eval_floats(`(predict-at ${scrubIndex} ${L} ${R} ${J})`);
+          }
+          const liveFrame = historySize > 0 ? historySize - 1 : 0;
+          const livePs = repl.eval_floats("(player-state)");
+          lastLivePlayer = livePs.length >= 2 ? Array.from(livePs) : null;
+        } else {
           const ps = repl.eval_floats("(player-state)");
           if (ps.length >= 6) lastPlayer = Array.from(ps);
-        } catch (e) {
-          setStatus(String(e), "err");
-          paused = true;
-          pauseBtn.textContent = "Resume";
+          if (ghostOn) {
+            predicted = repl.eval_floats(`(predict ${L} ${R} ${J})`);
+          }
+          lastLivePlayer = null;
         }
+
+        // keep scrubber max in sync; if live, slider tracks right edge
+        scrub.max = Math.max(1, historySize);
+        if (!scrubbing) {
+          scrub.value = historySize;
+          scrubLabel.textContent = "live";
+          scrubLabel.className = "pf-timeline-label live";
+        }
+      } catch (e) {
+        setStatus(String(e), "err");
+        paused = true;
+        pauseBtn.textContent = "Resume";
       }
+
       drawFrame();
       requestAnimationFrame(tick);
     }
+
+    // --- wiring ----------------------------------------------------------
 
     pauseBtn.addEventListener("click", () => {
       paused = !paused;
@@ -344,6 +469,33 @@
       if (repl) repl.eval("(respawn!)");
       stage.focus();
     });
+    forkBtn.addEventListener("click", () => {
+      if (!scrubbing || !repl) return;
+      repl.eval(`(fork-from! ${scrubIndex})`);
+      scrubbing = false;
+      stage.focus();
+    });
+    ghostBtn.addEventListener("click", () => {
+      ghostOn = !ghostOn;
+      ghostBtn.textContent = ghostOn ? "Ghost: on" : "Ghost: off";
+      if (!ghostOn) predicted = new Float32Array(0);
+    });
+
+    scrub.addEventListener("input", () => {
+      const v = parseInt(scrub.value, 10);
+      if (v >= historySize) {
+        scrubbing = false;
+        scrubLabel.textContent = "live";
+        scrubLabel.className = "pf-timeline-label live";
+      } else {
+        scrubbing = true;
+        scrubIndex = v;
+        const framesAgo = historySize - v;
+        scrubLabel.textContent = `-${framesAgo} fr`;
+        scrubLabel.className = "pf-timeline-label past";
+      }
+    });
+
     ta.addEventListener("input", () => {
       clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => applySource(ta.value), 400);
