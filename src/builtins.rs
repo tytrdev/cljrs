@@ -700,6 +700,10 @@ fn get_fn(args: &[Value]) -> Result<Value> {
             Value::Int(i) if *i >= 0 => Ok(v.get(*i as usize).cloned().unwrap_or(default)),
             _ => Ok(default),
         },
+        Value::List(v) => match &args[1] {
+            Value::Int(i) if *i >= 0 => Ok(v.get(*i as usize).cloned().unwrap_or(default)),
+            _ => Ok(default),
+        },
         Value::Nil => Ok(default),
         Value::Str(s) => match &args[1] {
             Value::Int(i) if *i >= 0 => Ok(s

@@ -683,19 +683,29 @@ fn sf_fn(args: &[Value], env: &Env, explicit_name: Option<Arc<str>>) -> Result<V
         return Err(Error::Eval("fn requires params vector".into()));
     }
     let mut name = explicit_name;
-    let (params_val, body_start) = match &args[0] {
-        Value::Vector(_) => (&args[0], 1usize),
+    // Skip past optional fn name.
+    let start = match &args[0] {
         Value::Symbol(s) => {
             if args.len() < 2 {
-                return Err(Error::Eval(
-                    "fn with name requires params vector".into(),
-                ));
+                return Err(Error::Eval("fn with name requires params vector".into()));
             }
             if name.is_none() {
                 name = Some(s.clone());
             }
-            (&args[1], 2usize)
+            1
         }
+        _ => 0,
+    };
+    // Multi-arity fn: `(fn ([x] ...) ([x y] ...))` — every arg from
+    // `start` is a list (params-vec body...). Rewrite as a single
+    // variadic fn with an arity-dispatch cond.
+    if args.len() > start && matches!(&args[start], Value::List(xs) if xs.first().map(|f| matches!(f, Value::Vector(_))).unwrap_or(false))
+        && args[start..].iter().all(|a| matches!(a, Value::List(xs) if xs.first().map(|f| matches!(f, Value::Vector(_))).unwrap_or(false)))
+    {
+        return build_multi_arity_fn(&args[start..], env, name);
+    }
+    let (params_val, body_start) = match &args[start] {
+        Value::Vector(_) => (&args[start], start + 1),
         _ => return Err(Error::Eval("fn requires params vector".into())),
     };
     let params_vec: imbl::Vector<Value> = match params_val {
@@ -767,6 +777,128 @@ fn sf_fn(args: &[Value], env: &Env, explicit_name: Option<Arc<str>>) -> Result<V
         env: env.clone(),
         name,
     })))
+}
+
+/// Rewrite a multi-arity fn into a single variadic fn that dispatches
+/// on (count args). Each arity's params-vec is re-used for
+/// let-destructuring against the captured rest arg.
+///
+///   (fn ([x] x) ([x y] (+ x y)))
+/// becomes
+///   (fn [& __argsN__]
+///     (cond
+///       (= (count __argsN__) 1) (let [[x] __argsN__] x)
+///       (= (count __argsN__) 2) (let [[x y] __argsN__] (+ x y))
+///       :else (throw "no matching arity")))
+///
+/// Variadic arities (one with `& rest`) become an `:else` fallback.
+fn build_multi_arity_fn(
+    arities: &[Value],
+    env: &Env,
+    name: Option<Arc<str>>,
+) -> Result<Value> {
+    let args_sym = match fresh_sym("args") {
+        Value::Symbol(s) => s,
+        _ => unreachable!(),
+    };
+    // Build the cond clauses and optional variadic else-branch.
+    let mut clauses: Vec<Value> = Vec::new();
+    let mut variadic_branch: Option<Value> = None;
+
+    for arity in arities {
+        let xs = match arity {
+            Value::List(v) => v.clone(),
+            _ => return Err(Error::Eval("multi-arity fn: each arity must be a list".into())),
+        };
+        let params_vec = match xs.first() {
+            Some(Value::Vector(pv)) => pv.clone(),
+            _ => return Err(Error::Eval("multi-arity fn: arity must start with a params vector".into())),
+        };
+        let body: Vec<Value> = xs[1..].to_vec();
+        // Is this arity variadic? Look for `&` in params.
+        let has_amp = params_vec
+            .iter()
+            .any(|p| matches!(p, Value::Symbol(s) if s.as_ref() == "&"));
+        let min_arity = if has_amp {
+            // count params before `&`
+            params_vec
+                .iter()
+                .take_while(|p| !matches!(p, Value::Symbol(s) if s.as_ref() == "&"))
+                .count()
+        } else {
+            params_vec.len()
+        };
+
+        // Body wrapped in a destructuring let.
+        let let_bindings = Value::Vector(
+            vec![
+                Value::Vector(params_vec.clone()),
+                Value::Symbol(Arc::clone(&args_sym)),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let mut let_form = vec![Value::Symbol(Arc::from("let")), let_bindings];
+        let_form.extend(body);
+        let body_expr = Value::List(Arc::new(let_form));
+
+        if has_amp {
+            // Variadic arity: matches (>= count min). Use as else fallback,
+            // but only if not already set (last one wins).
+            let guard = Value::List(Arc::new(vec![
+                Value::Symbol(Arc::from(">=")),
+                Value::List(Arc::new(vec![
+                    Value::Symbol(Arc::from("count")),
+                    Value::Symbol(Arc::clone(&args_sym)),
+                ])),
+                Value::Int(min_arity as i64),
+            ]));
+            variadic_branch = Some(body_expr.clone());
+            clauses.push(guard);
+            clauses.push(body_expr);
+        } else {
+            let guard = Value::List(Arc::new(vec![
+                Value::Symbol(Arc::from("=")),
+                Value::List(Arc::new(vec![
+                    Value::Symbol(Arc::from("count")),
+                    Value::Symbol(Arc::clone(&args_sym)),
+                ])),
+                Value::Int(min_arity as i64),
+            ]));
+            clauses.push(guard);
+            clauses.push(body_expr);
+        }
+    }
+    // Fallthrough: throw if no match (only reached when all arities are
+    // fixed and none matched).
+    if variadic_branch.is_none() {
+        clauses.push(Value::Keyword(Arc::from("else")));
+        clauses.push(Value::List(Arc::new(vec![
+            Value::Symbol(Arc::from("throw")),
+            Value::Str(Arc::from("no matching arity for multi-fn call")),
+        ])));
+    }
+
+    let mut cond_form = vec![Value::Symbol(Arc::from("cond"))];
+    cond_form.extend(clauses);
+    let body = Value::List(Arc::new(cond_form));
+
+    // Rebuild as (fn [name] [& args] body) and pass to sf_fn.
+    let params_vec = Value::Vector(
+        vec![
+            Value::Symbol(Arc::from("&")),
+            Value::Symbol(Arc::clone(&args_sym)),
+        ]
+        .into_iter()
+        .collect(),
+    );
+    let mut synth: Vec<Value> = Vec::new();
+    if let Some(n) = &name {
+        synth.push(Value::Symbol(Arc::clone(n)));
+    }
+    synth.push(params_vec);
+    synth.push(body);
+    sf_fn(&synth, env, name)
 }
 
 fn sf_loop(args: &[Value], env: &Env) -> Result<Value> {
