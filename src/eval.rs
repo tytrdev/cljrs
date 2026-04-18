@@ -202,7 +202,8 @@ pub fn eval(form: &Value, env: &Env) -> Result<Value> {
         | Value::Builtin(_)
         | Value::Native(_)
         | Value::Atom(_)
-        | Value::Regex(_) => Ok(form.clone()),
+        | Value::Regex(_)
+        | Value::Multi(_) => Ok(form.clone()),
         #[cfg(feature = "gpu")]
         Value::GpuKernel(_) | Value::GpuPixelKernel(_) => Ok(form.clone()),
         Value::Symbol(s) => env.lookup(s),
@@ -252,6 +253,8 @@ fn eval_list(xs: &[Value], env: &Env) -> Result<Value> {
             "defn-gpu" => return sf_defn_gpu(&xs[1..], env),
             #[cfg(feature = "gpu")]
             "defn-gpu-pixel" => return sf_defn_gpu_pixel(&xs[1..], env),
+            "defmulti" => return sf_defmulti(&xs[1..], env),
+            "defmethod" => return sf_defmethod(&xs[1..], env),
             "defmacro" => return sf_defmacro(&xs[1..], env),
             "macroexpand" => return sf_macroexpand(&xs[1..], env),
             "macroexpand-1" => return sf_macroexpand_1(&xs[1..], env),
@@ -362,6 +365,8 @@ const SPECIAL_FORMS: &[&str] = &[
     "defn-native",
     "defn-gpu",
     "defn-gpu-pixel",
+    "defmulti",
+    "defmethod",
     "defmacro",
     "macroexpand",
     "macroexpand-1",
@@ -452,9 +457,31 @@ pub fn apply(f: &Value, args: &[Value]) -> Result<Value> {
         Value::Keyword(_) | Value::Map(_) | Value::Set(_) | Value::Vector(_) => {
             invoke_collection(f, args)
         }
+        Value::Multi(m) => invoke_multi(m, args),
         #[cfg(feature = "gpu")]
         Value::GpuKernel(k) => invoke_gpu_kernel(k, args),
         _ => Err(Error::Type(format!("not callable: {}", f.type_name()))),
+    }
+}
+
+/// Multimethod dispatch: run the dispatch fn on the call args, look up
+/// the result in the methods table, fall back to `:default`.
+fn invoke_multi(m: &Arc<crate::value::MultiFn>, args: &[Value]) -> Result<Value> {
+    let dval = apply(&m.dispatch, args)?;
+    let methods = m.methods.read().unwrap();
+    let method = methods.get(&dval).cloned().or_else(|| {
+        methods
+            .get(&Value::Keyword(Arc::from("default")))
+            .cloned()
+    });
+    drop(methods);
+    match method {
+        Some(f) => apply(&f, args),
+        None => Err(Error::Eval(format!(
+            "no method in multifn `{}` for dispatch value {}",
+            m.name,
+            dval.to_pr_string()
+        ))),
     }
 }
 
@@ -1145,6 +1172,53 @@ fn sf_defn_gpu_pixel(args: &[Value], env: &Env) -> Result<Value> {
     let v = Value::GpuPixelKernel(Arc::new(kernel));
     env.define_global(&name, v.clone());
     Ok(v)
+}
+
+/// `(defmulti name dispatch-fn)` — introduce a multimethod. Stores a
+/// `Value::Multi` under `name`. Dispatch fn is evaluated immediately
+/// (it's a normal fn applied to each call's args).
+fn sf_defmulti(args: &[Value], env: &Env) -> Result<Value> {
+    if args.len() != 2 {
+        return Err(Error::Arity { expected: "2".into(), got: args.len() });
+    }
+    let name = match &args[0] {
+        Value::Symbol(s) => Arc::clone(s),
+        _ => return Err(Error::Eval("defmulti: name must be a symbol".into())),
+    };
+    let dispatch = eval(&args[1], env)?;
+    let multi = crate::value::MultiFn {
+        name: Arc::clone(&name),
+        dispatch,
+        methods: std::sync::RwLock::new(imbl::HashMap::new()),
+    };
+    let v = Value::Multi(Arc::new(multi));
+    env.define_global(&name, v.clone());
+    Ok(v)
+}
+
+/// `(defmethod name dispatch-val [params] body...)` — register a method
+/// on the multimethod named `name`. Looks up the multi, evaluates the
+/// fn (a lambda over the params), and inserts into the methods map.
+fn sf_defmethod(args: &[Value], env: &Env) -> Result<Value> {
+    if args.len() < 3 {
+        return Err(Error::Arity { expected: ">= 3".into(), got: args.len() });
+    }
+    let name = match &args[0] {
+        Value::Symbol(s) => s.clone(),
+        _ => return Err(Error::Eval("defmethod: name must be a symbol".into())),
+    };
+    let dispatch_val = eval(&args[1], env)?;
+    // The rest of args is `[params] body...` — build a fn value.
+    let fn_val = sf_fn(&args[2..], env, None)?;
+    let multi_val = env.lookup(&name)?;
+    let multi = match &multi_val {
+        Value::Multi(m) => m.clone(),
+        _ => return Err(Error::Eval(format!(
+            "defmethod: `{name}` is not a multimethod"
+        ))),
+    };
+    multi.methods.write().unwrap().insert(dispatch_val, fn_val);
+    Ok(multi_val)
 }
 
 fn sf_defmacro(args: &[Value], env: &Env) -> Result<Value> {

@@ -41,6 +41,10 @@ pub enum Value {
     /// Compiled regex pattern from `#"..."`. Wraps the regex crate's
     /// Regex; lookups go through `re-find`, `re-matches`, `re-seq`.
     Regex(Arc<regex::Regex>),
+    /// Multimethod from `defmulti`. Stores the dispatch fn + a
+    /// dispatch-value to method-fn map. Callable via `apply` like
+    /// any other fn.
+    Multi(Arc<MultiFn>),
     /// Compiled GPU kernel from `defn-gpu`. Called as a normal fn: takes
     /// one arg (an f32 buffer = vector/list of numbers) and returns a
     /// vector of f32s. Internally dispatches via wgpu.
@@ -89,6 +93,15 @@ pub struct Lambda {
     pub name: Option<Arc<str>>,
 }
 
+/// A multimethod. The dispatch fn is applied to the call args and its
+/// return value is looked up in `methods`. Falls back to the `:default`
+/// method if no exact match. Methods are mutated via `defmethod`.
+pub struct MultiFn {
+    pub name: Arc<str>,
+    pub dispatch: Value,
+    pub methods: RwLock<imbl::HashMap<Value, Value>>,
+}
+
 impl Value {
     pub fn truthy(&self) -> bool {
         !matches!(self, Value::Nil | Value::Bool(false))
@@ -113,6 +126,7 @@ impl Value {
             Value::Native(_) => "native",
             Value::Atom(_) => "atom",
             Value::Regex(_) => "regex",
+            Value::Multi(_) => "multi",
             #[cfg(feature = "gpu")]
             Value::GpuKernel(_) => "gpu-kernel",
             #[cfg(feature = "gpu")]
@@ -179,6 +193,7 @@ impl Value {
             Value::Native(nf) => format!("#<native {}>", nf.name),
             Value::Atom(a) => format!("#<atom {}>", a.read().unwrap().to_pr_string()),
             Value::Regex(r) => format!("#\"{}\"", r.as_str()),
+            Value::Multi(m) => format!("#<multi {}>", m.name),
             #[cfg(feature = "gpu")]
             Value::GpuKernel(k) => format!("#<gpu-kernel {}>", k.name),
             #[cfg(feature = "gpu")]
@@ -242,6 +257,7 @@ impl PartialEq for Value {
             (Set(a), Set(b)) => a == b,
             (Atom(a), Atom(b)) => Arc::ptr_eq(a, b),
             (Regex(a), Regex(b)) => a.as_str() == b.as_str(),
+            (Multi(a), Multi(b)) => Arc::ptr_eq(a, b),
             #[cfg(feature = "gpu")]
             (GpuKernel(a), GpuKernel(b)) => Arc::ptr_eq(a, b),
             #[cfg(feature = "gpu")]
@@ -350,6 +366,10 @@ impl Hash for Value {
             Value::Regex(r) => {
                 18u8.hash(state);
                 r.as_str().hash(state);
+            }
+            Value::Multi(m) => {
+                19u8.hash(state);
+                (Arc::as_ptr(m) as usize).hash(state);
             }
             #[cfg(feature = "gpu")]
             Value::GpuKernel(k) => {
