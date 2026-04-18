@@ -14,7 +14,13 @@
       flex: 0 0 auto;
     }
     .phys-stage canvas { display: block; }
-    .phys-col { flex: 1 1 340px; min-width: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+    .phys-col {
+      flex: 1 1 380px;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+    }
     .phys-toolbar {
       display: flex; gap: 0.5rem; align-items: center;
       font-size: 0.8rem; color: var(--fg-dim);
@@ -23,13 +29,7 @@
     .phys-toolbar select, .phys-toolbar button {
       font-family: inherit;
       font-size: 0.8rem;
-      padding: 0.25rem 0.6rem;
-    }
-    .phys-col .repl-hl-wrap { height: 380px; }
-    .phys-col textarea, .phys-col .repl-hl {
-      font-family: ui-monospace, Menlo, Consolas, monospace;
-      font-size: 0.78rem;
-      line-height: 1.35;
+      padding: 0.25rem 0.7rem;
     }
     .phys-status {
       font-family: ui-monospace, monospace;
@@ -66,7 +66,7 @@
           <span id="phys-fps">—</span>
         </div>
         <div class="repl" id="phys-editor">
-          <textarea id="phys-src" spellcheck="false"></textarea>
+          <textarea id="phys-src" spellcheck="false" style="min-height:380px"></textarea>
         </div>
         <div id="phys-status" class="phys-status"></div>
       </div>
@@ -90,7 +90,6 @@
 (p2/add-body! world {:type :fixed :position [12 0] :rotation -0.3
                      :collider {:shape :box :half-extents [6 0.3]}})
 
-;; 18 falling boxes
 (def bodies
   (vec
     (for [i (range 18)]
@@ -146,101 +145,145 @@
 
     const DEMO_BALLS_2D = `(require '[cljrs.physics.d2 :as p2])
 
-;; a bowl of bouncy balls with varying restitution.
-(def world (p2/world {:gravity [0 -18]}))
+;; high-restitution pinballs in a wedge — they keep bouncing for a long
+;; time because restitution is near 1 and friction is near 0.
+(def world (p2/world {:gravity [0 -22]}))
 
-(p2/add-body! world {:type :fixed :position [-10 -2] :rotation 0.6
-                     :collider {:shape :box :half-extents [8 0.3]}})
-(p2/add-body! world {:type :fixed :position [10 -2] :rotation -0.6
-                     :collider {:shape :box :half-extents [8 0.3]}})
 (p2/add-body! world {:type :fixed :position [0 -6]
-                     :collider {:shape :box :half-extents [6 0.3]}})
+                     :collider {:shape :box :half-extents [12 0.3]
+                                :restitution 0.95}})
+(p2/add-body! world {:type :fixed :position [-10 0] :rotation 0.9
+                     :collider {:shape :box :half-extents [8 0.3]
+                                :restitution 0.95}})
+(p2/add-body! world {:type :fixed :position [10 0] :rotation -0.9
+                     :collider {:shape :box :half-extents [8 0.3]
+                                :restitution 0.95}})
+(p2/add-body! world {:type :fixed :position [0 2] :rotation 0
+                     :collider {:shape :ball :radius 0.9
+                                :restitution 1.0}})
 
 (def balls
   (vec
-    (for [i (range 24)]
+    (for [i (range 30)]
       (p2/add-body! world
                     {:type :dynamic
                      :position [(- (mod i 6) 2.5)
-                                (+ 3 (* 0.8 (quot i 6)))]
-                     :linvel [(* 2 (- 0.5 (/ (mod i 5) 5.0))) 0]
+                                (+ 6 (* 0.3 (quot i 6)))]
+                     :linvel [(* 5 (- 0.5 (/ (mod i 7) 7.0)))
+                              (* -3 (/ (mod i 3) 3.0))]
                      :collider {:shape :ball
-                                :radius 0.42
-                                :restitution (+ 0.4 (* 0.05 (mod i 10)))
-                                :friction 0.15}}))))
+                                :radius 0.35
+                                :restitution 0.95
+                                :friction 0.02
+                                :density 0.6}}))))
 
 (defn frame! []
   (p2/step! world)
   (mapv (fn [b]
           (let [[x y] (p2/translation world b)]
-            [x y 0.42]))
+            [x y 0.35]))
         balls))`;
 
-    const DEMO_BOXES_3D = `(require '[cljrs.physics.d3 :as p3])
+    const DEMO_EXPLOSION_3D = `(require '[cljrs.physics.d3 :as p3])
 
-;; a stack of spheres on a 3D floor. We render spheres because we
-;; haven't bound 3D quaternion → screen rotation yet.
-(def world (p3/world {:gravity [0 -15 0]}))
+;; a 3D firework: 90 spheres start tightly packed at the origin, each
+;; with a strong outward velocity. Walls contain the blast so you can
+;; watch ricochets pile up.
+(def world (p3/world {:gravity [0 -6 0]}))
 
-(p3/add-body! world {:type :fixed :position [0 -4 0]
-                     :collider {:shape :box
-                                :half-extents [10 0.5 10]}})
+;; floor + 4 walls (an arena)
+(p3/add-body! world {:type :fixed :position [0 -5 0]
+                     :collider {:shape :box :half-extents [14 0.3 14]
+                                :restitution 0.6}})
+(p3/add-body! world {:type :fixed :position [14 0 0]
+                     :collider {:shape :box :half-extents [0.3 6 14]
+                                :restitution 0.8}})
+(p3/add-body! world {:type :fixed :position [-14 0 0]
+                     :collider {:shape :box :half-extents [0.3 6 14]
+                                :restitution 0.8}})
+(p3/add-body! world {:type :fixed :position [0 0 14]
+                     :collider {:shape :box :half-extents [14 6 0.3]
+                                :restitution 0.8}})
+(p3/add-body! world {:type :fixed :position [0 0 -14]
+                     :collider {:shape :box :half-extents [14 6 0.3]
+                                :restitution 0.8}})
 
-(def bodies
+;; 90 balls from a fibonacci-sphere distribution, each launched outward
+(def balls
   (vec
-    (for [i (range 5)
-          j (range 5)]
-      (p3/add-body! world
-                    {:type :dynamic
-                     :position [(- i 2) (+ 1 (* 0.2 i)) (- j 2)]
-                     :collider {:shape :ball
-                                :radius 0.45
-                                :restitution 0.1
-                                :friction 0.4}}))))
+    (for [i (range 90)]
+      (let [phi  (* i 2.399963)            ; golden angle
+            y    (- 1.0 (/ (* i 2.0) 89.0)) ; -1..1
+            r    (sqrt (max 0.0001 (- 1.0 (* y y))))
+            dx   (* r (cos phi))
+            dz   (* r (sin phi))
+            speed 18.0]
+        (p3/add-body! world
+                      {:type :dynamic
+                       :position [(* 0.2 dx) (+ 1 (* 0.2 y)) (* 0.2 dz)]
+                       :linvel [(* speed dx) (* speed y) (* speed dz)]
+                       :collider {:shape :ball
+                                  :radius 0.28
+                                  :restitution 0.75
+                                  :friction 0.05
+                                  :density 0.8}})))))
 
 (defn frame! []
   (p3/step! world)
   (mapv (fn [b]
           (let [[x y z] (p3/translation world b)]
-            [x y z 0.45]))
-        bodies))`;
+            [x y z 0.28]))
+        balls))`;
 
-    const DEMO_RAIN_3D = `(require '[cljrs.physics.d3 :as p3])
+    const DEMO_ORBIT_3D = `(require '[cljrs.physics.d3 :as p3])
 
-;; raining balls into a square arena with four walls.
-(def world (p3/world {:gravity [0 -18 0]}))
+;; a gravity well: no global gravity, each frame we apply an inward
+;; impulse toward the origin, strength ~ 1/r^2 like a point mass.
+;; 35 balls start on rings at varied radii with tangential velocities
+;; tuned for roughly-circular orbits; collisions between them turn the
+;; ring into a simmering disc.
+(def world (p3/world {:gravity [0 0 0]}))
 
-(p3/add-body! world {:type :fixed :position [0 -4 0]
-                     :collider {:shape :box :half-extents [6 0.3 6]}})
-(p3/add-body! world {:type :fixed :position [6 -2 0]
-                     :collider {:shape :box :half-extents [0.3 2 6]}})
-(p3/add-body! world {:type :fixed :position [-6 -2 0]
-                     :collider {:shape :box :half-extents [0.3 2 6]}})
-(p3/add-body! world {:type :fixed :position [0 -2 6]
-                     :collider {:shape :box :half-extents [6 2 0.3]}})
-(p3/add-body! world {:type :fixed :position [0 -2 -6]
-                     :collider {:shape :box :half-extents [6 2 0.3]}})
+;; one big static sphere at center as a visual anchor + collider
+(p3/add-body! world {:type :fixed :position [0 0 0]
+                     :collider {:shape :ball :radius 0.8
+                                :restitution 0.3}})
 
 (def balls
   (vec
-    (for [i (range 60)]
-      (let [ang (* i 0.73)
-            r   (* 3 (sin (* i 0.3)))]
+    (for [i (range 35)]
+      (let [ring (quot i 12)
+            r    (+ 3 (* 1.3 ring))
+            th   (* (mod i 12) 0.5236)
+            x    (* r (cos th))
+            z    (* r (sin th))
+            y    (* 0.15 (- (mod i 3) 1))
+            speed (* 1.3 (sqrt (/ 12.0 r)))
+            vx   (* speed (- (sin th)))
+            vz   (* speed (cos th))]
         (p3/add-body! world
                       {:type :dynamic
-                       :position [(* r (cos ang))
-                                  (+ 6 (* 0.2 i))
-                                  (* r (sin ang))]
+                       :position [x y z]
+                       :linvel [vx 0 vz]
                        :collider {:shape :ball
-                                  :radius 0.32
-                                  :restitution 0.55
-                                  :friction 0.2}})))))
+                                  :radius 0.28
+                                  :restitution 0.6
+                                  :friction 0.1
+                                  :density 1.0}})))))
 
 (defn frame! []
+  ;; inward pull toward origin, clipped so near-center bodies don't
+  ;; explode out (1/r^2 blows up near 0).
+  (doseq [b balls]
+    (let [[x y z] (p3/translation world b)
+          r2 (max 1.0 (+ (* x x) (* y y) (* z z)))
+          k  (/ 3.2 r2)]
+      (p3/apply-impulse! world b
+                         [(* k (- x)) (* k (- y)) (* k (- z))])))
   (p3/step! world)
   (mapv (fn [b]
           (let [[x y z] (p3/translation world b)]
-            [x y z 0.32]))
+            [x y z 0.28]))
         balls))`;
 
     // --- rendering -------------------------------------------------------
@@ -251,7 +294,7 @@
     function render2dBoxes(ctx, floats, statics, PPU, halfExt) {
       ctx.fillStyle = "#222633";
       for (const [x, y, r, hx, hy] of statics) {
-        const [sx, sy] = [CX + x * PPU, CY - y * PPU];
+        const sx = CX + x * PPU, sy = CY - y * PPU;
         ctx.save();
         ctx.translate(sx, sy);
         ctx.rotate(-r);
@@ -263,7 +306,7 @@
       ctx.strokeStyle = "#cde";
       ctx.lineWidth = 1;
       for (let i = 0; i < floats.length; i += 3) {
-        const [sx, sy] = [CX + floats[i] * PPU, CY - floats[i + 1] * PPU];
+        const sx = CX + floats[i] * PPU, sy = CY - floats[i + 1] * PPU;
         const r = floats[i + 2];
         ctx.save();
         ctx.translate(sx, sy);
@@ -276,13 +319,20 @@
 
     function render2dBalls(ctx, floats, statics, PPU) {
       ctx.fillStyle = "#222633";
-      for (const [x, y, r, hx, hy] of statics) {
-        const [sx, sy] = [CX + x * PPU, CY - y * PPU];
-        ctx.save();
-        ctx.translate(sx, sy);
-        ctx.rotate(-r);
-        ctx.fillRect(-hx * PPU, -hy * PPU, hx * 2 * PPU, hy * 2 * PPU);
-        ctx.restore();
+      for (const stat of statics) {
+        const [x, y, r, hx, hy, shape] = stat;
+        const sx = CX + x * PPU, sy = CY - y * PPU;
+        if (shape === "ball") {
+          ctx.beginPath();
+          ctx.arc(sx, sy, hx * PPU, 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          ctx.save();
+          ctx.translate(sx, sy);
+          ctx.rotate(-r);
+          ctx.fillRect(-hx * PPU, -hy * PPU, hx * 2 * PPU, hy * 2 * PPU);
+          ctx.restore();
+        }
       }
       ctx.fillStyle = "#fc8";
       ctx.strokeStyle = "#ffe0c0";
@@ -298,19 +348,28 @@
       }
     }
 
-    // Oblique projection for 3D: simple, no camera math. z tints depth.
-    // Each body is rendered as a circle (sphere) at projected position.
+    // Oblique projection for 3D: z offsets x and y, depth-tinted fill.
     function render3dSpheres(ctx, floats, statics3d, PPU) {
-      // Project: sx = CX + (x - 0.4*z) * PPU,  sy = CY - (y - 0.3*z) * PPU
       const PX = 0.4, PY = 0.3;
       function proj(x, y, z) {
         return [CX + (x - PX * z) * PPU, CY - (y - PY * z) * PPU];
       }
-      // Draw floor + walls as filled polygons by projecting their corners.
-      ctx.fillStyle = "#1b1d26";
-      ctx.strokeStyle = "#343846";
-      for (const [cx, cy, cz, hx, hy, hz] of statics3d) {
-        // Only draw the top face of each box (cheap but readable).
+      // static geometry (floor top face + optionally a center ball)
+      for (const s of statics3d) {
+        const [cx, cy, cz, hx, hy, hz, shape] = s;
+        if (shape === "ball") {
+          const [sx, sy] = proj(cx, cy, cz);
+          ctx.fillStyle = "#3a3d4a";
+          ctx.strokeStyle = "#60657a";
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.arc(sx, sy, hx * PPU, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+          continue;
+        }
+        ctx.fillStyle = "#1b1d26";
+        ctx.strokeStyle = "#343846";
         const corners = [
           [cx - hx, cy + hy, cz - hz],
           [cx + hx, cy + hy, cz - hz],
@@ -326,12 +385,11 @@
         ctx.fill();
         ctx.stroke();
       }
-      // Sort bodies by projected depth so near bodies draw on top.
+      // dynamic bodies: sort by (z - y) so near-camera draws last
       const n = Math.floor(floats.length / 4);
       const order = new Array(n);
       for (let i = 0; i < n; i++) order[i] = i;
       order.sort((a, b) => {
-        // depth proxy: z - y (further = drawn first)
         const za = floats[a * 4 + 2] - floats[a * 4 + 1];
         const zb = floats[b * 4 + 2] - floats[b * 4 + 1];
         return za - zb;
@@ -342,16 +400,16 @@
         const z = floats[idx * 4 + 2];
         const r = floats[idx * 4 + 3];
         const [sx, sy] = proj(x, y, z);
-        // depth-tint: far = darker
-        const depth = (z + 6) / 12; // rough 0..1
-        const shade = Math.max(0, Math.min(1, depth));
-        const g = Math.floor(140 + 80 * shade);
-        const b = Math.floor(200 - 60 * shade);
-        ctx.fillStyle = `rgb(100, ${g}, ${b})`;
+        // color: far → cool blue, near → warm orange
+        const depth = Math.max(0, Math.min(1, (z + 12) / 24));
+        const rch = Math.floor(80 + 160 * (1 - depth));
+        const gch = Math.floor(140 + 40 * depth);
+        const bch = Math.floor(200 - 80 * (1 - depth));
+        ctx.fillStyle = `rgb(${rch}, ${gch}, ${bch})`;
         ctx.strokeStyle = "#e0e8f0";
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.arc(sx, sy, r * PPU, 0, Math.PI * 2);
+        ctx.arc(sx, sy, Math.max(2, r * PPU), 0, Math.PI * 2);
         ctx.fill();
         ctx.stroke();
       }
@@ -374,35 +432,34 @@
         statics: [[0, -6, 0, 14, 0.4]],
         render: (ctx, f, s) => render2dBoxes(ctx, f, s, 22, 0.5),
       },
-      "2d-balls": {
-        label: "2D · bouncing balls",
+      "2d-pinball": {
+        label: "2D · bouncy pinball wedge",
         source: DEMO_BALLS_2D,
+        // [x, y, r, hx, hy, shape?]
         statics: [
-          [-10, -2, 0.6, 8, 0.3],
-          [10, -2, -0.6, 8, 0.3],
-          [0, -6, 0, 6, 0.3],
+          [0, -6, 0, 12, 0.3, "box"],
+          [-10, 0, 0.9, 8, 0.3, "box"],
+          [10, 0, -0.9, 8, 0.3, "box"],
+          [0, 2, 0, 0.9, 0.9, "ball"],
         ],
         render: (ctx, f, s) => render2dBalls(ctx, f, s, 22),
       },
-      "3d-stack": {
-        label: "3D · sphere pile",
-        source: DEMO_BOXES_3D,
-        statics3d: [[0, -4, 0, 10, 0.5, 10]],
-        render3d: true,
-        render: (ctx, f, s, s3d) => render3dSpheres(ctx, f, s3d, 22),
-      },
-      "3d-rain": {
-        label: "3D · arena rain",
-        source: DEMO_RAIN_3D,
+      "3d-explosion": {
+        label: "3D · firework explosion",
+        source: DEMO_EXPLOSION_3D,
+        // [cx, cy, cz, hx, hy, hz, shape?]
         statics3d: [
-          [0, -4, 0, 6, 0.3, 6],
-          [6, -2, 0, 0.3, 2, 6],
-          [-6, -2, 0, 0.3, 2, 6],
-          [0, -2, 6, 6, 2, 0.3],
-          [0, -2, -6, 6, 2, 0.3],
+          [0, -5, 0, 14, 0.3, 14, "box"],
         ],
-        render3d: true,
-        render: (ctx, f, s, s3d) => render3dSpheres(ctx, f, s3d, 22),
+        render: (ctx, f, s, s3d) => render3dSpheres(ctx, f, s3d, 14),
+      },
+      "3d-orbit": {
+        label: "3D · gravity well",
+        source: DEMO_ORBIT_3D,
+        statics3d: [
+          [0, 0, 0, 0.8, 0.8, 0.8, "ball"],
+        ],
+        render: (ctx, f, s, s3d) => render3dSpheres(ctx, f, s3d, 28),
       },
     };
 
@@ -456,8 +513,11 @@
     function loadDemo(key) {
       currentDemo = DEMOS[key];
       ta.value = currentDemo.source;
-      // Fire highlight overlay update manually.
+      // Resync the highlight overlay (which listens on input) without
+      // also kicking off the debounce — cancel it right after.
       ta.dispatchEvent(new Event("input"));
+      clearTimeout(debounceTimer);
+      debounceTimer = null;
       applySource(currentDemo.source);
     }
 
@@ -503,7 +563,7 @@
 
     ta.addEventListener("input", () => {
       clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => applySource(ta.value), 450);
+      debounceTimer = setTimeout(() => applySource(ta.value), 500);
     });
     ta.addEventListener("keydown", (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
