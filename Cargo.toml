@@ -5,6 +5,9 @@ members = [".", "crates/cljrs-wasm"]
 name = "cljrs"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
+repository = "https://github.com/tytrdev/cljrs"
+description = "Clojure dialect implemented from scratch in Rust, with MLIR/LLVM native codegen and a GPU compute path."
 
 [features]
 default = []
