@@ -41,10 +41,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let v0: f32 = ((2.0 * (f32(k_y) / fh)) - 1.0) / zoom;
     let base_re: f32 = cx + (u0 * aspect);
     let base_im: f32 = cy + v0;
-    let c_re_: f32 = base_re + (px_size * ((-0.4375) * aspect));
-    let c_im_: f32 = base_im + (py_size * (-0.0625));
-    var _lv0_z_re: f32 = c_re_;
-    var _lv1_z_im: f32 = c_im_;
+    let c_re__37__auto: f32 = base_re + (px_size * ((-0.4375) * aspect));
+    let c_im__37__auto: f32 = base_im + (py_size * (-0.0625));
+    var _lv0_z_re: f32 = c_re__37__auto;
+    var _lv1_z_im: f32 = c_im__37__auto;
     var _lv2_it: i32 = 0i;
     var _lr3: f32 = 0.0;
     loop {
@@ -56,8 +56,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     _lr3 = (f32(_lv2_it) + (1.0 - (log(log(((_lv0_z_re * _lv0_z_re) + (_lv1_z_im * _lv1_z_im)))) / 0.6931)));
     break;
     } else {
-    let _rt4: f32 = (((_lv0_z_re * _lv0_z_re) - (_lv1_z_im * _lv1_z_im)) + c_re_);
-    let _rt5: f32 = ((2.0 * (_lv0_z_re * _lv1_z_im)) + c_im_);
+    let _rt4: f32 = (((_lv0_z_re * _lv0_z_re) - (_lv1_z_im * _lv1_z_im)) + c_re__37__auto);
+    let _rt5: f32 = ((2.0 * (_lv0_z_re * _lv1_z_im)) + c_im__37__auto);
     let _rt6: i32 = (_lv2_it + 1i);
     _lv0_z_re = _rt4;
     _lv1_z_im = _rt5;
@@ -67,10 +67,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     }
     let s1v: f32 = _lr3;
-    let c_re__2: f32 = base_re + (px_size * ((-0.1875) * aspect));
-    let c_im__2: f32 = base_im + (py_size * (-0.3125));
-    var _lv7_z_re: f32 = c_re__2;
-    var _lv8_z_im: f32 = c_im__2;
+    let c_re__37__auto_2: f32 = base_re + (px_size * ((-0.1875) * aspect));
+    let c_im__37__auto_2: f32 = base_im + (py_size * (-0.3125));
+    var _lv7_z_re: f32 = c_re__37__auto_2;
+    var _lv8_z_im: f32 = c_im__37__auto_2;
     var _lv9_it: i32 = 0i;
     var _lr10: f32 = 0.0;
     loop {
@@ -82,8 +82,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     _lr10 = (f32(_lv9_it) + (1.0 - (log(log(((_lv7_z_re * _lv7_z_re) + (_lv8_z_im * _lv8_z_im)))) / 0.6931)));
     break;
     } else {
-    let _rt11: f32 = (((_lv7_z_re * _lv7_z_re) - (_lv8_z_im * _lv8_z_im)) + c_re__2);
-    let _rt12: f32 = ((2.0 * (_lv7_z_re * _lv8_z_im)) + c_im__2);
+    let _rt11: f32 = (((_lv7_z_re * _lv7_z_re) - (_lv8_z_im * _lv8_z_im)) + c_re__37__auto_2);
+    let _rt12: f32 = ((2.0 * (_lv7_z_re * _lv8_z_im)) + c_im__37__auto_2);
     let _rt13: i32 = (_lv9_it + 1i);
     _lv7_z_re = _rt11;
     _lv8_z_im = _rt12;
@@ -93,10 +93,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     }
     let s2v: f32 = _lr10;
-    let c_re__3: f32 = base_re + (px_size * (0.0625 * aspect));
-    let c_im__3: f32 = base_im + (py_size * (-0.4375));
-    var _lv14_z_re: f32 = c_re__3;
-    var _lv15_z_im: f32 = c_im__3;
+    let c_re__37__auto_3: f32 = base_re + (px_size * (0.0625 * aspect));
+    let c_im__37__auto_3: f32 = base_im + (py_size * (-0.4375));
+    var _lv14_z_re: f32 = c_re__37__auto_3;
+    var _lv15_z_im: f32 = c_im__37__auto_3;
     var _lv16_it: i32 = 0i;
     var _lr17: f32 = 0.0;
     loop {
@@ -108,8 +108,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     _lr17 = (f32(_lv16_it) + (1.0 - (log(log(((_lv14_z_re * _lv14_z_re) + (_lv15_z_im * _lv15_z_im)))) / 0.6931)));
     break;
     } else {
-    let _rt18: f32 = (((_lv14_z_re * _lv14_z_re) - (_lv15_z_im * _lv15_z_im)) + c_re__3);
-    let _rt19: f32 = ((2.0 * (_lv14_z_re * _lv15_z_im)) + c_im__3);
+    let _rt18: f32 = (((_lv14_z_re * _lv14_z_re) - (_lv15_z_im * _lv15_z_im)) + c_re__37__auto_3);
+    let _rt19: f32 = ((2.0 * (_lv14_z_re * _lv15_z_im)) + c_im__37__auto_3);
     let _rt20: i32 = (_lv16_it + 1i);
     _lv14_z_re = _rt18;
     _lv15_z_im = _rt19;
@@ -119,10 +119,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     }
     let s3v: f32 = _lr17;
-    let c_re__4: f32 = base_re + (px_size * (0.3125 * aspect));
-    let c_im__4: f32 = base_im + (py_size * (-0.1875));
-    var _lv21_z_re: f32 = c_re__4;
-    var _lv22_z_im: f32 = c_im__4;
+    let c_re__37__auto_4: f32 = base_re + (px_size * (0.3125 * aspect));
+    let c_im__37__auto_4: f32 = base_im + (py_size * (-0.1875));
+    var _lv21_z_re: f32 = c_re__37__auto_4;
+    var _lv22_z_im: f32 = c_im__37__auto_4;
     var _lv23_it: i32 = 0i;
     var _lr24: f32 = 0.0;
     loop {
@@ -134,8 +134,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     _lr24 = (f32(_lv23_it) + (1.0 - (log(log(((_lv21_z_re * _lv21_z_re) + (_lv22_z_im * _lv22_z_im)))) / 0.6931)));
     break;
     } else {
-    let _rt25: f32 = (((_lv21_z_re * _lv21_z_re) - (_lv22_z_im * _lv22_z_im)) + c_re__4);
-    let _rt26: f32 = ((2.0 * (_lv21_z_re * _lv22_z_im)) + c_im__4);
+    let _rt25: f32 = (((_lv21_z_re * _lv21_z_re) - (_lv22_z_im * _lv22_z_im)) + c_re__37__auto_4);
+    let _rt26: f32 = ((2.0 * (_lv21_z_re * _lv22_z_im)) + c_im__37__auto_4);
     let _rt27: i32 = (_lv23_it + 1i);
     _lv21_z_re = _rt25;
     _lv22_z_im = _rt26;
@@ -145,10 +145,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     }
     let s4v: f32 = _lr24;
-    let c_re__5: f32 = base_re + (px_size * (0.4375 * aspect));
-    let c_im__5: f32 = base_im + (py_size * 0.0625);
-    var _lv28_z_re: f32 = c_re__5;
-    var _lv29_z_im: f32 = c_im__5;
+    let c_re__37__auto_5: f32 = base_re + (px_size * (0.4375 * aspect));
+    let c_im__37__auto_5: f32 = base_im + (py_size * 0.0625);
+    var _lv28_z_re: f32 = c_re__37__auto_5;
+    var _lv29_z_im: f32 = c_im__37__auto_5;
     var _lv30_it: i32 = 0i;
     var _lr31: f32 = 0.0;
     loop {
@@ -160,8 +160,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     _lr31 = (f32(_lv30_it) + (1.0 - (log(log(((_lv28_z_re * _lv28_z_re) + (_lv29_z_im * _lv29_z_im)))) / 0.6931)));
     break;
     } else {
-    let _rt32: f32 = (((_lv28_z_re * _lv28_z_re) - (_lv29_z_im * _lv29_z_im)) + c_re__5);
-    let _rt33: f32 = ((2.0 * (_lv28_z_re * _lv29_z_im)) + c_im__5);
+    let _rt32: f32 = (((_lv28_z_re * _lv28_z_re) - (_lv29_z_im * _lv29_z_im)) + c_re__37__auto_5);
+    let _rt33: f32 = ((2.0 * (_lv28_z_re * _lv29_z_im)) + c_im__37__auto_5);
     let _rt34: i32 = (_lv30_it + 1i);
     _lv28_z_re = _rt32;
     _lv29_z_im = _rt33;
@@ -171,10 +171,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     }
     let s5v: f32 = _lr31;
-    let c_re__6: f32 = base_re + (px_size * (0.1875 * aspect));
-    let c_im__6: f32 = base_im + (py_size * 0.3125);
-    var _lv35_z_re: f32 = c_re__6;
-    var _lv36_z_im: f32 = c_im__6;
+    let c_re__37__auto_6: f32 = base_re + (px_size * (0.1875 * aspect));
+    let c_im__37__auto_6: f32 = base_im + (py_size * 0.3125);
+    var _lv35_z_re: f32 = c_re__37__auto_6;
+    var _lv36_z_im: f32 = c_im__37__auto_6;
     var _lv37_it: i32 = 0i;
     var _lr38: f32 = 0.0;
     loop {
@@ -186,8 +186,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     _lr38 = (f32(_lv37_it) + (1.0 - (log(log(((_lv35_z_re * _lv35_z_re) + (_lv36_z_im * _lv36_z_im)))) / 0.6931)));
     break;
     } else {
-    let _rt39: f32 = (((_lv35_z_re * _lv35_z_re) - (_lv36_z_im * _lv36_z_im)) + c_re__6);
-    let _rt40: f32 = ((2.0 * (_lv35_z_re * _lv36_z_im)) + c_im__6);
+    let _rt39: f32 = (((_lv35_z_re * _lv35_z_re) - (_lv36_z_im * _lv36_z_im)) + c_re__37__auto_6);
+    let _rt40: f32 = ((2.0 * (_lv35_z_re * _lv36_z_im)) + c_im__37__auto_6);
     let _rt41: i32 = (_lv37_it + 1i);
     _lv35_z_re = _rt39;
     _lv36_z_im = _rt40;
@@ -197,10 +197,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     }
     let s6v: f32 = _lr38;
-    let c_re__7: f32 = base_re + (px_size * ((-0.0625) * aspect));
-    let c_im__7: f32 = base_im + (py_size * 0.4375);
-    var _lv42_z_re: f32 = c_re__7;
-    var _lv43_z_im: f32 = c_im__7;
+    let c_re__37__auto_7: f32 = base_re + (px_size * ((-0.0625) * aspect));
+    let c_im__37__auto_7: f32 = base_im + (py_size * 0.4375);
+    var _lv42_z_re: f32 = c_re__37__auto_7;
+    var _lv43_z_im: f32 = c_im__37__auto_7;
     var _lv44_it: i32 = 0i;
     var _lr45: f32 = 0.0;
     loop {
@@ -212,8 +212,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     _lr45 = (f32(_lv44_it) + (1.0 - (log(log(((_lv42_z_re * _lv42_z_re) + (_lv43_z_im * _lv43_z_im)))) / 0.6931)));
     break;
     } else {
-    let _rt46: f32 = (((_lv42_z_re * _lv42_z_re) - (_lv43_z_im * _lv43_z_im)) + c_re__7);
-    let _rt47: f32 = ((2.0 * (_lv42_z_re * _lv43_z_im)) + c_im__7);
+    let _rt46: f32 = (((_lv42_z_re * _lv42_z_re) - (_lv43_z_im * _lv43_z_im)) + c_re__37__auto_7);
+    let _rt47: f32 = ((2.0 * (_lv42_z_re * _lv43_z_im)) + c_im__37__auto_7);
     let _rt48: i32 = (_lv44_it + 1i);
     _lv42_z_re = _rt46;
     _lv43_z_im = _rt47;
@@ -223,10 +223,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     }
     let s7v: f32 = _lr45;
-    let c_re__8: f32 = base_re + (px_size * ((-0.3125) * aspect));
-    let c_im__8: f32 = base_im + (py_size * 0.1875);
-    var _lv49_z_re: f32 = c_re__8;
-    var _lv50_z_im: f32 = c_im__8;
+    let c_re__37__auto_8: f32 = base_re + (px_size * ((-0.3125) * aspect));
+    let c_im__37__auto_8: f32 = base_im + (py_size * 0.1875);
+    var _lv49_z_re: f32 = c_re__37__auto_8;
+    var _lv50_z_im: f32 = c_im__37__auto_8;
     var _lv51_it: i32 = 0i;
     var _lr52: f32 = 0.0;
     loop {
@@ -238,8 +238,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     _lr52 = (f32(_lv51_it) + (1.0 - (log(log(((_lv49_z_re * _lv49_z_re) + (_lv50_z_im * _lv50_z_im)))) / 0.6931)));
     break;
     } else {
-    let _rt53: f32 = (((_lv49_z_re * _lv49_z_re) - (_lv50_z_im * _lv50_z_im)) + c_re__8);
-    let _rt54: f32 = ((2.0 * (_lv49_z_re * _lv50_z_im)) + c_im__8);
+    let _rt53: f32 = (((_lv49_z_re * _lv49_z_re) - (_lv50_z_im * _lv50_z_im)) + c_re__37__auto_8);
+    let _rt54: f32 = ((2.0 * (_lv49_z_re * _lv50_z_im)) + c_im__37__auto_8);
     let _rt55: i32 = (_lv51_it + 1i);
     _lv49_z_re = _rt53;
     _lv50_z_im = _rt54;

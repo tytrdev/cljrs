@@ -8,24 +8,27 @@
 ;;   s2  sun azimuth      0..1000 -> 0..2pi
 ;;   s3  shape blend      0..1000 -> 0.05..1.2
 
+;; Bring in shared SDF primitives + color packing.
+(load-file "demo_gpu/stdlib.clj")
+
 ;; Scene SDF: two bouncing spheres smoothly unioned, plus an infinite
 ;; Y=0 floor. `t` is time in seconds, `k` is the smooth-union radius.
+;; The primitives + combinators live in stdlib; this macro is just the
+;; scene wiring (sphere positions, blend radius, floor).
 (defmacro scene-sdf [px py pz tt kk]
-  `(let [ax (- ~px 0.0)
-         ay (- ~py (+ 0.55 (* 0.25 (sin (* ~tt 1.1)))))
-         az (- ~pz 0.0)
-         da (- (sqrt (+ (+ (* ax ax) (* ay ay)) (* az az))) 0.55)
-         bx (- ~px (* 0.9 (cos (* ~tt 0.7))))
-         by (- ~py (+ 0.55 (* 0.15 (cos (* ~tt 1.3)))))
-         bz (- ~pz (* 0.9 (sin (* ~tt 0.7))))
-         db (- (sqrt (+ (+ (* bx bx) (* by by)) (* bz bz))) 0.45)
-         ;; Polynomial smooth min for a soft union.
-         hh (max 0.0 (- 1.0 (/ (abs (- da db)) (max 0.0001 ~kk))))
-         smn (- (min da db)
-                (* (* ~kk hh) (* hh (* hh (/ 1.0 6.0)))))
-         ;; Floor at y=0.
-         df ~py]
-     (min smn df)))
+  `(let [da (sd-sphere ~px ~py ~pz
+                       0.0
+                       (+ 0.55 (* 0.25 (sin (* ~tt 1.1))))
+                       0.0
+                       0.55)
+         db (sd-sphere ~px ~py ~pz
+                       (* 0.9 (cos (* ~tt 0.7)))
+                       (+ 0.55 (* 0.15 (cos (* ~tt 1.3))))
+                       (* 0.9 (sin (* ~tt 0.7)))
+                       0.45)
+         blobs (sd-smooth-union da db ~kk)
+         floor (sd-plane ~px ~py ~pz 0.0)]
+     (sd-union blobs floor)))
 
 (defn-gpu-pixel render
   [x y w h t-ms s0 s1 s2 s3]
@@ -189,8 +192,5 @@
 
         out-r (if hit? rr skr)
         out-g (if hit? gg skg)
-        out-b (if hit? bb skb)
-        ri    (u32 (min (i32 255) (max (i32 0) (i32 (* 255.0 out-r)))))
-        gi    (u32 (min (i32 255) (max (i32 0) (i32 (* 255.0 out-g)))))
-        bi    (u32 (min (i32 255) (max (i32 0) (i32 (* 255.0 out-b)))))]
-    (bit-or (bit-or (bit-shift-left ri (u32 16)) (bit-shift-left gi (u32 8))) bi)))
+        out-b (if hit? bb skb)]
+    (pack-rgb out-r out-g out-b)))

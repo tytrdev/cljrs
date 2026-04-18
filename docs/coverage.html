@@ -85,6 +85,19 @@
       <li><b>Fn combinators:</b> <code>comp partial complement juxt constantly identity</code></li>
       <li><b>I/O:</b> <code>print println pr-str print-str println-str slurp spit read-string</code></li>
     </ul>
+
+    <h3>GPU stdlib</h3>
+    <p>
+      <code>demo_gpu/stdlib.clj</code> is a userland bundle of <code>defmacro</code>s
+      that kernels pull in with <code>(load-file "demo_gpu/stdlib.clj")</code> — no
+      compiler changes, just syntax-quote expansion. Exposes
+      <code>pack-rgb</code>, <code>hash2</code>, <code>noise2</code>, <code>fbm2</code>,
+      SDF primitives (<code>sd-sphere</code>, <code>sd-box</code>, <code>sd-plane</code>,
+      <code>sd-torus</code>), combinators (<code>sd-union</code>, <code>sd-intersect</code>,
+      <code>sd-subtract</code>, <code>sd-smooth-union</code>), and
+      <code>tone-reinhard</code>. Demonstrates that clean DSL layers on top of
+      <code>defn-gpu-pixel</code> are a library concern.
+    </p>
   </main>
   <script type="module">
     import { mountChrome } from "./_layout.js";

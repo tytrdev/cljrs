@@ -9,34 +9,12 @@
 ;;   s2  trace length    0..1000 -> 8..48 steps
 ;;   s3  hue shift       0..1000 -> 0..TAU
 
-(defmacro hash2 [ix iy]
-  `(let [n (+ (* (u32 ~ix) (u32 73856093))
-              (* (u32 ~iy) (u32 19349663)))
-         x (bit-xor n (u32 61))
-         x (bit-xor x (bit-shift-right x (u32 16)))
-         x (* x (u32 668265261))
-         x (bit-xor x (bit-shift-right x (u32 13)))
-         x (* x (u32 374761393))
-         x (bit-xor x (bit-shift-right x (u32 16)))]
-     (/ (f32 (bit-and x (u32 16777215))) 16777215.0)))
+;; hash2 / noise2 come from the shared stdlib.
+(load-file "demo_gpu/stdlib.clj")
 
-(defmacro noise2 [xf yf]
-  `(let [fx ~xf fy ~yf
-         ix (i32 (floor fx))
-         iy (i32 (floor fy))
-         tx (- fx (floor fx))
-         ty (- fy (floor fy))
-         wx (* (* tx tx) (- 3.0 (* 2.0 tx)))
-         wy (* (* ty ty) (- 3.0 (* 2.0 ty)))
-         h00 (hash2 ix iy)
-         h10 (hash2 (+ ix 1) iy)
-         h01 (hash2 ix (+ iy 1))
-         h11 (hash2 (+ ix 1) (+ iy 1))
-         a   (+ h00 (* wx (- h10 h00)))
-         b   (+ h01 (* wx (- h11 h01)))]
-     (+ a (* wy (- b a)))))
-
-;; Potential field: 3-octave fbm with time offset built in.
+;; Potential field: 3-octave value noise with a time offset on x. Built
+;; on stdlib `noise2` so the hash/interpolation stays identical to every
+;; other noise-based kernel.
 (defmacro pot [xf yf tt]
   `(let [n1 (noise2 (+ ~xf ~tt) ~yf)
          n2 (noise2 (* (+ ~xf ~tt) 2.13) (* ~yf 2.13))
@@ -105,8 +83,5 @@
         amp   (max 0.2 (min 1.0 (* 3.5 disp)))
         r     (* amp (* 0.5 (+ 1.0 (sin phase))))
         g     (* amp (* 0.5 (+ 1.0 (sin (+ phase 2.094)))))
-        b     (* amp (* 0.5 (+ 1.0 (sin (+ phase 4.188)))))
-        ri   (u32 (min (i32 255) (max (i32 0) (i32 (* 255.0 r)))))
-        gi   (u32 (min (i32 255) (max (i32 0) (i32 (* 255.0 g)))))
-        bi   (u32 (min (i32 255) (max (i32 0) (i32 (* 255.0 b)))))]
-    (bit-or (bit-or (bit-shift-left ri (u32 16)) (bit-shift-left gi (u32 8))) bi)))
+        b     (* amp (* 0.5 (+ 1.0 (sin (+ phase 4.188)))))]
+    (pack-rgb r g b)))

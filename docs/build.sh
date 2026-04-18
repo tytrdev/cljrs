@@ -19,10 +19,14 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cargo build --release --features gpu --bin gpu-compile --manifest-path "$ROOT/Cargo.toml"
 mkdir -p "$ROOT/docs/wgsl" "$ROOT/docs/kernels"
 for k in plasma waves mandelbrot raymarch3d raytrace clouds flowfield; do
-  "$ROOT/target/release/gpu-compile" "$ROOT/demo_gpu/$k.clj" > "$ROOT/docs/wgsl/$k.wgsl"
-  "$ROOT/target/release/gpu-compile" --inline "$ROOT/demo_gpu/$k.clj" > "$ROOT/docs/wgsl/${k}_inline.wgsl"
+  # gpu-compile resolves (load-file "demo_gpu/stdlib.clj") relative to cwd,
+  # so we invoke it from the repo root.
+  (cd "$ROOT" && "$ROOT/target/release/gpu-compile" "demo_gpu/$k.clj") > "$ROOT/docs/wgsl/$k.wgsl"
+  (cd "$ROOT" && "$ROOT/target/release/gpu-compile" --inline "demo_gpu/$k.clj") > "$ROOT/docs/wgsl/${k}_inline.wgsl"
   cp "$ROOT/demo_gpu/$k.clj" "$ROOT/docs/kernels/$k.clj"
 done
+# Ship the stdlib alongside the kernels so the docs site can display it.
+cp "$ROOT/demo_gpu/stdlib.clj" "$ROOT/docs/kernels/stdlib.clj"
 
 echo "done."
 echo "  wasm:    $ROOT/docs/wasm/"
