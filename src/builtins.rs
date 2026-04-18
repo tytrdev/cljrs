@@ -98,13 +98,16 @@ const TRANSDUCER_BUILTIN_ALIASES: &[(&str, &str)] = &[
 /// compiled cljrs binary needs no external file at runtime.
 fn install_prelude(env: &Env) {
     const PRELUDE: &str = include_str!("core.clj");
-    let forms = match crate::reader::read_all(PRELUDE) {
-        Ok(f) => f,
-        Err(e) => panic!("cljrs prelude parse failed: {e}"),
-    };
-    for f in forms {
-        if let Err(e) = eval::eval(&f, env) {
-            panic!("cljrs prelude eval failed: {e}");
+    const TEST_NS: &str = include_str!("cljrs_test.clj");
+    for (label, src) in [("core.clj", PRELUDE), ("cljrs_test.clj", TEST_NS)] {
+        let forms = match crate::reader::read_all(src) {
+            Ok(f) => f,
+            Err(e) => panic!("cljrs prelude {label} parse failed: {e}"),
+        };
+        for f in forms {
+            if let Err(e) = eval::eval(&f, env) {
+                panic!("cljrs prelude {label} eval failed: {e}");
+            }
         }
     }
 }
