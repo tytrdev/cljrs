@@ -51,6 +51,25 @@ function span(cls, text) {
   return `<span class="${cls}">${esc(text)}</span>`;
 }
 
+/// Number span with source-position attrs so editor UIs (e.g. the
+/// platformer's alt+drag scrubbable numbers) can locate the literal
+/// in the underlying textarea.
+function numSpan(start, text) {
+  return `<span class="tok-number" data-s="${start}" data-l="${text.length}">${esc(text)}</span>`;
+}
+
+/// String span with source-position attrs — lets editor UIs attach
+/// color-picker popovers to hex-color string literals. Hex-like strings
+/// get an additional `tok-color` class plus a `--swatch` CSS variable
+/// so UIs can render an in-line color preview.
+function strSpan(start, text) {
+  const m = text.match(/^"(#[0-9a-fA-F]{6})"$/);
+  if (m) {
+    return `<span class="tok-string tok-color" data-s="${start}" data-l="${text.length}" style="--swatch:${m[1]}">${esc(text)}</span>`;
+  }
+  return `<span class="tok-string" data-s="${start}" data-l="${text.length}">${esc(text)}</span>`;
+}
+
 /// Highlight a Clojure-ish source string (cljrs dialect).
 function highlightClj(src) {
   let out = "";
@@ -74,7 +93,7 @@ function highlightClj(src) {
         if (src[j] === '"') { j++; break; }
         j++;
       }
-      out += span("tok-string", src.slice(i, j));
+      out += strSpan(i, src.slice(i, j));
       i = j;
       continue;
     }
@@ -92,7 +111,7 @@ function highlightClj(src) {
          (i === 0 || /[\s(\[{,]/.test(src[i - 1])))) {
       let j = i + 1;
       while (j < n && /[0-9.eE+\-xXa-fA-F]/.test(src[j])) j++;
-      out += span("tok-number", src.slice(i, j));
+      out += numSpan(i, src.slice(i, j));
       i = j;
       continue;
     }

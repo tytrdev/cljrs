@@ -96,6 +96,42 @@ impl Repl {
         out
     }
 
+    /// Fast-path for live demos: look up a Clojure fn by name and call
+    /// it with pre-built i64 args, returning the result as a flat
+    /// Vec<f32> (same shape as `eval_floats`). Skips the reader parse
+    /// that dominates per-frame cost in an rAF loop.
+    pub fn call_ints(&self, name: &str, args: Vec<i32>) -> Vec<f32> {
+        use cljrs::value::Value;
+        let f = match self.env.lookup(name) {
+            Ok(v) => v,
+            Err(_) => return Vec::new(),
+        };
+        let arg_vals: Vec<Value> = args.into_iter().map(|i| Value::Int(i as i64)).collect();
+        let result = match eval::apply(&f, &arg_vals) {
+            Ok(v) => v,
+            Err(_) => return Vec::new(),
+        };
+        fn push_num(out: &mut Vec<f32>, v: &Value) -> bool {
+            match v {
+                Value::Float(f) => { out.push(*f as f32); true }
+                Value::Int(i) => { out.push(*i as f32); true }
+                _ => false,
+            }
+        }
+        let mut out: Vec<f32> = Vec::new();
+        if let Value::Vector(xs) = &result {
+            for x in xs.iter() {
+                if push_num(&mut out, x) { continue; }
+                if let Value::Vector(inner) = x {
+                    for y in inner.iter() {
+                        push_num(&mut out, y);
+                    }
+                }
+            }
+        }
+        out
+    }
+
     /// Reset to a fresh prelude-initialized env.
     pub fn reset(&mut self) {
         self.env = Env::new();
