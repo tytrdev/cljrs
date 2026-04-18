@@ -248,6 +248,7 @@ fn eval_list(xs: &[Value], env: &Env) -> Result<Value> {
         match s.as_ref() {
             "quote" => return sf_quote(&xs[1..]),
             "def" => return sf_def(&xs[1..], env),
+            "defonce" => return sf_defonce(&xs[1..], env),
             "if" => return sf_if(&xs[1..], env),
             "do" => return sf_do(&xs[1..], env),
             "let" => return sf_let(&xs[1..], env),
@@ -362,6 +363,7 @@ fn invoke_collection(f: &Value, args: &[Value]) -> Result<Value> {
 const SPECIAL_FORMS: &[&str] = &[
     "quote",
     "def",
+    "defonce",
     "if",
     "do",
     "let",
@@ -617,6 +619,30 @@ fn sf_def(args: &[Value], env: &Env) -> Result<Value> {
         Value::Symbol(s) => s.clone(),
         _ => return Err(Error::Eval("def requires symbol as first arg".into())),
     };
+    let val = eval(&args[1], env)?;
+    env.define_global(&name, val.clone());
+    Ok(val)
+}
+
+/// `(defonce name value)` — only evaluates `value` and installs it if
+/// `name` isn't already bound. The key use case is live-coded sessions:
+/// re-evaluating the source file redefines all fns and constants but
+/// state atoms declared with `defonce` survive so the running program
+/// keeps its world.
+fn sf_defonce(args: &[Value], env: &Env) -> Result<Value> {
+    if args.len() != 2 {
+        return Err(Error::Arity {
+            expected: "2".into(),
+            got: args.len(),
+        });
+    }
+    let name = match &args[0] {
+        Value::Symbol(s) => s.clone(),
+        _ => return Err(Error::Eval("defonce requires symbol as first arg".into())),
+    };
+    if let Ok(existing) = env.lookup(&name) {
+        return Ok(existing);
+    }
     let val = eval(&args[1], env)?;
     env.define_global(&name, val.clone());
     Ok(val)

@@ -2421,10 +2421,30 @@ fn odd_q(args: &[Value]) -> Result<Value> {
     Ok(Value::Bool(to_i64(&args[0])? % 2 != 0))
 }
 fn pos_q(args: &[Value]) -> Result<Value> {
-    Ok(Value::Bool(to_i64(&args[0])? > 0))
+    Ok(Value::Bool(match &args[0] {
+        Value::Int(i) => *i > 0,
+        Value::Float(f) => *f > 0.0,
+        Value::Ratio(n, d) => (*n > 0) == (*d > 0) && *n != 0,
+        _ => {
+            return Err(Error::Type(format!(
+                "pos?: expected number, got {}",
+                args[0].type_name()
+            )));
+        }
+    }))
 }
 fn neg_q(args: &[Value]) -> Result<Value> {
-    Ok(Value::Bool(to_i64(&args[0])? < 0))
+    Ok(Value::Bool(match &args[0] {
+        Value::Int(i) => *i < 0,
+        Value::Float(f) => *f < 0.0,
+        Value::Ratio(n, d) => (*n > 0) != (*d > 0) && *n != 0,
+        _ => {
+            return Err(Error::Type(format!(
+                "neg?: expected number, got {}",
+                args[0].type_name()
+            )));
+        }
+    }))
 }
 
 fn identity_fn(args: &[Value]) -> Result<Value> {
