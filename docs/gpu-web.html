@@ -110,6 +110,7 @@
       <button data-kernel="plasma" class="active">plasma</button>
       <button data-kernel="waves">waves</button>
       <button data-kernel="mandelbrot">mandelbrot</button>
+      <button data-kernel="raymarch3d">raymarch 3D</button>
     </div>
 
     <div class="gpu-stage">
@@ -183,6 +184,7 @@
       plasma:     { wgsl: "./wgsl/plasma.wgsl",     clj: "./kernels/plasma.clj" },
       waves:      { wgsl: "./wgsl/waves.wgsl",      clj: "./kernels/waves.clj" },
       mandelbrot: { wgsl: "./wgsl/mandelbrot.wgsl", clj: "./kernels/mandelbrot.clj" },
+      raymarch3d: { wgsl: "./wgsl/raymarch3d.wgsl", clj: "./kernels/raymarch3d.clj" },
     };
 
     const canvas = document.getElementById("gpu-canvas");
