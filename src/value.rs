@@ -63,6 +63,15 @@ pub enum Value {
     /// through `+ - *` against ints and other ratios. Mixing with
     /// floats demotes to float.
     Ratio(i64, i64),
+    /// Opaque foreign value — a handle to something owned by a Rust
+    /// library (e.g. a rapier physics world). `tag` is a short human
+    /// name used in display and type predicates. `inner` is type-erased;
+    /// consumers downcast via `Any::downcast_ref`. Identity semantics:
+    /// eq is ptr-eq on the Arc, hash is ptr-hash.
+    Opaque {
+        tag: Arc<str>,
+        inner: Arc<dyn std::any::Any + Send + Sync>,
+    },
     /// Compiled GPU kernel from `defn-gpu`. Called as a normal fn: takes
     /// one arg (an f32 buffer = vector/list of numbers) and returns a
     /// vector of f32s. Internally dispatches via wgpu.
@@ -187,6 +196,7 @@ impl Value {
             Value::Cons(_, _) => "cons",
             Value::Reduced(_) => "reduced",
             Value::Ratio(_, _) => "ratio",
+            Value::Opaque { .. } => "opaque",
             #[cfg(feature = "gpu")]
             Value::GpuKernel(_) => "gpu-kernel",
             #[cfg(feature = "gpu")]
@@ -258,6 +268,13 @@ impl Value {
             Value::Cons(h, t) => format!("(cons {} {})", h.to_pr_string(), t.to_pr_string()),
             Value::Reduced(v) => format!("#<reduced {}>", v.to_pr_string()),
             Value::Ratio(n, d) => format!("{n}/{d}"),
+            Value::Opaque { tag, inner } => {
+                format!(
+                    "#<{} 0x{:x}>",
+                    tag,
+                    Arc::as_ptr(inner) as *const () as usize
+                )
+            }
             #[cfg(feature = "gpu")]
             Value::GpuKernel(k) => format!("#<gpu-kernel {}>", k.name),
             #[cfg(feature = "gpu")]
@@ -330,6 +347,7 @@ impl PartialEq for Value {
             (Ratio(n, d), Float(f)) | (Float(f), Ratio(n, d)) => {
                 (*n as f64 / *d as f64) == *f
             }
+            (Opaque { inner: a, .. }, Opaque { inner: b, .. }) => Arc::ptr_eq(a, b),
             #[cfg(feature = "gpu")]
             (GpuKernel(a), GpuKernel(b)) => Arc::ptr_eq(a, b),
             #[cfg(feature = "gpu")]
@@ -460,6 +478,10 @@ impl Hash for Value {
                 23u8.hash(state);
                 n.hash(state);
                 d.hash(state);
+            }
+            Value::Opaque { inner, .. } => {
+                24u8.hash(state);
+                (Arc::as_ptr(inner) as *const () as usize).hash(state);
             }
             #[cfg(feature = "gpu")]
             Value::GpuKernel(k) => {

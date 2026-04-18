@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/cljrs-wasm"]
+members = [".", "crates/cljrs-wasm", "crates/cljrs-physics"]
 
 [package]
 name = "cljrs"

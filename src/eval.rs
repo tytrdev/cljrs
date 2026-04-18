@@ -207,7 +207,8 @@ pub fn eval(form: &Value, env: &Env) -> Result<Value> {
         | Value::LazySeq(_)
         | Value::Cons(_, _)
         | Value::Reduced(_)
-        | Value::Ratio(_, _) => Ok(form.clone()),
+        | Value::Ratio(_, _)
+        | Value::Opaque { .. } => Ok(form.clone()),
         #[cfg(feature = "gpu")]
         Value::GpuKernel(_) | Value::GpuPixelKernel(_) => Ok(form.clone()),
         Value::Symbol(s) => env.lookup(s),
@@ -1123,21 +1124,24 @@ fn sf_load_file(args: &[Value], env: &Env) -> Result<Value> {
 /// at `some/ns.clj` relative to CWD. Real namespace semantics (with
 /// :as aliases, refer lists, isolation) are Arc 2.
 fn sf_require(args: &[Value], env: &Env) -> Result<Value> {
+    let consumer = env.current_ns();
     for a in args {
-        // Accept (require 'ns) — a quoted symbol — or a string path.
         let evaluated = eval(a, env)?;
-        let name: String = match &evaluated {
-            Value::Symbol(s) => s.to_string(),
-            Value::Str(s) => s.to_string(),
+        match &evaluated {
+            Value::Str(s) => {
+                // String form: load the file directly.
+                sf_load_file(&[Value::Str(Arc::clone(s))], env)?;
+            }
+            Value::Symbol(_) | Value::Vector(_) | Value::List(_) => {
+                apply_require_spec(env, consumer.as_ref(), &evaluated)?;
+            }
             _ => {
                 return Err(Error::Type(format!(
-                    "require: expected symbol or string, got {}",
+                    "require: expected symbol, vector, or string, got {}",
                     evaluated.type_name()
                 )));
             }
-        };
-        let path = name.replace('.', "/").replace('-', "_") + ".clj";
-        sf_load_file(&[Value::Str(Arc::from(path.as_str()))], env)?;
+        }
     }
     Ok(Value::Nil)
 }

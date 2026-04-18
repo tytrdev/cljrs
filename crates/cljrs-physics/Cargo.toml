@@ -1,0 +1,16 @@
+[package]
+name = "cljrs-physics"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license = "MIT"
+description = "Rapier 2D/3D physics bindings for cljrs."
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+cljrs = { path = "../.." }
+imbl = "3"
+rapier2d = { version = "0.22", default-features = false, features = ["dim2", "f32"] }
+rapier3d = { version = "0.22", default-features = false, features = ["dim3", "f32"] }
