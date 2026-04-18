@@ -23,14 +23,19 @@
 (defn-native render-pixel ^i64
   [^i64 px ^i64 py ^i64 frame ^i64 t-ms
    ^i64 s0 ^i64 s1 ^i64 s2 ^i64 s3]
-  (let [radius (+ 60.0 (* 100.0 (/ (float s0) 1000.0)))
+  (let [base-r (+ 60.0 (* 100.0 (/ (float s0) 1000.0)))
         speed  (* 0.002 (/ (float s1) 1000.0))
-        spread (+ 50.0 (* 250.0 (/ (float s2) 1000.0)))
+        base-spread (+ 50.0 (* 250.0 (/ (float s2) 1000.0)))
         hue    (/ (float s3) 1000.0)
         t      (* speed (float t-ms))
+        ;; Ten-second breathing zoom: the field is sampled in scaled
+        ;; pixel space so the whole composition zooms in and out.
+        zt     (* 0.628 (* speed 1000.0))   ;; faster slider = faster zoom
+        zoom   (+ 1.0 (* 0.9 (sin zt)))     ;; ranges 0.1..1.9
+        spread (* base-spread zoom)
+        radius (* base-r (/ 1.0 zoom))      ;; counter-scale to keep blobs same on screen
         cx 480.0
         cy 270.0
-        ;; Four balls tracing Lissajous-ish paths.
         x0 (+ cx (* spread (sin (* 1.0 t))))
         y0 (+ cy (* spread (cos (* 1.3 t))))
         x1 (+ cx (* spread (sin (+ (* 1.2 t) 1.5))))
@@ -39,8 +44,9 @@
         y2 (+ cy (* spread (cos (+ (* 1.5 t) 2.5))))
         x3 (+ cx (* spread (sin (+ (* 1.1 t) 4.5))))
         y3 (+ cy (* spread (cos (+ (* 0.7 t) 3.8))))
-        fx (float px)
-        fy (float py)
+        ;; Sample-space zoom: pixel coords scaled toward center.
+        fx (+ cx (/ (- (float px) cx) zoom))
+        fy (+ cy (/ (- (float py) cy) zoom))
         v (meta-sum fx fy x0 y0 radius x1 y1 radius
                            x2 y2 radius x3 y3 radius)
         ;; Map field value to a two-tone palette with a soft edge around 1.0.

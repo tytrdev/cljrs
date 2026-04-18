@@ -111,6 +111,7 @@
       <button data-kernel="waves">waves</button>
       <button data-kernel="mandelbrot">mandelbrot</button>
       <button data-kernel="raymarch3d">raymarch 3D</button>
+      <button data-kernel="raytrace">raytrace</button>
     </div>
 
     <div class="gpu-stage">
@@ -185,6 +186,7 @@
       waves:      { wgsl: "./wgsl/waves.wgsl",      clj: "./kernels/waves.clj" },
       mandelbrot: { wgsl: "./wgsl/mandelbrot.wgsl", clj: "./kernels/mandelbrot.clj" },
       raymarch3d: { wgsl: "./wgsl/raymarch3d.wgsl", clj: "./kernels/raymarch3d.clj" },
+      raytrace:   { wgsl: "./wgsl/raytrace.wgsl",   clj: "./kernels/raytrace.clj" },
     };
 
     const canvas = document.getElementById("gpu-canvas");

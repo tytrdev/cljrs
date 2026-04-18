@@ -67,12 +67,17 @@
         arng   (+ 1.0 (* 4.0 (/ (float s3) 1000.0)))
         fx (float px)
         fy (float py)
-        ;; Map pixel to (θ1, θ2) with ±π * arng range.
-        t1-0 (* arng (* 3.1415926 (- (/ (* 2.0 fx) width)  1.0)))
-        t2-0 (* arng (* 3.1415926 (- (/ (* 2.0 fy) height) 1.0)))
-        ;; Slight time-varying perturbation so the image animates slowly.
-        pert (* 0.002 (sin (* 0.001 (float t-ms))))
-        final (simulate (+ t1-0 pert) t2-0 steps dt)
+        ;; Map pixel to (θ1, θ2) with ±π * arng range, then sweep the
+        ;; whole grid through a slow rotation + offset so the basin
+        ;; structure animates visibly rather than just shimmering.
+        t   (* 0.0008 (float t-ms))
+        ux  (* arng (* 3.1415926 (- (/ (* 2.0 fx) width)  1.0)))
+        vy  (* arng (* 3.1415926 (- (/ (* 2.0 fy) height) 1.0)))
+        co  (cos (* 0.5 t))
+        si  (sin (* 0.5 t))
+        t1-0 (+ (- (* co ux) (* si vy)) (* 0.5 (sin (* 0.7 t))))
+        t2-0 (+ (+ (* si ux) (* co vy)) (* 0.5 (cos (* 0.9 t))))
+        final (simulate t1-0 t2-0 steps dt)
         ;; Wrap final angle to [0, 2π].
         wrapped (- final (* 6.2831853 (float (int (/ final 6.2831853)))))
         norm (/ wrapped 6.2831853)

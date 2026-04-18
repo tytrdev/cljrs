@@ -25,11 +25,17 @@
    ^i64 s0 ^i64 s1 ^i64 s2 ^i64 s3]
   (let [width  960.0
         height 540.0
-        ;; Sliders.
-        cr   (- (* 2.0 (/ (float s0) 1000.0)) 1.0)   ;; -1..1
-        ci   (- (* 2.0 (/ (float s1) 1000.0)) 1.0)   ;; -1..1
-        zoom (+ 0.5 (* 2.5 (/ (float s2) 1000.0)))   ;; 0.5..3
-        ccyc (* 0.2 (/ (float s3) 1000.0))           ;; 0..0.2
+        ;; Base c from sliders, then orbit it slowly in complex plane so
+        ;; the set morphs continuously. Slider 0/1 are still the nominal
+        ;; centers; the orbit has a small fixed radius around that point.
+        cr0  (- (* 2.0 (/ (float s0) 1000.0)) 1.0)
+        ci0  (- (* 2.0 (/ (float s1) 1000.0)) 1.0)
+        zoom (+ 0.5 (* 2.5 (/ (float s2) 1000.0)))
+        ccyc (* 0.2 (/ (float s3) 1000.0))
+        t    (* 0.0006 (float t-ms))
+        orb-r 0.12
+        cr   (+ cr0 (* orb-r (cos t)))
+        ci   (+ ci0 (* orb-r (sin (* 1.13 t))))
         fx (float px)
         fy (float py)
         zr (/ (- (* 3.5 (/ fx width))  1.75) zoom)

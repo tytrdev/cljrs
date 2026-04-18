@@ -45,12 +45,19 @@
         scale  (+ 0.5 (* 3.5 (/ (float s3) 1000.0)))
         fx (float px)
         fy (float py)
-        ;; Map pixel to initial condition (x0, y0) centered on 0.
-        x0 (* scale (- (/ fx width)  0.5))
-        y0 (* scale (- (/ fy height) 0.5))
-        ;; Slowly vary with time so the image animates.
-        t  (* 0.01 (float frame))
-        final-z (simulate (+ x0 (* 0.02 (sin t))) y0 z0 steps dt)
+        ;; Time-varying rotation of the initial-condition plane, plus
+        ;; an orbital z0 sweep, so the basin structure keeps morphing.
+        t    (* 0.0005 (float t-ms))
+        theta (* 0.35 t)
+        co    (cos theta)
+        si    (sin theta)
+        ux (* scale (- (/ fx width)  0.5))
+        vy (* scale (- (/ fy height) 0.5))
+        x0 (- (* co ux) (* si vy))
+        y0 (+ (* si ux) (* co vy))
+        ;; z0 slider sets the center; time modulates ±8 around it.
+        zt (+ z0 (* 8.0 (sin (* 0.7 t))))
+        final-z (simulate x0 y0 zt steps dt)
         ;; Map final z to color. Lorenz z typically wanders 0..50.
         u (+ 0.5 (* 0.02 final-z))
         ;; Clamp and palette-map.
