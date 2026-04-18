@@ -18,8 +18,9 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # GPU kernels → WGSL + source snapshots for the GPU docs page.
 cargo build --release --features gpu --bin gpu-compile --manifest-path "$ROOT/Cargo.toml"
 mkdir -p "$ROOT/docs/wgsl" "$ROOT/docs/kernels"
-for k in plasma waves mandelbrot; do
+for k in plasma waves mandelbrot raymarch3d raytrace; do
   "$ROOT/target/release/gpu-compile" "$ROOT/demo_gpu/$k.clj" > "$ROOT/docs/wgsl/$k.wgsl"
+  "$ROOT/target/release/gpu-compile" --inline "$ROOT/demo_gpu/$k.clj" > "$ROOT/docs/wgsl/${k}_inline.wgsl"
   cp "$ROOT/demo_gpu/$k.clj" "$ROOT/docs/kernels/$k.clj"
 done
 

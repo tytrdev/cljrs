@@ -63,19 +63,48 @@
     }
     .gpu-source {
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
       gap: 1rem;
       margin-top: 1.5rem;
     }
+    .gpu-source > div { min-width: 0; }
     .gpu-source pre {
-      max-height: 400px;
+      max-height: 480px;
       overflow: auto;
-      font-size: 0.8rem;
+      font-size: 0.78rem;
+      line-height: 1.45;
       margin: 0;
+      white-space: pre;
     }
     .gpu-source h4 {
       margin: 0 0 0.3rem 0;
       font-size: 0.95rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 0.5rem;
+    }
+    .mode-toggle {
+      display: inline-flex;
+      gap: 0.25rem;
+      font-size: 0.75rem;
+      font-family: var(--mono);
+      font-weight: 400;
+    }
+    .mode-toggle button {
+      background: var(--bg-elev);
+      color: var(--fg-dim);
+      border: 1px solid var(--border);
+      padding: 0.15rem 0.5rem;
+      border-radius: 3px;
+      cursor: pointer;
+      font-family: var(--mono);
+      font-size: 0.72rem;
+    }
+    .mode-toggle button.active {
+      background: var(--accent);
+      color: #0b1015;
+      border-color: var(--accent);
     }
     .gpu-status {
       font-family: var(--mono);
@@ -141,7 +170,13 @@
         <pre><code id="src-clj">loading…</code></pre>
       </div>
       <div>
-        <h4>compiled WGSL</h4>
+        <h4>
+          compiled WGSL
+          <span class="mode-toggle">
+            <button data-mode="inline" class="active">readable</button>
+            <button data-mode="cse">optimized</button>
+          </span>
+        </h4>
         <pre><code id="src-wgsl">loading…</code></pre>
       </div>
     </div>
@@ -182,12 +217,15 @@
     mountChrome();
 
     const KERNELS = {
-      plasma:     { wgsl: "./wgsl/plasma.wgsl",     clj: "./kernels/plasma.clj" },
-      waves:      { wgsl: "./wgsl/waves.wgsl",      clj: "./kernels/waves.clj" },
-      mandelbrot: { wgsl: "./wgsl/mandelbrot.wgsl", clj: "./kernels/mandelbrot.clj" },
-      raymarch3d: { wgsl: "./wgsl/raymarch3d.wgsl", clj: "./kernels/raymarch3d.clj" },
-      raytrace:   { wgsl: "./wgsl/raytrace.wgsl",   clj: "./kernels/raytrace.clj" },
+      plasma:     { wgsl: "./wgsl/plasma.wgsl",     inline: "./wgsl/plasma_inline.wgsl",     clj: "./kernels/plasma.clj" },
+      waves:      { wgsl: "./wgsl/waves.wgsl",      inline: "./wgsl/waves_inline.wgsl",      clj: "./kernels/waves.clj" },
+      mandelbrot: { wgsl: "./wgsl/mandelbrot.wgsl", inline: "./wgsl/mandelbrot_inline.wgsl", clj: "./kernels/mandelbrot.clj" },
+      raymarch3d: { wgsl: "./wgsl/raymarch3d.wgsl", inline: "./wgsl/raymarch3d_inline.wgsl", clj: "./kernels/raymarch3d.clj" },
+      raytrace:   { wgsl: "./wgsl/raytrace.wgsl",   inline: "./wgsl/raytrace_inline.wgsl",   clj: "./kernels/raytrace.clj" },
     };
+
+    let currentKernel = "plasma";
+    let wgslMode = "inline";   // "inline" = readable, "cse" = optimized
 
     const canvas = document.getElementById("gpu-canvas");
     const status = document.getElementById("status");
@@ -198,18 +236,30 @@
 
     let runner = null;
 
+    async function refreshSourceView() {
+      const k = KERNELS[currentKernel];
+      const wgslUrl = wgslMode === "inline" ? k.inline : k.wgsl;
+      try {
+        const [wgsl, clj] = await Promise.all([
+          fetch(wgslUrl).then((r) => r.text()),
+          fetch(k.clj).then((r) => r.text()).catch(() => "(source unavailable)"),
+        ]);
+        srcClj.innerHTML = highlight(clj, "clj");
+        srcWgsl.innerHTML = highlight(wgsl, "wgsl");
+      } catch (e) {
+        srcWgsl.textContent = `failed to load ${wgslUrl}: ${e}`;
+      }
+    }
+
     async function load(kernelName) {
+      currentKernel = kernelName;
       if (runner) runner.stop();
       status.textContent = `loading ${kernelName}…`;
       status.classList.remove("err");
       try {
         const k = KERNELS[kernelName];
-        const [wgsl, clj] = await Promise.all([
-          fetch(k.wgsl).then((r) => r.text()),
-          fetch(k.clj).then((r) => r.text()).catch(() => "(source unavailable)"),
-        ]);
-        srcClj.innerHTML = highlight(clj, "clj");
-        srcWgsl.innerHTML = highlight(wgsl, "wgsl");
+        // Always run the optimized WGSL (the source view picks per mode).
+        const wgsl = await fetch(k.wgsl).then((r) => r.text());
         runner = new GpuRunner(canvas, wgsl, { width: 800, height: 450 });
         runner.onStats = (fps) => {
           status.textContent = `${kernelName} · ${(fps).toFixed(0)} fps · ${runner.adapterInfo.description || "WebGPU"}`;
@@ -217,11 +267,22 @@
         await runner.init();
         runner.setSliders(sliderEls.map((el) => Number(el.value)));
         runner.start();
+        await refreshSourceView();
       } catch (e) {
         status.textContent = String(e);
         status.classList.add("err");
       }
     }
+
+    // WGSL mode toggle.
+    document.querySelectorAll(".mode-toggle button").forEach((b) => {
+      b.addEventListener("click", () => {
+        document.querySelectorAll(".mode-toggle button").forEach((x) => x.classList.remove("active"));
+        b.classList.add("active");
+        wgslMode = b.dataset.mode;
+        refreshSourceView();
+      });
+    });
 
     // Slider wiring.
     sliderEls.forEach((el, i) => {

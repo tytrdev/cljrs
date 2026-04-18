@@ -106,7 +106,16 @@ pub fn emit_elementwise(
     value_name: &str,
     body: &Value,
 ) -> Result<String> {
-    let mut ctx = Ctx::new();
+    emit_elementwise_with(index_name, value_name, body, EmitOptions::default())
+}
+
+pub fn emit_elementwise_with(
+    index_name: &str,
+    value_name: &str,
+    body: &Value,
+    opts: EmitOptions,
+) -> Result<String> {
+    let mut ctx = Ctx::with_options(opts);
     let mut scope = Scope::new();
     // The thread index is surfaced as i32 (friendlier for cljrs users),
     // even though WGSL uses u32 under the hood. We bitcast on emit.
@@ -161,7 +170,15 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 ///   [x y width height t-ms s0 s1 s2 s3]
 /// The host binds these to their corresponding slots.
 pub fn emit_pixel(params: &[&str; 9], body: &Value) -> Result<String> {
-    let mut ctx = Ctx::new();
+    emit_pixel_with(params, body, EmitOptions::default())
+}
+
+pub fn emit_pixel_with(
+    params: &[&str; 9],
+    body: &Value,
+    opts: EmitOptions,
+) -> Result<String> {
+    let mut ctx = Ctx::with_options(opts);
     let mut scope = Scope::new();
     scope.insert(params[0].into(), Val { expr: "k_x".into(), ty: Ty::I32 });
     scope.insert(params[1].into(), Val { expr: "k_y".into(), ty: Ty::I32 });
@@ -231,16 +248,37 @@ struct LoopTail {
     result_ty_known: Option<Ty>,
 }
 
+/// Emitter options. `inline` = true produces readable WGSL that mirrors
+/// the cljrs source (no temporary lets for intermediates; expressions
+/// nest). `inline` = false produces an SSA-style dump where every
+/// subexpression lives on its own `let _sN` line. Both compile to the
+/// same machine code after the wgpu / naga optimizer pass.
+#[derive(Clone, Copy, Debug)]
+pub struct EmitOptions {
+    pub inline: bool,
+}
+
+impl Default for EmitOptions {
+    fn default() -> Self {
+        EmitOptions { inline: false }
+    }
+}
+
 struct Ctx {
     body: String,
     counter: usize,
+    opts: EmitOptions,
 }
 
 impl Ctx {
     fn new() -> Self {
+        Self::with_options(EmitOptions::default())
+    }
+    fn with_options(opts: EmitOptions) -> Self {
         Ctx {
             body: String::new(),
             counter: 0,
+            opts,
         }
     }
     fn fresh(&mut self) -> String {
@@ -254,7 +292,13 @@ impl Ctx {
         self.body.push('\n');
     }
 
+    /// In optimized mode, bind each sub-expression to a fresh `_sN` so
+    /// the output is linear SSA. In readable mode, leave the expression
+    /// as-is (parenthesized) so the WGSL mirrors the cljrs structure.
     fn bind(&mut self, val: Val) -> Val {
+        if self.opts.inline {
+            return val;
+        }
         let name = self.fresh();
         self.line(&format!("let {name}: {} = {};", val.ty.as_str(), val.expr));
         Val {
@@ -332,6 +376,10 @@ impl Ctx {
             "min" => self.emit_math_binary(xs, scope, "min"),
             "max" => self.emit_math_binary(xs, scope, "max"),
             "pow" => self.emit_math_binary(xs, scope, "pow"),
+            "atan2" => self.emit_math_binary(xs, scope, "atan2"),
+            "atan" => self.emit_math_unary(xs, scope, "atan"),
+            "asin" => self.emit_math_unary(xs, scope, "asin"),
+            "acos" => self.emit_math_unary(xs, scope, "acos"),
             "mod" | "rem" => self.emit_infix_binary(xs, scope, "%"),
             "bit-and" => self.emit_bitwise(xs, scope, "&"),
             "bit-or" => self.emit_bitwise(xs, scope, "|"),
@@ -447,7 +495,21 @@ impl Ctx {
                 _ => return Err(Error::Eval("gpu let: binding name must be symbol".into())),
             };
             let val = self.emit(&bindings[i + 1], &cur)?;
-            let bound = self.bind(val);
+            // Readable mode: keep the user's name in the WGSL output so
+            // the structure mirrors the cljrs source. Optimized mode:
+            // fall through to the anonymous SSA `_sN` path.
+            let bound = if self.opts.inline {
+                let wgsl_name = format!("v_{}_{}", sanitize_ident(&name), self.counter);
+                self.counter += 1;
+                self.line(&format!(
+                    "let {wgsl_name}: {} = {};",
+                    val.ty.as_str(),
+                    val.expr
+                ));
+                Val { expr: wgsl_name, ty: val.ty }
+            } else {
+                self.bind(val)
+            };
             cur.insert(name, bound);
             i += 2;
         }
