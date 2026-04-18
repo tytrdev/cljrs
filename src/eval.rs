@@ -205,7 +205,8 @@ pub fn eval(form: &Value, env: &Env) -> Result<Value> {
         | Value::Regex(_)
         | Value::Multi(_)
         | Value::LazySeq(_)
-        | Value::Cons(_, _) => Ok(form.clone()),
+        | Value::Cons(_, _)
+        | Value::Reduced(_) => Ok(form.clone()),
         #[cfg(feature = "gpu")]
         Value::GpuKernel(_) | Value::GpuPixelKernel(_) => Ok(form.clone()),
         Value::Symbol(s) => env.lookup(s),

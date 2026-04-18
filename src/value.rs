@@ -55,6 +55,9 @@ pub enum Value {
     /// the tail isn't an eager collection. Walking via first/rest is
     /// the only correct way to consume; `seq_items` chases the tail.
     Cons(Arc<Value>, Arc<Value>),
+    /// Wraps a value to signal "stop reducing now". `reduce` and
+    /// `transduce` unwrap and return the inner value when they see one.
+    Reduced(Arc<Value>),
     /// Compiled GPU kernel from `defn-gpu`. Called as a normal fn: takes
     /// one arg (an f32 buffer = vector/list of numbers) and returns a
     /// vector of f32s. Internally dispatches via wgpu.
@@ -177,6 +180,7 @@ impl Value {
             Value::Multi(_) => "multi",
             Value::LazySeq(_) => "lazy-seq",
             Value::Cons(_, _) => "cons",
+            Value::Reduced(_) => "reduced",
             #[cfg(feature = "gpu")]
             Value::GpuKernel(_) => "gpu-kernel",
             #[cfg(feature = "gpu")]
@@ -246,6 +250,7 @@ impl Value {
             Value::Multi(m) => format!("#<multi {}>", m.name),
             Value::LazySeq(_) => "#<lazy-seq>".to_string(),
             Value::Cons(h, t) => format!("(cons {} {})", h.to_pr_string(), t.to_pr_string()),
+            Value::Reduced(v) => format!("#<reduced {}>", v.to_pr_string()),
             #[cfg(feature = "gpu")]
             Value::GpuKernel(k) => format!("#<gpu-kernel {}>", k.name),
             #[cfg(feature = "gpu")]
@@ -312,6 +317,7 @@ impl PartialEq for Value {
             (Multi(a), Multi(b)) => Arc::ptr_eq(a, b),
             (LazySeq(a), LazySeq(b)) => Arc::ptr_eq(a, b),
             (Cons(ah, at), Cons(bh, bt)) => ah == bh && at == bt,
+            (Reduced(a), Reduced(b)) => a == b,
             #[cfg(feature = "gpu")]
             (GpuKernel(a), GpuKernel(b)) => Arc::ptr_eq(a, b),
             #[cfg(feature = "gpu")]
@@ -433,6 +439,10 @@ impl Hash for Value {
                 21u8.hash(state);
                 h.hash(state);
                 t.hash(state);
+            }
+            Value::Reduced(v) => {
+                22u8.hash(state);
+                v.hash(state);
             }
             #[cfg(feature = "gpu")]
             Value::GpuKernel(k) => {

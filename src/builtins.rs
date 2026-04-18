@@ -68,8 +68,28 @@ pub fn install(env: &Env) {
     for (name, f) in core_fns() {
         env.define_global(name, Value::Builtin(Builtin::new_static(name, f)));
     }
+    // Internal aliases for builtins we want the prelude to wrap with
+    // multi-arity overloads (so the 1-arg form returns a transducer
+    // while the 2-arg form keeps the existing eager behavior). We
+    // install the original under both names; the prelude then shadows
+    // the public name.
+    for (alias, original) in TRANSDUCER_BUILTIN_ALIASES {
+        if let Ok(v) = env.lookup(original) {
+            env.define_global(alias, v);
+        }
+    }
     install_prelude(env);
 }
+
+const TRANSDUCER_BUILTIN_ALIASES: &[(&str, &str)] = &[
+    ("__map-coll", "map"),
+    ("__filter-coll", "filter"),
+    ("__take-coll", "take"),
+    ("__drop-coll", "drop"),
+    ("__take-while-coll", "take-while"),
+    ("__drop-while-coll", "drop-while"),
+    ("__mapcat-coll", "mapcat"),
+];
 
 /// Evaluate the cljrs-authored prelude (threading macros, conditional
 /// macros, iteration macros, etc.). Bundled via `include_str!` so a
@@ -250,7 +270,60 @@ fn core_fns() -> Vec<(&'static str, fn(&[Value]) -> Result<Value>)> {
         ("min-key", min_key_fn),
         ("update-vals", update_vals_fn),
         ("update-keys", update_keys_fn),
+        ("reduced", reduced_fn),
+        ("reduced?", reduced_q),
+        ("unreduced", unreduced_fn),
+        ("transduce", transduce_fn),
     ]
+}
+
+fn reduced_fn(args: &[Value]) -> Result<Value> {
+    if args.len() != 1 {
+        return Err(Error::Arity { expected: "1".into(), got: args.len() });
+    }
+    Ok(Value::Reduced(Arc::new(args[0].clone())))
+}
+
+fn reduced_q(args: &[Value]) -> Result<Value> {
+    Ok(Value::Bool(matches!(&args[0], Value::Reduced(_))))
+}
+
+fn unreduced_fn(args: &[Value]) -> Result<Value> {
+    match &args[0] {
+        Value::Reduced(inner) => Ok((**inner).clone()),
+        other => Ok(other.clone()),
+    }
+}
+
+/// (transduce xform rf init coll). Composes rf with the xform, then
+/// reduces over coll, finally calls rf's 1-arity on the result for
+/// completion (e.g. `conj` would finalize, `+` might just pass through).
+/// The 3-arg form (transduce xform rf coll) uses (rf) as init.
+fn transduce_fn(args: &[Value]) -> Result<Value> {
+    if args.len() != 3 && args.len() != 4 {
+        return Err(Error::Arity { expected: "3 or 4".into(), got: args.len() });
+    }
+    let xform = &args[0];
+    let rf = &args[1];
+    let (init, coll) = if args.len() == 4 {
+        (args[2].clone(), &args[3])
+    } else {
+        // (transduce xform rf coll): init = (rf)
+        (eval::apply(rf, &[])?, &args[2])
+    };
+    // xform is (rf) -> rf', where rf' is a multi-arity fn.
+    let xrf = eval::apply(xform, std::slice::from_ref(rf))?;
+    let items = seq_items(coll)?;
+    let mut acc = init;
+    for item in items {
+        acc = eval::apply(&xrf, &[acc, item])?;
+        if let Value::Reduced(inner) = &acc {
+            acc = (**inner).clone();
+            break;
+        }
+    }
+    // Final completion call: xrf with 1 arg.
+    eval::apply(&xrf, &[acc])
 }
 
 /// (seq coll) -> nil if empty, otherwise the seq itself (as a list).
@@ -2101,12 +2174,14 @@ fn reduce_fn(args: &[Value]) -> Result<Value> {
             let f = &args[0];
             let coll = as_seq(&args[1])?;
             if coll.is_empty() {
-                // Clojure's reduce with no init on empty coll: call f with no args
                 return eval::apply(f, &[]);
             }
             let mut acc = coll[0].clone();
             for item in &coll[1..] {
                 acc = eval::apply(f, &[acc, item.clone()])?;
+                if let Value::Reduced(inner) = &acc {
+                    return Ok((**inner).clone());
+                }
             }
             Ok(acc)
         }
@@ -2116,6 +2191,9 @@ fn reduce_fn(args: &[Value]) -> Result<Value> {
             let coll = as_seq(&args[2])?;
             for item in coll {
                 acc = eval::apply(f, &[acc, item.clone()])?;
+                if let Value::Reduced(inner) = &acc {
+                    return Ok((**inner).clone());
+                }
             }
             Ok(acc)
         }

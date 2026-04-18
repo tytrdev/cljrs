@@ -60,7 +60,8 @@
         <tr><td>atom, <code>deref</code>, <code>swap!</code>, <code>reset!</code>, <code>compare-and-set!</code></td><td class="ok">supported</td></tr>
         <tr><td>ratios, bigint</td><td class="missing">missing</td></tr>
         <tr><td>lazy-seq, iterate, repeatedly, cycle</td><td class="ok">supported</td><td>Memoized thunks; first/rest force on demand; <code>take</code> walks lazily</td></tr>
-        <tr><td>reducers, transducers</td><td class="missing">missing</td></tr>
+        <tr><td>transducers</td><td class="ok">supported</td><td><code>map</code>/<code>filter</code>/<code>take</code>/<code>drop</code>/<code>take-while</code>/<code>drop-while</code>/<code>remove</code>/<code>mapcat</code> 1-arg, <code>transduce</code>, <code>into</code> xform, <code>sequence</code>, <code>reduced</code></td></tr>
+        <tr><td>reducers library</td><td class="missing">missing</td></tr>
         <tr><td>refs, agents, futures, promises, delays</td><td class="missing">missing</td></tr>
       </tbody>
     </table>

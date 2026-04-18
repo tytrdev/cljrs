@@ -332,6 +332,115 @@
 (defn cycle [coll]
   (cycle-step coll coll))
 
+;; ---------- transducers --------------------------------------------------
+;; Shadow the built-in sequence fns with multi-arity variants:
+;;   1 arg  -> a transducer (rf -> rf')
+;;   2 args -> delegate to the original eager builtin (preserved under a
+;;             __*-coll alias)
+;;
+;; A transducer rf has three arities: (rf) init, (rf result) complete,
+;; (rf result input) step. Composition via comp flows left to right.
+
+(defn map
+  ([f]
+   (fn [rf]
+     (fn
+       ([] (rf))
+       ([result] (rf result))
+       ([result input] (rf result (f input))))))
+  ([f coll] (__map-coll f coll)))
+
+(defn filter
+  ([pred]
+   (fn [rf]
+     (fn
+       ([] (rf))
+       ([result] (rf result))
+       ([result input]
+        (if (pred input) (rf result input) result)))))
+  ([pred coll] (__filter-coll pred coll)))
+
+(defn remove
+  ([pred] (filter (complement pred)))
+  ([pred coll] (filter (complement pred) coll)))
+
+(defn take
+  ([n]
+   (fn [rf]
+     (let [counter (atom n)]
+       (fn
+         ([] (rf))
+         ([result] (rf result))
+         ([result input]
+          (let [remaining @counter]
+            (if (<= remaining 0)
+              (reduced result)
+              (do
+                (swap! counter dec)
+                (if (<= remaining 1)
+                  (reduced (rf result input))
+                  (rf result input))))))))))
+  ([n coll] (__take-coll n coll)))
+
+(defn drop
+  ([n]
+   (fn [rf]
+     (let [counter (atom n)]
+       (fn
+         ([] (rf))
+         ([result] (rf result))
+         ([result input]
+          (if (pos? @counter)
+            (do (swap! counter dec) result)
+            (rf result input)))))))
+  ([n coll] (__drop-coll n coll)))
+
+(defn take-while
+  ([pred]
+   (fn [rf]
+     (fn
+       ([] (rf))
+       ([result] (rf result))
+       ([result input]
+        (if (pred input) (rf result input) (reduced result))))))
+  ([pred coll] (__take-while-coll pred coll)))
+
+(defn drop-while
+  ([pred]
+   (fn [rf]
+     (let [dropping (atom true)]
+       (fn
+         ([] (rf))
+         ([result] (rf result))
+         ([result input]
+          (if (and @dropping (pred input))
+            result
+            (do (reset! dropping false)
+                (rf result input))))))))
+  ([pred coll] (__drop-while-coll pred coll)))
+
+(defn mapcat
+  ([f] (comp (map f) (fn [rf]
+                       (fn
+                         ([] (rf))
+                         ([result] (rf result))
+                         ([result input] (reduce rf result input))))))
+  ([f coll] (__mapcat-coll f coll)))
+
+;; (into to xform from): eager into with an xform. 2-arg fallback to
+;; the original into (from builtins).
+(def __into-no-xf into)
+(defn into
+  ([] [])
+  ([to] to)
+  ([to from] (__into-no-xf to from))
+  ([to xform from] (transduce xform conj to from)))
+
+(defn sequence
+  ([] [])
+  ([coll] (vec (seq coll)))
+  ([xform coll] (transduce xform conj [] coll)))
+
 ;; ---------- small utility fns --------------------------------------------
 
 (defn inc-all [xs] (mapv inc xs))
