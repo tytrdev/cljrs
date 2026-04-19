@@ -9,6 +9,7 @@ const NAV = [
   { href: "./gpu-web.html", label: "GPU" },
   { href: "./physics.html", label: "Physics" },
   { href: "./platformer.html", label: "Platformer" },
+  { href: "./life.html", label: "Life" },
   { href: "./synth.html", label: "Synth" },
   { href: "./sequencer.html", label: "Sequencer" },
   { href: "./ml.html", label: "ML" },
@@ -16,6 +17,7 @@ const NAV = [
   { href: "./ui-demo.html", label: "UI" },
   { href: "./library.html", label: "Library" },
   { href: "./benchmarks.html", label: "Benchmarks" },
+  { href: "./bench.html", label: "Matmul" },
   { href: "./repl.html", label: "REPL" },
   { href: "./roadmap.html", label: "Roadmap" },
 ];

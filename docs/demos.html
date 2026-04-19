@@ -67,6 +67,20 @@
     </div>
     <pre><code>cargo run --release --features demo --bin demo -- demo/fractal.clj</code></pre>
 
+    <h3>Live-coded browser demos</h3>
+    <p>Edit cljrs source in the page, see the change reflected immediately. State persists across edits.</p>
+    <ul>
+      <li><a href="./platformer.html">Platformer</a> — pause, rewind, change jump height, see the future trajectory redraw.</li>
+      <li><a href="./life.html">Conway's Game of Life</a> — edit birth/survive rules, neighborhood, palette; click cells to toggle.</li>
+      <li><a href="./synth.html">Synth</a> — polyphonic subtractive synth, live-editable ADSR + filter + LFO.</li>
+      <li><a href="./sequencer.html">Sequencer</a> — step sequencer wired to the synth.</li>
+      <li><a href="./ml.html">ML</a> — four training showcases (curve fit, two-moons, MNIST-tiny, autoencoder).</li>
+      <li><a href="./bench.html">Matmul bench</a> — cljrs CPU/GPU matmul vs numpy/JAX/PyTorch references.</li>
+      <li><a href="./ui-demo.html">UI demo</a> — cljrs.ui = hiccup → Preact via wasm.</li>
+      <li><a href="./js-interop.html">JS interop</a> — fetch, local storage, DOM from cljrs.</li>
+      <li><a href="./physics.html">Physics</a> — rapier-driven 2D physics playground.</li>
+    </ul>
+
     <h3>Kernel ABI</h3>
     <p>CPU kernels have a fixed signature:</p>
     <pre><code>(defn-native render-pixel ^i64
