@@ -1,0 +1,552 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>ML</title>
+  <link rel="stylesheet" href="./style.css">
+  <style>
+    .ml-wrap { display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-start; }
+    .ml-stage {
+      background: #0b0d14;
+      border: 1px solid var(--border, #333);
+      border-radius: 4px;
+      flex: 0 0 auto;
+      position: relative;
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    .ml-stage canvas { display: block; }
+    .ml-overlay {
+      position: absolute; top: 6px; left: 10px;
+      color: #9aa;
+      font: 0.7rem ui-monospace, monospace;
+      pointer-events: none;
+      text-shadow: 0 0 2px #000;
+    }
+    .ml-col {
+      flex: 1 1 400px;
+      min-width: 0;
+      display: flex; flex-direction: column; gap: 0.5rem;
+    }
+    .ml-toolbar {
+      display: flex; gap: 0.5rem; align-items: center;
+      font-size: 0.8rem; color: var(--fg-dim);
+      flex-wrap: wrap;
+    }
+    .ml-toolbar button {
+      font-family: inherit; font-size: 0.8rem; padding: 0.25rem 0.7rem;
+    }
+    .ml-status {
+      font-family: ui-monospace, monospace;
+      font-size: 0.75rem;
+      color: var(--fg-dim);
+      min-height: 1em;
+      white-space: pre-wrap;
+    }
+    .ml-status.err { color: #ff6666; }
+    .ml-status.ok  { color: #8ec07c; }
+    .ml-hint { font-size: 0.75rem; color: var(--fg-dim); }
+    .ml-hint kbd {
+      background: #1d2029; border: 1px solid #333;
+      padding: 0 4px; border-radius: 3px;
+      font-family: inherit;
+    }
+    .ml-meter {
+      font-family: ui-monospace, monospace;
+      font-size: 0.75rem;
+      color: var(--fg-dim);
+    }
+    /* scrubbable numbers, same pattern as platformer/synth */
+    .ml-scrub-mode.repl .repl-hl-wrap .repl-hl { pointer-events: auto !important; cursor: default; }
+    .ml-scrub-mode.repl .repl-hl-wrap textarea { pointer-events: none !important; }
+    .ml-scrub-mode.repl .repl-hl .tok-number {
+      cursor: ew-resize;
+      background: rgba(255, 204, 96, 0.14);
+      border-radius: 2px;
+      outline: 1px solid rgba(255, 204, 96, 0.3);
+    }
+    .ml-scrub-mode.repl .repl-hl .tok-number:hover,
+    .repl .repl-hl .tok-number.ml-scrubbing {
+      background: rgba(255, 204, 96, 0.35);
+      outline-color: rgba(255, 204, 96, 0.8);
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h2>ML — live coded autograd</h2>
+    <p class="ml-hint" style="margin-top:-0.4rem">
+      A tiny MLP fits a noisy <code>sin(x)</code> in your browser. The
+      model definition, hyperparameters, and one training step are all
+      authored in Clojure; only forward + backward + SGD live in Rust.
+    </p>
+    <p>
+      Edit <code>HIDDEN-SIZE</code>, <code>LEARNING-RATE</code>, the
+      activation, or the target function — pause for ~400 ms and the
+      page rebuilds the model with new weights. Hold <b>Alt</b>
+      (or <b>Ctrl</b>) and drag any number to scrub it live.
+      Weights live behind <code>defonce</code> so editing the source
+      while training continues only resets them when you change shape.
+    </p>
+    <p class="ml-hint">
+      <b>Phase 1: CPU autograd.</b> Reverse-mode over dense f32 buffers
+      in a new <code>cljrs-ml</code> crate, exposed to cljrs as
+      builtins (<code>ml/tensor</code>, <code>ml/matmul</code>,
+      <code>ml/relu</code>, <code>ml/mse</code>,
+      <code>ml/backward!</code>, <code>ml/sgd-step!</code>, …).
+      The cljrs GPU path is per-pixel right now — wrong shape for
+      matmuls — so a GPU mat-mul kernel is left as phase 2.
+    </p>
+
+    <div class="ml-wrap">
+      <div class="ml-stage">
+        <canvas id="ml-fit"  width="420" height="260"></canvas>
+        <canvas id="ml-loss" width="420" height="120"></canvas>
+        <div class="ml-overlay" id="ml-overlay">idle</div>
+      </div>
+      <div class="ml-col">
+        <div class="ml-toolbar">
+          <button id="ml-run">Pause</button>
+          <button id="ml-reset" title="Re-init weights">Reset weights</button>
+          <span id="ml-meter" class="ml-meter">—</span>
+        </div>
+        <div class="repl" id="ml-editor">
+          <textarea id="ml-src" spellcheck="false" style="min-height:520px"></textarea>
+        </div>
+        <div id="ml-status" class="ml-status"></div>
+      </div>
+    </div>
+
+    <h3>What's happening</h3>
+    <ul>
+      <li>The Clojure source defines <code>HIDDEN-SIZE</code>,
+        <code>LEARNING-RATE</code>, <code>BATCH</code>, the dataset, and
+        the model fns. It also calls <code>ml/randn</code> /
+        <code>ml/zeros</code> behind <code>defonce</code> so weights
+        survive an edit.</li>
+      <li>Each frame the page calls <code>(train-step!)</code> which
+        does a forward pass, a backward pass, and one SGD update.
+        It returns the current loss; JS plots it.</li>
+      <li><code>(predict-grid)</code> returns model outputs over a
+        fixed grid of <code>x</code> values; JS draws it as a curve
+        over the dataset.</li>
+      <li>If you change <code>HIDDEN-SIZE</code> the JS detects a
+        shape mismatch on the next frame and re-applies the source,
+        which re-initializes the weights.</li>
+    </ul>
+  </main>
+  <script type="module">
+    import { mountChrome, loadWasm, attachHighlightOverlay } from "./_layout.js";
+    mountChrome();
+
+    const INITIAL_SOURCE = `;; ============================================================
+;; Live MLP regression — fit y ~ sin(2x) with a 1->H->1 net.
+;;   Alt+drag any number to scrub it live.
+;;   Edit, pause ~400 ms, the source re-applies and training resumes.
+;; ============================================================
+
+(require '[cljrs.ml :as ml])
+
+;; --- hyperparams ---
+(def HIDDEN-SIZE   24)
+(def LEARNING-RATE 0.05)
+(def BATCH         32)
+(def N-DATA        80)
+(def NOISE-AMP     0.10)
+(def X-MIN        -3.0)
+(def X-MAX         3.0)
+(def FREQ          2.0)        ; target = sin(FREQ * x)
+
+;; --- a deterministic LCG (cljrs has no rand or bit-ops yet) ---
+;;   Numerical Recipes constants; mod 2^31 to keep an i64 well-behaved.
+(defonce RNG (atom 1234567))
+(defn rng-next! []
+  (let [s (mod (+ (* @RNG 1103515245) 12345) 2147483648)]
+    (reset! RNG s)
+    s))
+(defn rng-float! []                    ; uniform 0..1
+  (/ (* 1.0 (rng-next!)) 2147483648.0))
+(defn rng-int! [n]
+  (mod (rng-next!) n))
+
+;; --- ground truth + dataset ---
+(defn target-fn [x] (sin (* FREQ x)))
+
+(defn make-data [n]
+  (let [xs (vec (for [i (range n)]
+                  (+ X-MIN (* (- X-MAX X-MIN)
+                              (/ (* 1.0 i) (max 1 (dec n)))))))
+        ys (mapv (fn [x]
+                   (+ (target-fn x)
+                      (* NOISE-AMP (- (rng-float!) 0.5))))
+                 xs)]
+    {:xs xs :ys ys}))
+
+(defonce DATA (atom (make-data N-DATA)))
+(when (not (= (count (:xs @DATA)) N-DATA))
+  (reset! DATA (make-data N-DATA)))
+
+;; --- model. defonce so weights survive an edit. ---
+(defonce W1 (atom (ml/randn 1 HIDDEN-SIZE 0.8)))
+(defonce B1 (atom (ml/zeros 1 HIDDEN-SIZE)))
+(defonce W2 (atom (ml/randn HIDDEN-SIZE 1 (/ 1.0 (sqrt HIDDEN-SIZE)))))
+(defonce B2 (atom (ml/zeros 1 1)))
+
+(defn fix-shapes! []
+  (when (not (= (second (ml/shape @W1)) HIDDEN-SIZE))
+    (reset! W1 (ml/randn 1 HIDDEN-SIZE 0.8))
+    (reset! B1 (ml/zeros 1 HIDDEN-SIZE))
+    (reset! W2 (ml/randn HIDDEN-SIZE 1 (/ 1.0 (sqrt HIDDEN-SIZE))))
+    (reset! B2 (ml/zeros 1 1))))
+(fix-shapes!)
+
+;; per-step mini-batch buffers — sized once, refilled in place
+(defonce X-BUF (atom (ml/zeros BATCH 1)))
+(defonce Y-BUF (atom (ml/zeros BATCH 1)))
+(when (not (= (first (ml/shape @X-BUF)) BATCH))
+  (reset! X-BUF (ml/zeros BATCH 1))
+  (reset! Y-BUF (ml/zeros BATCH 1)))
+
+(defn forward [x-tensor]
+  (let [h (ml/tanh (ml/add-bias (ml/matmul x-tensor @W1) @B1))]
+    (ml/add-bias (ml/matmul h @W2) @B2)))
+
+(defn sample-batch! []
+  (let [d  @DATA
+        xs (:xs d)
+        ys (:ys d)
+        n  (count xs)
+        idxs (vec (for [_ (range BATCH)] (rng-int! n)))
+        xb (mapv #(nth xs %) idxs)
+        yb (mapv #(nth ys %) idxs)]
+    (ml/set-data! @X-BUF xb)
+    (ml/set-data! @Y-BUF yb)))
+
+(defn train-step! []
+  (sample-batch!)
+  (let [pred (forward @X-BUF)
+        loss (ml/mse pred @Y-BUF)]
+    (ml/backward! loss)
+    (ml/sgd-step! [@W1 @B1 @W2 @B2] LEARNING-RATE)
+    [(ml/scalar loss)]))
+
+;; Predictions on a uniform grid, flat: [x0 y0 x1 y1 ...]
+(def GRID-N 80)
+(defn predict-grid []
+  (let [xs (vec (for [i (range GRID-N)]
+                  (+ X-MIN (* (- X-MAX X-MIN)
+                              (/ (* 1.0 i) (max 1 (dec GRID-N)))))))
+        xt (ml/tensor GRID-N 1 xs)
+        ys (ml/tolist (forward xt))]
+    (vec (interleave xs ys))))
+
+(defn data-points []
+  (let [d  @DATA]
+    (vec (interleave (:xs d) (:ys d)))))
+`;
+
+    // --- elements --------------------------------------------------------
+    const fitC  = document.getElementById("ml-fit");
+    const lossC = document.getElementById("ml-loss");
+    const fitX  = fitC.getContext("2d");
+    const lossX = lossC.getContext("2d");
+    const ta    = document.getElementById("ml-src");
+    const editorEl = document.getElementById("ml-editor");
+    const status   = document.getElementById("ml-status");
+    const overlay  = document.getElementById("ml-overlay");
+    const runBtn   = document.getElementById("ml-run");
+    const resetBtn = document.getElementById("ml-reset");
+    const meterEl  = document.getElementById("ml-meter");
+
+    ta.value = INITIAL_SOURCE;
+
+    // --- state -----------------------------------------------------------
+    let repl = null;
+    let running = true;
+    let dataPoints = [];      // flat [x0 y0 x1 y1 ...]
+    let lossHistory = [];
+    let stepCount = 0;
+    let lastLoss = NaN;
+    let debounceTimer = null;
+    let stepsThisSecond = 0;
+    let lastTpsAt = performance.now();
+    let lastTps = 0;
+
+    function setStatus(msg, cls) {
+      status.className = cls ? `ml-status ${cls}` : "ml-status";
+      status.textContent = msg;
+    }
+
+    function applySource(src) {
+      if (!repl) return false;
+      setStatus("…");
+      const result = repl.eval(src);
+      if (result.startsWith("read error") || result.startsWith("eval error")) {
+        setStatus(result, "err");
+        return false;
+      }
+      const dp = repl.eval_floats("(data-points)");
+      if (dp && dp.length > 0) dataPoints = Array.from(dp);
+      lossHistory = [];
+      stepCount = 0;
+      setStatus("applied. weights persisted via defonce (reset shape to re-init).", "ok");
+      return true;
+    }
+
+    function resetWeights() {
+      if (!repl) return;
+      // Drop the def'd weights, then re-eval source so defonce reinstalls.
+      repl.eval("(do (ns-unmap 'user 'W1) (ns-unmap 'user 'B1) (ns-unmap 'user 'W2) (ns-unmap 'user 'B2))");
+      // Fall back path if ns-unmap is unsupported: full reset.
+      // (We catch via an error string above; if it errored, just reset.)
+      repl.reset();
+      applySource(ta.value);
+    }
+
+    // --- training loop ---------------------------------------------------
+
+    function step() {
+      if (!repl || !running) return;
+      const out = repl.call_ints("train-step!", []);
+      if (out.length === 0) {
+        // Could be a shape mismatch after edit. Re-apply.
+        applySource(ta.value);
+        return;
+      }
+      lastLoss = out[0];
+      lossHistory.push(lastLoss);
+      if (lossHistory.length > 600) lossHistory.shift();
+      stepCount++;
+      stepsThisSecond++;
+    }
+
+    // --- rendering -------------------------------------------------------
+
+    function dataBounds() {
+      let xmin = -3, xmax = 3, ymin = -1.4, ymax = 1.4;
+      for (let i = 0; i < dataPoints.length; i += 2) {
+        const x = dataPoints[i], y = dataPoints[i + 1];
+        if (x < xmin) xmin = x; if (x > xmax) xmax = x;
+        if (y < ymin) ymin = y; if (y > ymax) ymax = y;
+      }
+      const padY = 0.1 * (ymax - ymin || 1);
+      return { xmin, xmax, ymin: ymin - padY, ymax: ymax + padY };
+    }
+
+    function drawFit() {
+      const W = fitC.width, H = fitC.height;
+      fitX.fillStyle = "#0b0d14";
+      fitX.fillRect(0, 0, W, H);
+      // grid
+      fitX.strokeStyle = "#1d2029";
+      fitX.lineWidth = 1;
+      for (let i = 1; i < 8; i++) {
+        const x = (W * i) / 8;
+        fitX.beginPath(); fitX.moveTo(x, 0); fitX.lineTo(x, H); fitX.stroke();
+      }
+      for (let i = 1; i < 4; i++) {
+        const y = (H * i) / 4;
+        fitX.beginPath(); fitX.moveTo(0, y); fitX.lineTo(W, y); fitX.stroke();
+      }
+
+      const b = dataBounds();
+      const xToPx = (x) => ( (x - b.xmin) / (b.xmax - b.xmin) ) * (W - 12) + 6;
+      const yToPx = (y) => H - 6 - ((y - b.ymin) / (b.ymax - b.ymin)) * (H - 12);
+
+      // dataset scatter
+      fitX.fillStyle = "#cc8aff";
+      for (let i = 0; i < dataPoints.length; i += 2) {
+        const px = xToPx(dataPoints[i]);
+        const py = yToPx(dataPoints[i + 1]);
+        fitX.beginPath(); fitX.arc(px, py, 2, 0, Math.PI * 2); fitX.fill();
+      }
+
+      // model curve
+      if (repl) {
+        const grid = repl.eval_floats("(predict-grid)");
+        if (grid && grid.length >= 4) {
+          fitX.strokeStyle = "#7cd98a";
+          fitX.lineWidth = 2;
+          fitX.beginPath();
+          for (let i = 0; i < grid.length; i += 2) {
+            const px = xToPx(grid[i]);
+            const py = yToPx(grid[i + 1]);
+            if (i === 0) fitX.moveTo(px, py); else fitX.lineTo(px, py);
+          }
+          fitX.stroke();
+        }
+      }
+    }
+
+    function drawLoss() {
+      const W = lossC.width, H = lossC.height;
+      lossX.fillStyle = "#0b0d14";
+      lossX.fillRect(0, 0, W, H);
+      lossX.strokeStyle = "#1d2029";
+      lossX.lineWidth = 1;
+      for (let i = 1; i < 4; i++) {
+        const y = (H * i) / 4;
+        lossX.beginPath(); lossX.moveTo(0, y); lossX.lineTo(W, y); lossX.stroke();
+      }
+      if (lossHistory.length < 2) return;
+      let lo = Infinity, hi = -Infinity;
+      for (const l of lossHistory) {
+        if (l < lo) lo = l; if (l > hi) hi = l;
+      }
+      // log-ish: clamp so a brief NaN doesn't blow scale
+      if (!isFinite(lo) || !isFinite(hi) || hi <= lo) { lo = 0; hi = 1; }
+      lossX.strokeStyle = "#ffcc60";
+      lossX.lineWidth = 1.5;
+      lossX.beginPath();
+      const n = lossHistory.length;
+      for (let i = 0; i < n; i++) {
+        const px = (i / (n - 1)) * (W - 8) + 4;
+        const py = H - 4 - ((lossHistory[i] - lo) / (hi - lo)) * (H - 8);
+        if (i === 0) lossX.moveTo(px, py); else lossX.lineTo(px, py);
+      }
+      lossX.stroke();
+    }
+
+    function frame() {
+      // throttle: do a few steps per frame for smoother loss curves
+      if (running) {
+        for (let k = 0; k < 4; k++) step();
+      }
+      drawFit();
+      drawLoss();
+
+      const now = performance.now();
+      if (now - lastTpsAt > 500) {
+        lastTps = Math.round(stepsThisSecond * 1000 / (now - lastTpsAt));
+        stepsThisSecond = 0;
+        lastTpsAt = now;
+      }
+      meterEl.textContent =
+        `step ${stepCount}  loss ${isFinite(lastLoss) ? lastLoss.toFixed(4) : '--'}  ${lastTps}/s`;
+      overlay.textContent = running ? `training (${lastTps}/s)` : "paused";
+      requestAnimationFrame(frame);
+    }
+
+    // --- buttons ---------------------------------------------------------
+    runBtn.addEventListener("click", () => {
+      running = !running;
+      runBtn.textContent = running ? "Pause" : "Resume";
+    });
+    resetBtn.addEventListener("click", () => resetWeights());
+
+    // --- debounced source apply -----------------------------------------
+    ta.addEventListener("input", () => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => applySource(ta.value), 400);
+    });
+    ta.addEventListener("keydown", (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        clearTimeout(debounceTimer);
+        applySource(ta.value);
+      }
+    });
+
+    // --- alt-drag scrubbable numbers (same pattern as synth/platformer)
+    let scrubModHeld = false;
+    let scrubbingNumber = null;
+
+    function modFromEvent(e) { return !!(e.altKey || e.ctrlKey); }
+    function setScrubMode(on) {
+      if (scrubModHeld === on) return;
+      scrubModHeld = on;
+      editorEl.classList.toggle("ml-scrub-mode", on);
+    }
+    function syncModFromEvent(e) {
+      setScrubMode(modFromEvent(e));
+      if (!modFromEvent(e)) endNumberScrub();
+    }
+    ["keydown", "keyup", "mousemove", "mousedown", "mouseup"].forEach((ev) => {
+      window.addEventListener(ev, syncModFromEvent, true);
+    });
+    window.addEventListener("blur", () => { setScrubMode(false); endNumberScrub(); });
+
+    function parseNumberText(s) {
+      const v = parseFloat(s);
+      if (!Number.isFinite(v)) return null;
+      const dot = s.indexOf(".");
+      const decimals = dot >= 0 ? s.length - dot - 1 : 0;
+      return { value: v, decimals };
+    }
+    function formatNumber(v, decimals) {
+      if (decimals === 0) return String(Math.round(v));
+      return v.toFixed(decimals);
+    }
+    function tokenFromTarget(target) {
+      let t = target;
+      for (let n = 0; n < 3 && t; n++) {
+        if (t.classList && t.dataset && t.dataset.s != null &&
+            t.classList.contains("tok-number")) return t;
+        t = t.parentElement;
+      }
+      return null;
+    }
+
+    editorEl.addEventListener("mousedown", (e) => {
+      if (!modFromEvent(e)) return;
+      const t = tokenFromTarget(e.target);
+      if (!t) return;
+      const start = parseInt(t.dataset.s, 10);
+      const len = parseInt(t.dataset.l, 10);
+      const text = ta.value.slice(start, start + len);
+      const parsed = parseNumberText(text);
+      if (!parsed) return;
+      e.preventDefault(); e.stopPropagation();
+      scrubbingNumber = {
+        startValue: parsed.value,
+        decimals: parsed.decimals,
+        start, len,
+        startX: e.clientX,
+        span: t,
+      };
+      t.classList.add("ml-scrubbing");
+      document.body.style.cursor = "ew-resize";
+    }, true);
+
+    function applyNumberDrag(clientX, shiftKey) {
+      const c = scrubbingNumber;
+      if (!c) return;
+      const dx = clientX - c.startX;
+      const mag = Math.max(0.1, Math.abs(c.startValue));
+      const coarse = c.decimals === 0 ? 1 : Math.max(0.001, mag * 0.02);
+      const step = shiftKey ? coarse * 10 : coarse;
+      let newValue = c.startValue + dx * step;
+      if (c.decimals === 0) newValue = Math.round(newValue);
+      const newText = formatNumber(newValue, c.decimals);
+      const before = ta.value.slice(0, c.start);
+      const after  = ta.value.slice(c.start + c.len);
+      ta.value = before + newText + after;
+      c.len = newText.length;
+      ta.dispatchEvent(new Event("input"));
+      clearTimeout(debounceTimer);
+      applySource(ta.value);
+    }
+
+    function endNumberScrub() {
+      if (!scrubbingNumber) return;
+      document.body.style.cursor = "";
+      document.querySelectorAll(".tok-number.ml-scrubbing").forEach(n => n.classList.remove("ml-scrubbing"));
+      scrubbingNumber = null;
+    }
+
+    window.addEventListener("mousemove", (e) => {
+      if (scrubbingNumber) { applyNumberDrag(e.clientX, e.shiftKey); e.preventDefault(); }
+    }, true);
+    window.addEventListener("mouseup", () => endNumberScrub(), true);
+
+    // --- boot ------------------------------------------------------------
+    (async () => {
+      await attachHighlightOverlay(editorEl, ta);
+      const mod = await loadWasm();
+      repl = new mod.Repl();
+      applySource(INITIAL_SOURCE);
+      requestAnimationFrame(frame);
+    })();
+  </script>
+</body>
+</html>

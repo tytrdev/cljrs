@@ -387,6 +387,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "cljrs-ml"
+version = "0.1.0"
+dependencies = [
+ "cljrs",
+ "imbl",
+]
+
+[[package]]
 name = "cljrs-physics"
 version = "0.1.0"
 dependencies = [
@@ -401,9 +409,13 @@ name = "cljrs-wasm"
 version = "0.1.0"
 dependencies = [
  "cljrs",
+ "cljrs-ml",
  "cljrs-physics",
  "console_error_panic_hook",
+ "js-sys",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]
