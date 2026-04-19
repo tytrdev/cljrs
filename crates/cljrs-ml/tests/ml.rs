@@ -88,6 +88,44 @@ fn backward_gradient_sign_trivial() {
 }
 
 #[test]
+fn matmul_gpu_propagates_gradient() {
+    // Regression: matmul-gpu used to return a Tensor::leaf with no
+    // parents — backward never reached the upstream weight, so SGD
+    // didn't move it. This test fails if anyone introduces that bug
+    // again. (On wasm matmul-gpu falls back to CPU, so this also
+    // covers the fallback path.)
+    let env = fresh_env();
+    let v = run(&env, r#"
+        (require '[cljrs.ml :as ml])
+        (def w (ml/param [[0.0]]))
+        (def xs (ml/tensor [[1.0] [2.0] [3.0] [4.0]]))
+        (def ys (ml/tensor [[3.0] [6.0] [9.0] [12.0]]))
+        (defn pred [] (ml/matmul-gpu xs w))
+        (defn loss-of [] (ml/mse (pred) ys))
+        (def initial-loss (ml/scalar (loss-of)))
+        (loop [i 0]
+          (when (< i 200)
+            (let [l (loss-of)]
+              (ml/backward! l)
+              (ml/sgd-step! [w] 0.02))
+            (recur (inc i))))
+        [initial-loss (ml/scalar (loss-of)) (first (ml/tolist w))]
+    "#);
+    let xs = as_floats(&v);
+    let initial = xs[0];
+    let final_loss = xs[1];
+    let w_final = xs[2];
+    assert!(
+        final_loss < initial * 0.01,
+        "matmul-gpu broke autograd: loss didn't drop ({initial} → {final_loss})"
+    );
+    assert!(
+        (w_final - 3.0).abs() < 0.1,
+        "matmul-gpu broke autograd: w stayed at {w_final}, should be ~3.0"
+    );
+}
+
+#[test]
 fn sgd_step_lowers_loss_on_linear_fit() {
     let env = fresh_env();
     let v = run(&env, r#"

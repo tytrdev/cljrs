@@ -142,6 +142,7 @@ fn core_fns() -> Vec<(&'static str, fn(&[Value]) -> Result<Value>)> {
         (">=", ge),
         ("not", not_fn),
         ("not=", not_eq_fn),
+        ("subvec", subvec_fn),
         ("str", to_str),
         ("println", println_fn),
         ("pr-str", pr_str_fn),
@@ -2002,6 +2003,38 @@ fn le(args: &[Value]) -> Result<Value> {
 }
 fn ge(args: &[Value]) -> Result<Value> {
     cmp(args, |a, b| a >= b)
+}
+
+fn subvec_fn(args: &[Value]) -> Result<Value> {
+    // (subvec v start) / (subvec v start end). Returns a fresh
+    // imbl::Vector slice. Out-of-range = error, matching Clojure.
+    if args.len() < 2 || args.len() > 3 {
+        return Err(Error::Arity { expected: "2 or 3".into(), got: args.len() });
+    }
+    let v = match &args[0] {
+        Value::Vector(xs) => xs,
+        other => return Err(Error::Type(format!(
+            "subvec: first arg must be a vector, got {}", other.type_name()))),
+    };
+    let len = v.len();
+    let start = match &args[1] {
+        Value::Int(i) if *i >= 0 => *i as usize,
+        _ => return Err(Error::Type("subvec: start must be non-neg int".into())),
+    };
+    let end = match args.get(2) {
+        Some(Value::Int(i)) if *i >= 0 => *i as usize,
+        Some(_) => return Err(Error::Type("subvec: end must be non-neg int".into())),
+        None => len,
+    };
+    if start > len || end > len || start > end {
+        return Err(Error::Eval(format!(
+            "subvec: range {start}..{end} out of bounds for length {len}")));
+    }
+    let mut out: imbl::Vector<Value> = imbl::Vector::new();
+    for i in start..end {
+        out.push_back(v[i].clone());
+    }
+    Ok(Value::Vector(out))
 }
 
 fn not_eq_fn(args: &[Value]) -> Result<Value> {

@@ -348,7 +348,18 @@
        ([] (rf))
        ([result] (rf result))
        ([result input] (rf result (f input))))))
-  ([f coll] (__map-coll f coll)))
+  ([f coll] (__map-coll f coll))
+  ([f c1 c2]
+   (loop [a (seq c1) b (seq c2) acc []]
+     (if (and a b)
+       (recur (rest a) (rest b) (conj acc (f (first a) (first b))))
+       acc)))
+  ([f c1 c2 c3]
+   (loop [a (seq c1) b (seq c2) c (seq c3) acc []]
+     (if (and a b c)
+       (recur (rest a) (rest b) (rest c)
+              (conj acc (f (first a) (first b) (first c))))
+       acc))))
 
 (defn filter
   ([pred]

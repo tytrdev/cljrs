@@ -460,7 +460,16 @@ fn matmul_gpu_fn(args: &[Value]) -> Result<Value> {
     let av = a.data().clone();
     let bv = b.data().clone();
     let out = matmul_gpu_impl(&av, &bv, m, k, n);
-    Ok(opaque(Tensor::leaf(Shape::new(m, n), out, false)))
+    // CRITICAL: hook into the autograd graph the same way CPU matmul
+    // does — without parents + Op::MatMul, backward! cannot propagate
+    // gradients into the upstream weights, so training stalls and
+    // results look "broken" while errors stay quiet.
+    Ok(opaque(Tensor::from_op(
+        Shape::new(m, n),
+        out,
+        autograd::Op::MatMul,
+        vec![a.clone(), b.clone()],
+    )))
 }
 
 // --- optimizers ----------------------------------------------------------

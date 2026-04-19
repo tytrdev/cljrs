@@ -159,6 +159,41 @@ fn eval_source(label: &str, src: &str) -> Result<(), String> {
             return Err(format!("{label}: eval error: {e}"));
         }
     }
+    // Top-level eval defines fns but doesn't call them. Many bugs
+    // (subvec missing, wrong arities, type errors) only surface when
+    // the JS side actually calls a fn each frame. So invoke the
+    // standard entry-points if they exist. We don't fail if they
+    // don't — most demos define some subset of these.
+    for entry in ["boot", "patch", "viz", "frame!", "render-todos", "key->hz"] {
+        let probe = format!("(when (resolve '{entry}) ({entry}))");
+        // resolve isn't actually a builtin; use a try/catch idiom instead.
+        let probe = format!(
+            "(try ({entry}) (catch __unbound__ _ nil) (catch _ e (throw e)))"
+        );
+        let _ = probe; // silence unused
+    }
+    // Real implementation: shell each entry-point eval through try and
+    // bubble true errors. We swallow Unbound and Arity-mismatch since
+    // some entries take args (e.g. key->hz, render-buffer).
+    for entry in ["boot", "patch", "viz", "frame!", "render-todos"] {
+        let call = format!("({entry})");
+        let forms = match reader::read_all(&call) {
+            Ok(f) => f,
+            Err(_) => continue,
+        };
+        for f in forms {
+            match eval::eval(&f, &env) {
+                Ok(_) => {}
+                Err(cljrs::error::Error::Unbound(_)) => { /* fn not defined here */ }
+                Err(cljrs::error::Error::Arity { .. }) => { /* fn takes args */ }
+                Err(e) => {
+                    return Err(format!(
+                        "{label}: ({entry}) at runtime → {e}"
+                    ));
+                }
+            }
+        }
+    }
     Ok(())
 }
 

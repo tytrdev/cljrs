@@ -85,7 +85,7 @@ impl Tensor {
         }))
     }
 
-    fn from_op(shape: Shape, data: Vec<f32>, op: Op, parents: Vec<Tensor>) -> Tensor {
+    pub fn from_op(shape: Shape, data: Vec<f32>, op: Op, parents: Vec<Tensor>) -> Tensor {
         debug_assert_eq!(data.len(), shape.numel());
         Tensor(Arc::new(TensorInner {
             shape,
