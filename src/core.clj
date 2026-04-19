@@ -592,3 +592,243 @@
 
 (defn inc-all [xs] (mapv inc xs))
 (defn dec-all [xs] (mapv dec xs))
+
+;; ---------- additional conditional macros --------------------------------
+
+(defmacro if-not
+  ([test then] `(if ~test nil ~then))
+  ([test then else] `(if ~test ~else ~then)))
+
+(defmacro if-some
+  ([binding then] `(if-some ~binding ~then nil))
+  ([binding then else]
+   (let [name (first binding)
+         expr (first (rest binding))]
+     `(let [v# ~expr]
+        (if (nil? v#)
+          ~else
+          (let [~name v#] ~then))))))
+
+(defmacro when-some
+  [binding & body]
+  (let [name (first binding)
+        expr (first (rest binding))]
+    `(let [v# ~expr]
+       (if (nil? v#)
+         nil
+         (let [~name v#] ~@body)))))
+
+;; condp: (condp pred expr clause...) where each clause is either
+;;   test-expr result-expr
+;; or test-expr :>> result-fn  (calls result-fn with the pred result).
+;; A trailing single form is treated as the default.
+(defmacro condp
+  [pred expr & clauses]
+  (let [pv (gensym "pred_")
+        ev (gensym "expr_")]
+    (letfn-build pv ev pred expr (vec clauses))))
+
+(defn letfn-build [pv ev pred expr clauses]
+  ;; helper that emits the cascading if for condp.
+  `(let [~pv ~pred ~ev ~expr]
+     ~(condp-emit pv ev (vec clauses))))
+
+(defn condp-emit [pv ev clauses]
+  (cond
+    (empty? clauses)
+    `(throw (ex-info "No matching clause" {}))
+
+    (empty? (rest clauses))
+    ;; lone trailing clause = default value
+    (first clauses)
+
+    (= (first (rest clauses)) :>>)
+    ;; (test :>> result-fn) — call result-fn on (pred test expr)
+    (let [test (first clauses)
+          result-fn (first (rest (rest clauses)))
+          more (rest (rest (rest clauses)))
+          rv (gensym "rv_")]
+      `(let [~rv (~pv ~test ~ev)]
+         (if ~rv
+           (~result-fn ~rv)
+           ~(condp-emit pv ev (vec more)))))
+
+    :else
+    (let [test (first clauses)
+          result (first (rest clauses))
+          more (rest (rest clauses))]
+      `(if (~pv ~test ~ev)
+         ~result
+         ~(condp-emit pv ev (vec more))))))
+
+;; ---------- assertions ---------------------------------------------------
+
+(defmacro assert
+  ([expr]
+   `(when-not ~expr
+      (throw (ex-info (str "Assert failed: " (quote ~expr)) {}))))
+  ([expr message]
+   `(when-not ~expr
+      (throw (ex-info (str "Assert failed: " ~message "\n" (quote ~expr)) {})))))
+
+;; ---------- comment ------------------------------------------------------
+;; Drops its body entirely; always returns nil. Useful for inline notes
+;; or temporarily disabling a top-level form.
+
+(defmacro comment [& _body] nil)
+
+;; ---------- letfn --------------------------------------------------------
+;; Mutually-recursive local fns. Each binding is (fn-name [params] body...).
+;; We use atoms as forward references: each name is initially bound to a
+;; trampoline that dereferences the atom; then we install the real fns.
+
+(defmacro letfn
+  [fnspecs & body]
+  (let [n (count fnspecs)
+        ;; Pre-compute parallel vectors of names + matching atom syms.
+        names    (mapv first fnspecs)
+        atoms    (mapv (fn [_] (gensym "lf_")) names)
+        ;; Build the let-binding pairs as one flat vector.
+        atom-bs  (reduce (fn [acc a] (conj acc a `(atom nil))) [] atoms)
+        tramp-bs (loop [i 0 acc []]
+                   (if (>= i n)
+                     acc
+                     (recur (+ i 1)
+                            (conj acc (nth names i)
+                                  `(fn [& args#]
+                                     (apply (deref ~(nth atoms i)) args#))))))
+        install-bs (loop [i 0 acc []]
+                     (if (>= i n)
+                       acc
+                       (let [spec   (nth fnspecs i)
+                             params (first (rest spec))
+                             fbody  (rest (rest spec))]
+                         (recur (+ i 1)
+                                (conj acc (gensym "_")
+                                      `(reset! ~(nth atoms i)
+                                               (fn ~params ~@fbody)))))))]
+    `(let ~(vec (concat atom-bs tramp-bs install-bs))
+       ~@body)))
+
+;; ---------- delay / force ------------------------------------------------
+;; A delay is a tagged map {:__delay true :state (atom [:pending thunk])}.
+;; The first force evaluates the thunk and caches the result.
+;;
+;; NOTE: realized? is a builtin that checks for LazySeq specifically; on
+;; a delay it will wrongly return true. Use delay-realized? for delays.
+
+(defn delay? [d]
+  (and (map? d) (= (get d :__delay) true)))
+
+(defn force [d]
+  (if (delay? d)
+    (let [st (get d :state)
+          cur (deref st)]
+      (if (= (first cur) :pending)
+        (let [v ((first (rest cur)))]
+          (reset! st [:done v])
+          v)
+        (first (rest cur))))
+    d))
+
+(defn delay-realized? [d]
+  (and (delay? d) (= (first (deref (get d :state))) :done)))
+
+(defmacro delay
+  [& body]
+  `(hash-map :__delay true :state (atom [:pending (fn [] ~@body)])))
+
+;; ---------- sequence accessors ------------------------------------------
+
+(defn ffirst [coll] (first (first coll)))
+(defn fnext  [coll] (first (rest coll)))
+(defn nfirst [coll] (rest (first coll)))
+(defn nnext  [coll] (rest (rest coll)))
+
+;; ---------- not-any? / not-every? ---------------------------------------
+
+(defn not-any? [pred coll] (not (some pred coll)))
+(defn not-every? [pred coll] (not (every? pred coll)))
+
+;; ---------- replace (sequence form) -------------------------------------
+;; Replace each element of coll by looking it up in the smap (a map). If
+;; not found, the element is kept as-is. 1-arg returns a transducer.
+
+(defn replace
+  ([smap]
+   (map (fn [x] (if (contains? smap x) (get smap x) x))))
+  ([smap coll]
+   (mapv (fn [x] (if (contains? smap x) (get smap x) x)) coll)))
+
+;; ---------- every-pred / some-fn / fnil ---------------------------------
+
+(defn every-pred
+  ([p]
+   (fn [& args] (every? p args)))
+  ([p1 p2]
+   (fn [& args]
+     (and (every? p1 args) (every? p2 args))))
+  ([p1 p2 & ps]
+   (let [all (cons p1 (cons p2 ps))]
+     (fn [& args]
+       (every? (fn [p] (every? p args)) all)))))
+
+(defn some-fn
+  ([p]
+   (fn [& args] (some p args)))
+  ([p1 p2]
+   (fn [& args]
+     (or (some p1 args) (some p2 args))))
+  ([p1 p2 & ps]
+   (let [all (cons p1 (cons p2 ps))]
+     (fn [& args]
+       (some (fn [p] (some p args)) all)))))
+
+(defn fnil
+  ([f a]
+   (fn
+     ([x] (f (if (nil? x) a x)))
+     ([x y] (f (if (nil? x) a x) y))
+     ([x y z] (f (if (nil? x) a x) y z))
+     ([x y z & more] (apply f (if (nil? x) a x) y z more))))
+  ([f a b]
+   (fn
+     ([x y] (f (if (nil? x) a x) (if (nil? y) b y)))
+     ([x y z] (f (if (nil? x) a x) (if (nil? y) b y) z))
+     ([x y z & more] (apply f (if (nil? x) a x) (if (nil? y) b y) z more))))
+  ([f a b c]
+   (fn
+     ([x y z] (f (if (nil? x) a x) (if (nil? y) b y) (if (nil? z) c z)))
+     ([x y z & more]
+      (apply f (if (nil? x) a x) (if (nil? y) b y) (if (nil? z) c z) more)))))
+
+;; ---------- numeric == ---------------------------------------------------
+;; Variadic numeric equality. Coerces ints/floats to a common comparison
+;; via subtraction-equals-zero. cljrs's = already compares ints and floats
+;; structurally, so == here is essentially a numeric-typed alias.
+
+(defn ==
+  ([_x] true)
+  ([x y] (and (number? x) (number? y) (= 0 (- x y))))
+  ([x y & more]
+   (if (== x y)
+     (loop [a y bs more]
+       (if (empty? bs)
+         true
+         (if (== a (first bs))
+           (recur (first bs) (rest bs))
+           false)))
+     false)))
+
+;; ---------- printing -----------------------------------------------------
+;; pr / prn print the readable representation (via pr-str). println /
+;; print already exist as builtins and use the display representation.
+
+(defn pr [& args]
+  (print (apply pr-str args)))
+
+(defn prn [& args]
+  (println (apply pr-str args)))
+
+(defn prn-str [& args]
+  (str (apply pr-str args) "\n"))
