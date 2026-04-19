@@ -1,6 +1,10 @@
 # Rust build output
 /target
 
+# CI rebuilds the docs wasm bundle on every deploy; never commit a
+# local snapshot. Use `docs/serve.sh` to rebuild + serve locally.
+docs/wasm/
+
 # Cargo.lock is committed — this crate produces binaries, not a library.
 
 # IDE / editor
