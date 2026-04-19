@@ -1,0 +1,208 @@
+;; ============================================================
+;; Step sequencer — 16 steps × 4 tracks. Edits apply on a short
+;; debounce; the JS scheduler picks up new patterns at the next step.
+;;
+;; Two layers:
+;;   1. Score data — KICK / SNARE / HAT / MELODY / BPM / ROOT / SCALE.
+;;      JS pulls these via repl.eval_floats every step.
+;;   2. UI tree — a hiccup view rendered by cljrs.ui that contains
+;;      the transport controls, the step grid, the melody row, and
+;;      Randomize buttons. Clicking cells / buttons mutates the
+;;      score atoms and re-mounts.
+;;
+;;   hold Alt (or Ctrl) and drag any number to scrub it live
+;; ============================================================
+
+(ns sequencer)
+(require '[cljrs.ui :as ui])
+
+;; --- score atoms --------------------------------------------------
+;; Plain `def` so each apply snaps values back to source. The cljrs.ui
+;; click handlers mutate these atoms for live tweaking between edits.
+
+(def BPM    (atom 120))
+(def ROOT   (atom 60))      ; MIDI root for the scale (C4)
+(def SCALE  (atom :minor))  ; cljrs.music scale keyword
+
+(def KICK   (atom [1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0]))
+(def SNARE  (atom [0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 0]))
+(def HAT    (atom [1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0]))
+
+;; Melody — explicit MIDI numbers. Defaults to a minor pattern over
+;; the scale; Randomize regenerates this with the LCG below.
+(def MELODY (atom (let [scl (cljrs.music/scale 60 :minor)
+                        pat [0 2 4 5 7 4 2 0 0 2 4 7 9 7 5 4]]
+                    (mapv (fn [i] (nth scl (mod i (count scl)))) pat))))
+
+;; Currently-playing step (0..15), -1 when stopped. JS pushes this
+;; via repl.eval per audio step so the cljrs panel can re-render the
+;; playhead column.
+(def STEP   (atom -1))
+
+;; --- score readers (JS contract) ----------------------------------
+;; The JS scheduler reads each pattern with repl.eval_floats every step.
+;; Names + counts must stay stable.
+
+(defn bpm    [] [@BPM])
+(defn kick   [] @KICK)
+(defn snare  [] @SNARE)
+(defn hat    [] @HAT)
+(defn melody [] @MELODY)
+
+;; --- LCG (deterministic random) -----------------------------------
+;; cljrs has no `rand`. Linear congruential generator, Numerical
+;; Recipes constants. Keeps a per-call seed in an atom that we tick
+;; with the wall-clock'ish counter every Randomize click.
+
+(def __rng-seed (atom 1))
+
+(defn __rng-next []
+  (let [s @__rng-seed
+        ;; Numerical Recipes LCG: a=1664525, c=1013904223, m=2^32
+        n (mod (+ (* s 1664525) 1013904223) 4294967296)]
+    (reset! __rng-seed n)
+    n))
+
+(defn __rand-float []
+  (/ (sequencer/__rng-next) 4294967296.0))
+
+(defn __rand-int [n]
+  (mod (sequencer/__rng-next) n))
+
+(defn __reseed! [x]
+  (reset! __rng-seed (mod (+ (* x 2654435761) 1) 4294967296)))
+
+;; --- randomize helpers --------------------------------------------
+
+(defn __rand-pattern [density]
+  (mapv (fn [_]
+          (if (< (sequencer/__rand-float) density) 1 0))
+        (range 16)))
+
+;; Mix the existing seed forward so successive clicks of the same
+;; button give different patterns. We don't have a wall-clock, but
+;; tapping the LCG once before reseeding is enough entropy.
+(defn __mix-seed! [salt]
+  (sequencer/__reseed! (+ salt (sequencer/__rng-next))))
+
+(defn randomize-kick! []
+  (sequencer/__mix-seed! 1)
+  (reset! KICK  (sequencer/__rand-pattern 0.25))
+  (sequencer/render!))
+
+(defn randomize-snare! []
+  (sequencer/__mix-seed! 2)
+  (reset! SNARE (sequencer/__rand-pattern 0.12))
+  (sequencer/render!))
+
+(defn randomize-hat! []
+  (sequencer/__mix-seed! 3)
+  (reset! HAT   (sequencer/__rand-pattern 0.50))
+  (sequencer/render!))
+
+(defn randomize-melody! []
+  (sequencer/__mix-seed! 4)
+  (let [scl   (cljrs.music/scale @ROOT @SCALE)
+        ;; Pick from the first ~8 indices for a usable melody range.
+        top   (min 8 (count scl))]
+    (reset! MELODY
+            (mapv (fn [_] (nth scl (sequencer/__rand-int top)))
+                  (range 16))))
+  (sequencer/render!))
+
+;; --- cell toggle --------------------------------------------------
+
+(defn __toggle-vec [v i]
+  (assoc v i (if (= 1 (nth v i)) 0 1)))
+
+(defn toggle-cell! [track i]
+  (cond
+    (= track :kick)  (do (swap! KICK  sequencer/__toggle-vec i)
+                         (sequencer/render!))
+    (= track :snare) (do (swap! SNARE sequencer/__toggle-vec i)
+                         (sequencer/render!))
+    (= track :hat)   (do (swap! HAT   sequencer/__toggle-vec i)
+                         (sequencer/render!))))
+
+;; --- view ---------------------------------------------------------
+
+(defn __midi-name [n]
+  (let [names ["C" "C#" "D" "D#" "E" "F" "F#" "G" "G#" "A" "A#" "B"]
+        n     (int n)
+        oct   (- (quot n 12) 1)
+        pc    (mod n 12)]
+    (str (nth names pc) oct)))
+
+(defn __cell [track i v head?]
+  (let [base "sq-cell"
+        cls  (str base
+                  (if (= 1 v) " on" "")
+                  (if (= 0 (mod i 4)) " beat" "")
+                  (if head? " head" ""))]
+    [:div {:class cls
+           :on-click (fn [] (sequencer/toggle-cell! track i))}]))
+
+(defn __row [track-kw label pat head]
+  (vec
+    (concat
+      [[:div {:class "sq-label"} label]]
+      (mapv (fn [i] (sequencer/__cell track-kw i (nth pat i) (= i head)))
+            (range 16)))))
+
+(defn __mel-cell [i midi head?]
+  [:div {:class (str "sq-mel-cell" (if head? " head" ""))}
+   (sequencer/__midi-name midi)])
+
+(defn __mel-row [mel head]
+  (vec
+    (concat
+      [[:div {:class "sq-label"} "melody"]]
+      (mapv (fn [i] (sequencer/__mel-cell i (nth mel i) (= i head)))
+            (range 16)))))
+
+(defn ui-tree []
+  (let [head @STEP
+        k    @KICK
+        sn   @SNARE
+        ht   @HAT
+        mel  @MELODY]
+    [:div {:class "sq-panel"}
+     [:div {:class "sq-toolbar2"}
+      [:button {:class "sq-rand"
+                :on-click (fn [] (sequencer/randomize-melody!))}
+       "Randomize melody"]
+      [:button {:class "sq-rand"
+                :on-click (fn [] (sequencer/randomize-kick!))}
+       "kick"]
+      [:button {:class "sq-rand"
+                :on-click (fn [] (sequencer/randomize-snare!))}
+       "snare"]
+      [:button {:class "sq-rand"
+                :on-click (fn [] (sequencer/randomize-hat!))}
+       "hat"]
+      [:span {:class "sq-randhint"}
+       "regenerate from current scale"]]
+     [:div {:class "sq-grid"}
+      (sequencer/__row :kick  "kick"  k  head)
+      (sequencer/__row :snare "snare" sn head)
+      (sequencer/__row :hat   "hat"   ht head)]
+     [:div {:class "sq-mel-row"}
+      (sequencer/__mel-row mel head)]
+     [:p {:class "sq-foot"}
+      "Click any cell to toggle. Edit the source for a permanent change; "
+      "sliders / clicks are live tweaks until the next apply."]]))
+
+;; --- entry points -------------------------------------------------
+
+;; Re-mount the panel. cljrs has no add-watch, so every state mutator
+;; calls this explicitly. Cheap because Preact diffs.
+(defn render! []
+  (cljrs.ui/mount! "cljrs-root" (sequencer/ui-tree)))
+
+;; Build-time prerender (for SEO + first-paint).
+(defn prerender []
+  (cljrs.ui/render-html (sequencer/ui-tree)))
+
+;; Runtime: sequencer.html re-evals this file then calls (boot).
+(defn boot []
+  (sequencer/render!))

@@ -35,6 +35,7 @@
       background: #1a1d27;
       border: 1px solid #2a2f3d;
       box-sizing: border-box;
+      cursor: pointer;
     }
     .sq-cell.on  { background: #7cd98a; border-color: #8ec07c; }
     .sq-cell.beat { box-shadow: inset 0 0 0 1px rgba(255,255,255,0.06); }
@@ -91,6 +92,29 @@
       padding: 0 4px; border-radius: 3px;
       font-family: inherit;
     }
+
+    /* cljrs.ui-rendered panel inside the stage */
+    #cljrs-root .sq-panel { display: flex; flex-direction: column; gap: 0.4rem; }
+    #cljrs-root .sq-toolbar2 {
+      display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap;
+      font-size: 0.75rem; color: var(--fg-dim);
+      margin-bottom: 0.2rem;
+    }
+    #cljrs-root .sq-rand {
+      font-family: ui-monospace, monospace;
+      font-size: 0.7rem;
+      padding: 0.2rem 0.55rem;
+      background: #1d2029; color: #9abfff;
+      border: 1px solid #333; border-radius: 3px;
+      cursor: pointer;
+    }
+    #cljrs-root .sq-rand:hover { background: #262a36; }
+    #cljrs-root .sq-randhint { color: var(--fg-dim); margin-left: 0.3rem; }
+    #cljrs-root .sq-foot {
+      margin: 0.3rem 0 0 0;
+      font-size: 0.7rem;
+      color: var(--fg-dim);
+    }
   </style>
 </head>
 <body>
@@ -110,19 +134,21 @@
       from <code>:minor</code> to <code>:dorian</code> or
       <code>:pentatonic</code> and watch the melody re-harmonize on
       the next bar. Web Audio handles sample-accurate scheduling; the
-      cljrs runtime owns the score.
+      cljrs runtime owns the score, and the entire grid below is
+      rendered by <code>cljrs.ui</code> from the source.
     </p>
     <p class="sq-hint">
       Hold <b>Alt</b> (or <b>Ctrl</b>) and drag any number — try
       <code>BPM</code> — to scrub it live. Press
       <kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Enter</kbd> to apply
-      immediately.
+      immediately. Click a cell to toggle; click <b>Randomize melody</b>
+      to regenerate the melody from the current scale.
     </p>
 
     <div class="sq-wrap">
       <div class="sq-stage">
-        <div class="sq-grid" id="sq-grid"></div>
-        <div class="sq-mel-row" id="sq-mel-row"></div>
+        <!-- cljrs-prerender: ./sequencer.cljrs -->
+        <div id="cljrs-root"><!--ssr--><div class="sq-panel"><div class="sq-toolbar2"><button class="sq-rand">Randomize melody</button><button class="sq-rand">kick</button><button class="sq-rand">snare</button><button class="sq-rand">hat</button><span class="sq-randhint">regenerate from current scale</span></div><div class="sq-grid"><div class="sq-label">kick</div><div class="sq-cell on beat"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-cell on beat"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-cell on beat"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-cell on beat"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-label">snare</div><div class="sq-cell beat"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-cell on beat"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-cell beat"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-cell on beat"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-label">hat</div><div class="sq-cell on beat"></div><div class="sq-cell"></div><div class="sq-cell on"></div><div class="sq-cell"></div><div class="sq-cell on beat"></div><div class="sq-cell"></div><div class="sq-cell on"></div><div class="sq-cell"></div><div class="sq-cell on beat"></div><div class="sq-cell"></div><div class="sq-cell on"></div><div class="sq-cell"></div><div class="sq-cell on beat"></div><div class="sq-cell"></div><div class="sq-cell on"></div><div class="sq-cell"></div></div><div class="sq-mel-row"><div class="sq-label">melody</div><div class="sq-mel-cell">C4</div><div class="sq-mel-cell">D#4</div><div class="sq-mel-cell">G4</div><div class="sq-mel-cell">G#4</div><div class="sq-mel-cell">C5</div><div class="sq-mel-cell">G4</div><div class="sq-mel-cell">D#4</div><div class="sq-mel-cell">C4</div><div class="sq-mel-cell">C4</div><div class="sq-mel-cell">D#4</div><div class="sq-mel-cell">G4</div><div class="sq-mel-cell">C5</div><div class="sq-mel-cell">D4</div><div class="sq-mel-cell">C5</div><div class="sq-mel-cell">G#4</div><div class="sq-mel-cell">G4</div></div><p class="sq-foot">Click any cell to toggle. Edit the source for a permanent change; sliders / clicks are live tweaks until the next apply.</p></div><!--/ssr--></div>
         <div class="sq-overlay" id="sq-overlay">stopped · — bpm</div>
       </div>
       <div class="sq-col">
@@ -150,47 +176,18 @@
 
     <h3>What's happening</h3>
     <ul>
-      <li>The Clojure source defines four 16-element vectors and a BPM. <code>applySource</code> re-reads them with <code>repl.eval_floats</code> on every edit (300 ms debounce) — the JS sequencer reads the freshest pattern at the start of every step.</li>
-      <li>The melody line uses <code>(cljrs.music/scale 60 :minor)</code> to map step indices into MIDI notes, demonstrating data-driven harmony from the <code>cljrs.music</code> library.</li>
+      <li>The Clojure source defines the score (BPM + four 16-element vectors) and the entire control panel as a <code>cljrs.ui</code> hiccup tree. Editing the file re-evals it, then <code>(boot)</code> re-mounts the panel — Preact diffs against the live DOM.</li>
+      <li>Click any kick/snare/hat cell to toggle that step; <b>Randomize melody</b> picks fresh notes from the current <code>(cljrs.music/scale ROOT SCALE)</code> using a deterministic LCG (no <code>rand</code> in cljrs yet). The kick/snare/hat randomize buttons each have their own density default.</li>
       <li>Web Audio scheduling: a setInterval-driven lookahead walks the next ~100 ms of steps and queues drum hits / oscillator notes with <code>audioCtx.currentTime</code>, the standard <a href="https://web.dev/audio-scheduling/">Chris Wilson scheduling pattern</a>. The cljrs interpreter is fast enough for per-frame logic but sample-accurate timing belongs in the audio thread.</li>
-      <li>The grid you see is a <em>view</em> of the Clojure data, not a backing store — there's no checkbox state in JS, only what the source defines.</li>
+      <li>The playhead column is just <code>(reset! STEP n)</code> from JS once per audio step — cljrs.ui re-renders to highlight the current column.</li>
     </ul>
   </main>
   <script type="module">
     import { mountChrome, loadWasm, makeEditor, attachAltDragScrub, loadMonaco, attachShareLink } from "./_layout.js";
+    import "./_ui.js";
     mountChrome();
 
-    const INITIAL_SOURCE = `;; ============================================================
-;; Step sequencer — 16 steps × 4 tracks. Edits apply on a short
-;; debounce; the JS scheduler picks up new patterns at the next step.
-;;   hold Alt (or Ctrl) and drag any number to scrub it live
-;; ============================================================
-
-(def BPM 120)
-
-;; --- drum patterns (1 = hit, 0 = rest) ---
-(def KICK   [1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0])
-(def SNARE  [0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 0])
-(def HAT    [1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0])
-
-;; --- melody — indices into a scale from cljrs.music ---
-;; Try swapping :minor for :dorian, :pentatonic, :blues …
-(def MELODY (let [scl (cljrs.music/scale 60 :minor)
-                  pat [0 2 4 5 7 4 2 0 0 2 4 7 9 7 5 4]]
-              (mapv (fn [i] (nth scl (mod i (count scl)))) pat)))
-
-;; The JS side pulls each pattern with eval_floats. Order is a
-;; contract with sequencer.html — keep names + counts stable.
-(defn bpm [] [BPM])
-(defn kick   [] KICK)
-(defn snare  [] SNARE)
-(defn hat    [] HAT)
-(defn melody [] MELODY)
-`;
-
     // --- elements --------------------------------------------------------
-    const gridEl = document.getElementById("sq-grid");
-    const melRowEl = document.getElementById("sq-mel-row");
     const overlay = document.getElementById("sq-overlay");
     const status = document.getElementById("sq-status");
     const playBtn = document.getElementById("sq-play");
@@ -206,7 +203,8 @@
     let analyser = null;
     let playing = false;
 
-    // Score caches (refreshed on every applySource).
+    // Score caches (refreshed every applySource and at the start of each
+    // step so live edits / cell toggles take effect immediately).
     let bpm = 120;
     const STEPS = 16;
     let kick   = new Array(STEPS).fill(0);
@@ -217,7 +215,6 @@
     // Scheduler state.
     let nextStepTime = 0;       // audio-clock seconds
     let currentStep  = 0;       // 0..STEPS-1
-    let displayStep  = -1;      // last step we lit on the grid
     let schedulerHandle = null;
     const LOOKAHEAD_S = 0.1;    // schedule this far ahead
     const TICK_MS     = 25;     // interval timer cadence
@@ -225,67 +222,6 @@
     function setStatus(msg, cls) {
       status.className = cls ? `sq-status ${cls}` : "sq-status";
       status.textContent = msg;
-    }
-
-    // --- grid view -------------------------------------------------------
-    // Build a fresh grid every applySource — cheap, and the source is
-    // the single source of truth.
-    const TRACK_NAMES = ["kick", "snare", "hat"];
-    function trackVec(name) {
-      if (name === "kick")  return kick;
-      if (name === "snare") return snare;
-      if (name === "hat")   return hat;
-      return [];
-    }
-
-    function midiToName(n) {
-      const NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
-      const oct = Math.floor(n / 12) - 1;
-      return NAMES[((n % 12) + 12) % 12] + oct;
-    }
-
-    function rebuildGrid() {
-      gridEl.innerHTML = "";
-      for (const t of TRACK_NAMES) {
-        const lab = document.createElement("div");
-        lab.className = "sq-label";
-        lab.textContent = t;
-        gridEl.appendChild(lab);
-        const vec = trackVec(t);
-        for (let i = 0; i < STEPS; i++) {
-          const cell = document.createElement("div");
-          cell.className = "sq-cell" + (vec[i] ? " on" : "")
-                         + (i % 4 === 0 ? " beat" : "");
-          cell.dataset.step = i;
-          cell.dataset.track = t;
-          gridEl.appendChild(cell);
-        }
-      }
-
-      melRowEl.innerHTML = "";
-      const lab = document.createElement("div");
-      lab.className = "sq-label";
-      lab.textContent = "melody";
-      melRowEl.appendChild(lab);
-      for (let i = 0; i < STEPS; i++) {
-        const c = document.createElement("div");
-        c.className = "sq-mel-cell";
-        c.textContent = midiToName(melody[i] | 0);
-        c.dataset.step = i;
-        c.dataset.track = "melody";
-        melRowEl.appendChild(c);
-      }
-      displayStep = -1; // force playhead repaint
-    }
-
-    function paintPlayhead(step) {
-      if (step === displayStep) return;
-      gridEl.querySelectorAll(".sq-cell.head").forEach(n => n.classList.remove("head"));
-      melRowEl.querySelectorAll(".sq-mel-cell.head").forEach(n => n.classList.remove("head"));
-      gridEl.querySelectorAll(`.sq-cell[data-step="${step}"]`).forEach(n => n.classList.add("head"));
-      const m = melRowEl.querySelector(`.sq-mel-cell[data-step="${step}"]`);
-      if (m) m.classList.add("head");
-      displayStep = step;
     }
 
     // --- pull patterns from cljrs ---------------------------------------
@@ -310,19 +246,37 @@
     function applySource(src) {
       if (!repl) return false;
       setStatus("…");
+      // Reset env so def re-binds atoms to source values on every apply.
+      repl.reset();
       const result = repl.eval(src);
       if (result.startsWith("read error") || result.startsWith("eval error")) {
         setStatus(result, "err");
+        return false;
+      }
+      // Re-mount the cljrs.ui tree.
+      const r2 = repl.eval("(boot)");
+      if (typeof r2 === "string" &&
+          (r2.startsWith("read error") || r2.startsWith("eval error"))) {
+        setStatus(r2, "err");
         return false;
       }
       if (!readScore()) {
         setStatus("score read failed", "err");
         return false;
       }
-      rebuildGrid();
       updateOverlay();
       setStatus("applied.", "ok");
       return true;
+    }
+
+    function pushStepToCljrs(step) {
+      if (!repl) return;
+      // Cheap: a single int reset! through eval. cljrs.ui's render!
+      // is invoked by the ui-tree's @STEP read on next mount, so we
+      // re-mount explicitly via (boot) only when the step changes.
+      try {
+        repl.eval(`(do (reset! sequencer/STEP ${step|0}) (sequencer/render!))`);
+      } catch (_) { /* ignore — surfaced elsewhere */ }
     }
 
     function updateOverlay() {
@@ -331,11 +285,9 @@
     }
 
     // --- audio graph + scheduling ---------------------------------------
-    // Standard Chris Wilson "lookahead scheduler":
-    //   a setInterval ticks at TICK_MS and walks every step whose
-    //   start time is within the next LOOKAHEAD_S, queuing it on the
-    //   audio clock. The audio clock is what's actually heard; the JS
-    //   timer only has to be correct on average.
+    // Standard Chris Wilson "lookahead scheduler": setInterval ticks at
+    // TICK_MS and walks every step whose start time is within the next
+    // LOOKAHEAD_S, queuing it on the audio clock.
     function ensureAudio() {
       if (audio) return audio;
       audio = new (window.AudioContext || window.webkitAudioContext)();
@@ -362,7 +314,6 @@
     }
 
     function scheduleSnare(t) {
-      // Noise burst through bandpass + body sine.
       const sr = audio.sampleRate;
       const buf = audio.createBuffer(1, sr * 0.25, sr);
       const d = buf.getChannelData(0);
@@ -424,15 +375,19 @@
       if (hat[stepIdx])   scheduleHat(t);
       const m = melody[stepIdx] | 0;
       if (m > 0) scheduleMelodyNote(t, m);
-      // Schedule a UI tick so the playhead lights up right when the
-      // audio fires. We use setTimeout offset by audio-vs-wallclock.
+      // UI playhead: tell cljrs the current step right when the audio
+      // fires. cljrs.ui re-renders the highlight column.
       const delayMs = Math.max(0, (t - audio.currentTime) * 1000);
-      setTimeout(() => paintPlayhead(stepIdx), delayMs);
+      setTimeout(() => pushStepToCljrs(stepIdx), delayMs);
     }
 
     function schedulerTick() {
       const stepDur = 60.0 / bpm / 4; // 16th note in seconds
       while (nextStepTime < audio.currentTime + LOOKAHEAD_S) {
+        // Refresh the score at the top of every bar so cell toggles
+        // and Randomize clicks reach the audio path within at most
+        // one bar — cheaper than re-evaling every tick.
+        if (currentStep === 0) readScore();
         scheduleStep(currentStep, nextStepTime);
         nextStepTime += stepDur;
         currentStep = (currentStep + 1) % STEPS;
@@ -457,7 +412,7 @@
       }
       playing = false;
       playBtn.textContent = "Start";
-      paintPlayhead(-1);
+      pushStepToCljrs(-1);
       updateOverlay();
     }
 
@@ -489,10 +444,13 @@
 
     // --- boot ------------------------------------------------------------
     (async () => {
+      const SRC_URL = "./sequencer.cljrs";
+      const initialSource = await (await fetch(SRC_URL)).text();
+
       const mod = await loadWasm();
       repl = new mod.Repl();
       editor = await makeEditor(document.getElementById("sq-editor"), {
-        value: INITIAL_SOURCE,
+        value: initialSource,
         onApply: applySource,
         vimToggleEl: document.getElementById("sq-vim-toggle"),
         vimStatusEl: document.getElementById("sq-vim-status"),
@@ -501,7 +459,7 @@
       const monaco = await loadMonaco();
       attachAltDragScrub(editor, monaco);
       attachShareLink(editor);
-      applySource(INITIAL_SOURCE);
+      applySource(initialSource);
       requestAnimationFrame(drawMeter);
     })();
   </script>
