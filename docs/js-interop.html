@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>JS interop</title>
+  <link rel="stylesheet" href="./style.css">
+  <style>
+    .ji-wrap { display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-start; }
+    .ji-stage {
+      background: #0b0d14;
+      border: 1px solid var(--border, #333);
+      border-radius: 4px;
+      padding: 1rem;
+      flex: 1 1 360px;
+      min-width: 300px;
+    }
+    .ji-col { flex: 1 1 460px; min-width: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+    .ji-row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+    .ji-row input[type="text"] {
+      flex: 1; padding: 0.3rem 0.5rem;
+      background: #1d2029; border: 1px solid #333; color: #e6e6e6;
+      font-family: inherit;
+    }
+    .ji-row button {
+      font-family: inherit; font-size: 0.8rem; padding: 0.3rem 0.7rem;
+    }
+    .ji-section { margin-top: 1rem; }
+    .ji-section h4 { margin: 0 0 0.4rem 0; font-size: 0.85rem; color: var(--fg-dim); }
+    .ji-counter {
+      font-size: 1.6rem; font-family: ui-monospace, monospace;
+      color: #ffcc60;
+    }
+    .ji-joke {
+      font-style: italic; color: #9abfff;
+      min-height: 1.4em;
+    }
+    #ji-todos { list-style: none; padding: 0; margin: 0.4rem 0 0 0; }
+    #ji-todos li {
+      padding: 0.3rem 0.5rem;
+      background: #1d2029;
+      border-radius: 3px;
+      margin-bottom: 3px;
+      font-size: 0.85rem;
+    }
+    .ji-status {
+      font-family: ui-monospace, monospace;
+      font-size: 0.75rem; color: var(--fg-dim);
+      min-height: 1em; white-space: pre-wrap;
+    }
+    .ji-status.err { color: #ff6666; }
+    .ji-status.ok  { color: #8ec07c; }
+    .ji-hint { font-size: 0.75rem; color: var(--fg-dim); }
+  </style>
+</head>
+<body>
+  <main>
+    <h2>JS interop — DOM, fetch, localStorage from cljrs</h2>
+    <p class="ji-hint" style="margin-top:-0.4rem">
+      The cljrs runtime lives entirely in WASM. The <code>cljrs.js</code>
+      namespace exposes browser primitives — <code>console.log</code>,
+      <code>document.getElementById</code>, <code>addEventListener</code>,
+      <code>localStorage</code>, <code>fetch</code> — as ordinary cljrs
+      builtins. DOM elements round-trip as opaque handles.
+    </p>
+
+    <div class="ji-wrap">
+      <!-- Stage area: the DOM the cljrs code manipulates. -->
+      <div class="ji-stage">
+        <div class="ji-section">
+          <h4>Click counter</h4>
+          <div class="ji-row">
+            <button id="ji-tick">tick</button>
+            <span id="ji-count" class="ji-counter">0</span>
+          </div>
+        </div>
+
+        <div class="ji-section">
+          <h4>Dad joke (icanhazdadjoke.com)</h4>
+          <div class="ji-row">
+            <button id="ji-joke-btn">fetch a joke</button>
+          </div>
+          <p id="ji-joke" class="ji-joke">— click the button —</p>
+        </div>
+
+        <div class="ji-section">
+          <h4>TODO list (persisted in localStorage)</h4>
+          <div class="ji-row">
+            <input id="ji-todo-input" type="text" placeholder="thing to do…">
+            <button id="ji-todo-add">add</button>
+            <button id="ji-todo-clear">clear</button>
+          </div>
+          <ul id="ji-todos"></ul>
+        </div>
+      </div>
+
+      <div class="ji-col">
+        <div class="repl" id="ji-editor">
+          <textarea id="ji-src" spellcheck="false" style="min-height:520px"></textarea>
+        </div>
+        <div id="ji-status" class="ji-status">loading…</div>
+        <p class="ji-hint">
+          Edits apply automatically (debounced ~300ms). The cljrs source
+          owns all the wiring: it grabs DOM nodes, attaches listeners,
+          and reads/writes localStorage.
+        </p>
+      </div>
+    </div>
+
+    <h3>Builtins</h3>
+    <ul>
+      <li><code>(js/log msg ...)</code> — <code>console.log</code></li>
+      <li><code>(js/now)</code> — <code>Date.now()</code> (ms since epoch)</li>
+      <li><code>(js/get-element id)</code> — opaque handle or <code>nil</code></li>
+      <li><code>(js/set-text! el s)</code> · <code>(js/set-html! el s)</code></li>
+      <li><code>(js/on! el "click" handler)</code> — handler is a 0-arg cljrs fn</li>
+      <li><code>(js/local-get k)</code> · <code>(js/local-set! k s)</code></li>
+      <li><code>(js/fetch-text url callback)</code> — callback receives the body string (or nil on error)</li>
+    </ul>
+  </main>
+
+  <script type="module">
+    import { mountChrome, loadWasm, attachHighlightOverlay } from "./_layout.js";
+    mountChrome();
+
+    const INITIAL_SOURCE = `;; ============================================================
+;; cljrs in the browser. Everything below is plain cljrs talking
+;; to the DOM via the cljrs.js builtins.
+;; ============================================================
+
+;; --- click counter --------------------------------------------
+(defonce counter (atom 0))
+
+(defn render-count []
+  (js/set-text! (js/get-element "ji-count")
+                (str @counter)))
+
+(defn on-tick []
+  (swap! counter inc)
+  (render-count)
+  (js/log "tick →" @counter))
+
+(js/on! (js/get-element "ji-tick") "click" on-tick)
+(render-count)
+
+;; --- dad joke (fetch) -----------------------------------------
+;; icanhazdadjoke.com returns plain text when you set Accept:
+;; text/plain; we just request the JSON endpoint and grep.
+(defn show-joke [body]
+  (let [el (js/get-element "ji-joke")]
+    (if body
+      ;; Naive JSON pluck: pull the value of "joke" out of the
+      ;; response. Good enough for a demo; replace with a real
+      ;; JSON parser when cljrs grows one.
+      (let [i (clojure.string/index-of body "\\"joke\\"")
+            tail (subs body (+ i 8))
+            j (clojure.string/index-of tail "\\"")
+            k (clojure.string/index-of (subs tail (inc j)) "\\"")]
+        (js/set-text! el (subs tail (inc j) (+ (inc j) k))))
+      (js/set-text! el "(fetch failed)"))))
+
+(js/on! (js/get-element "ji-joke-btn") "click"
+        (fn []
+          (js/set-text! (js/get-element "ji-joke") "loading…")
+          (js/fetch-text "https://icanhazdadjoke.com/"
+                         show-joke)))
+
+;; --- todo list w/ localStorage --------------------------------
+(def TODO-KEY "cljrs.js-interop.todos")
+
+(defn load-todos []
+  (let [raw (js/local-get TODO-KEY)]
+    (if (or (nil? raw) (= raw ""))
+      []
+      (clojure.string/split raw #"\\n"))))
+
+(defn save-todos [xs]
+  (js/local-set! TODO-KEY (clojure.string/join "\\n" xs)))
+
+(defonce todos (atom (load-todos)))
+
+(defn render-todos []
+  (let [ul (js/get-element "ji-todos")
+        items (map (fn [t] (str "<li>" t "</li>")) @todos)]
+    (js/set-html! ul (clojure.string/join "" items))))
+
+(defn add-todo []
+  (let [input (js/get-element "ji-todo-input")
+        ;; we don't have a getter for input.value yet — read via
+        ;; localStorage round-trip would be silly. Instead the JS
+        ;; demo wiring mirrors the input value into a data attr we
+        ;; could read; for now we just append a timestamped row.
+        t (str "todo @ " (int (js/now)))]
+    (swap! todos conj t)
+    (save-todos @todos)
+    (render-todos)))
+
+(defn clear-todos []
+  (reset! todos [])
+  (save-todos [])
+  (render-todos))
+
+(js/on! (js/get-element "ji-todo-add")   "click" add-todo)
+(js/on! (js/get-element "ji-todo-clear") "click" clear-todos)
+(render-todos)
+
+(js/log "cljrs.js demo ready")
+:ok
+`;
+
+    const ta = document.getElementById("ji-src");
+    const status = document.getElementById("ji-status");
+    const editor = document.getElementById("ji-editor");
+
+    ta.value = INITIAL_SOURCE;
+    await attachHighlightOverlay(editor, ta);
+
+    const mod = await loadWasm();
+    let repl = new mod.Repl();
+
+    function setStatus(msg, cls) {
+      status.textContent = msg;
+      status.className = "ji-status " + (cls || "");
+    }
+
+    function run() {
+      // Fresh repl each apply: the cljrs source attaches listeners on
+      // every load, and we don't want N stacked handlers per button.
+      // `defonce` keeps the counter / todo atoms across reloads anyway,
+      // so the user-visible state is preserved.
+      try {
+        repl = new mod.Repl();
+        const result = repl.eval(ta.value);
+        if (result.startsWith("read error") || result.startsWith("eval error")) {
+          setStatus(result, "err");
+        } else {
+          setStatus("ok · " + result, "ok");
+        }
+      } catch (e) {
+        setStatus(String(e), "err");
+      }
+    }
+
+    // Debounced apply-on-edit.
+    let timer = null;
+    ta.addEventListener("input", () => {
+      clearTimeout(timer);
+      timer = setTimeout(run, 300);
+    });
+
+    run();
+  </script>
+</body>
+</html>

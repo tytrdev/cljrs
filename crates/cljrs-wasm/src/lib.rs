@@ -11,6 +11,8 @@
 use cljrs::{builtins, env::Env, eval, reader};
 use wasm_bindgen::prelude::*;
 
+mod js_bridge;
+
 #[wasm_bindgen(start)]
 pub fn _start() {
     console_error_panic_hook::set_once();
@@ -23,6 +25,8 @@ pub fn eval_source(src: &str) -> String {
     let env = Env::new();
     builtins::install(&env);
     cljrs_physics::install(&env);
+    cljrs_ml::install(&env);
+    js_bridge::install(&env);
     eval_in(&env, src)
 }
 
@@ -40,6 +44,8 @@ impl Repl {
         let env = Env::new();
         builtins::install(&env);
         cljrs_physics::install(&env);
+        cljrs_ml::install(&env);
+        js_bridge::install(&env);
         Repl { env }
     }
 
@@ -175,6 +181,8 @@ impl Repl {
         self.env = Env::new();
         builtins::install(&self.env);
         cljrs_physics::install(&self.env);
+        cljrs_ml::install(&self.env);
+        js_bridge::install(&self.env);
     }
 }
 

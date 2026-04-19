@@ -14,8 +14,27 @@ crate-type = ["cdylib"]
 [dependencies]
 cljrs = { path = "../.." }
 cljrs-physics = { path = "../cljrs-physics" }
+cljrs-ml = { path = "../cljrs-ml" }
 wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
 console_error_panic_hook = "0.1"
+
+[dependencies.web-sys]
+version = "0.3"
+features = [
+  "Document",
+  "Window",
+  "Element",
+  "HtmlElement",
+  "Event",
+  "EventTarget",
+  "Storage",
+  "console",
+  "Request",
+  "RequestInit",
+  "Response",
+]
 
 [profile.release]
 opt-level = "s"
