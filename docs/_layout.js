@@ -503,6 +503,46 @@ export function attachAltDragScrub(editor, monaco) {
   });
 }
 
+// --- Library docs sidebar -------------------------------------------
+// Each lib-*.html page can call mountLibrarySidebar() to inject a
+// sticky left-rail nav listing every library and highlighting the
+// current page.
+
+const LIBRARY_PAGES = [
+  { href: "./library.html",  label: "Overview" },
+  { href: "./lib-core.html", label: "Core" },
+  { href: "./lib-ui.html",   label: "UI" },
+  { href: "./lib-shader.html", label: "Shader" },
+  { href: "./lib-ml.html",   label: "ML" },
+  { href: "./lib-music.html",label: "Music" },
+  { href: "./lib-js.html",   label: "JS" },
+  { href: "./lib-rust.html", label: "Rust interop" },
+];
+
+export function mountLibrarySidebar() {
+  // Wrap <main> in a flex layout if not already wrapped.
+  const main = document.querySelector("main");
+  if (!main || main.parentElement?.classList?.contains("lib-layout")) return;
+  const wrap = document.createElement("div");
+  wrap.className = "lib-layout";
+  main.parentNode.insertBefore(wrap, main);
+  const aside = document.createElement("aside");
+  aside.className = "lib-sidebar";
+  const here = basename(location.pathname);
+  aside.innerHTML = `
+    <h4>Libraries</h4>
+    <ul>
+      ${LIBRARY_PAGES.map(p =>
+        `<li><a href="${p.href}" class="${
+          basename(p.href) === here ? "active" : ""
+        }">${p.label}</a></li>`
+      ).join("")}
+    </ul>
+  `;
+  wrap.appendChild(aside);
+  wrap.appendChild(main);
+}
+
 // --- Share links via URL hash ----------------------------------------
 // Each editor page can call `attachShareLink(editor)` to:
 //   1. on load, if the URL hash contains `#src=<base64url>`, swap the

@@ -125,9 +125,10 @@
     </div>
   </main>
   <script type="module">
-    import { mountChrome } from "./_layout.js";
+    import { mountChrome, mountLibrarySidebar } from "./_layout.js";
     import { wireAll } from "./_runnable.js";
     mountChrome("./lib-ml.html");
+    mountLibrarySidebar();
     wireAll();
   </script>
 </body>

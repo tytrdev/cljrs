@@ -198,6 +198,89 @@ footer {
   font-weight: 500;
 }
 .repl-toolbar button:hover { opacity: 0.85; }
+/* Inline runnable code block on the library docs pages. Same vibe as
+   .repl above — dark editor surface, button at the bottom — but the
+   library pages instantiate them outside of an explicit `<div class=
+   "repl">` wrapper, so we re-style them directly. */
+.run-example {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  margin: 1rem 0;
+  background: var(--bg-elev);
+}
+.run-example textarea {
+  display: block;
+  width: 100%;
+  min-height: 120px;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0.8rem;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  line-height: 1.45;
+  tab-size: 2;
+  white-space: pre;
+  resize: vertical;
+  outline: none;
+}
+.run-example .repl-toolbar {
+  display: flex; justify-content: flex-end; align-items: center;
+  padding: 0.4rem 0.8rem;
+  border-top: 1px solid var(--border);
+  background: #12151b;
+}
+.run-example .repl-toolbar button {
+  background: var(--accent);
+  color: #0b1015;
+  border: none; padding: 0.3rem 0.9rem;
+  font-size: 0.85rem; border-radius: 4px;
+  cursor: pointer; font-weight: 500;
+}
+.run-example .repl-out {
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  padding: 0.5rem 0.8rem;
+  background: #0b0d14;
+  color: var(--fg-dim);
+  border-top: 1px solid var(--border);
+  white-space: pre-wrap;
+  min-height: 1.4em;
+}
+.run-example .repl-out.err { color: var(--danger); }
+
+/* Library docs sidebar layout. Used by lib-*.html via mountLibrarySidebar. */
+.lib-layout { display: flex; gap: 1.5rem; align-items: flex-start; }
+.lib-layout main { flex: 1 1 0; min-width: 0; }
+.lib-sidebar {
+  flex: 0 0 200px; position: sticky; top: 1rem;
+  font-size: 0.85rem;
+  border-right: 1px solid var(--border);
+  padding-right: 1rem;
+}
+.lib-sidebar h4 {
+  margin: 0 0 0.4rem 0; font-size: 0.7rem;
+  text-transform: uppercase; color: var(--fg-dim);
+  letter-spacing: 0.06em;
+}
+.lib-sidebar ul { list-style: none; padding: 0; margin: 0 0 1rem 0; }
+.lib-sidebar li { padding: 0.18rem 0; }
+.lib-sidebar a { color: var(--fg-dim); text-decoration: none; }
+.lib-sidebar a:hover { color: var(--fg); }
+.lib-sidebar a.active {
+  color: var(--accent); font-weight: 500;
+}
+@media (max-width: 720px) {
+  .lib-layout { flex-direction: column; }
+  .lib-sidebar { position: static; border-right: none; padding-right: 0;
+    border-bottom: 1px solid var(--border); padding-bottom: 0.6rem;
+    width: 100%;
+  }
+}
+
 .repl-out {
   font-family: var(--mono);
   font-size: 0.85rem;
