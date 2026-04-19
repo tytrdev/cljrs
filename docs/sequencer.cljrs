@@ -54,7 +54,9 @@
 ;; Recipes constants. Keeps a per-call seed in an atom that we tick
 ;; with the wall-clock'ish counter every Randomize click.
 
-(def __rng-seed (atom 1))
+;; defonce so repeated applySource (debounced auto-apply on edit, plus
+;; the initial boot) doesn't snap the seed back to 1 between clicks.
+(defonce __rng-seed (atom 1))
 
 (defn __rng-next []
   (let [s @__rng-seed
@@ -80,10 +82,12 @@
         (range 16)))
 
 ;; Mix the existing seed forward so successive clicks of the same
-;; button give different patterns. We don't have a wall-clock, but
-;; tapping the LCG once before reseeding is enough entropy.
+;; button give different patterns. Uses js/now as a wall-clock kicker
+;; so even if the env got reset between clicks (re-apply, repl.reset)
+;; successive clicks still produce visibly different patterns.
 (defn __mix-seed! [salt]
-  (sequencer/__reseed! (+ salt (sequencer/__rng-next))))
+  (let [t (int (js/now))]
+    (sequencer/__reseed! (+ salt t (sequencer/__rng-next)))))
 
 (defn randomize-kick! []
   (sequencer/__mix-seed! 1)
