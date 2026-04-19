@@ -118,6 +118,7 @@
             <label style="font-size:0.75rem;color:var(--fg-dim)">
               <input type="checkbox" id="ml-vim-toggle"> vim mode
             </label>
+              <button data-share style="font-size:0.75rem;padding:0.25rem 0.7rem;margin-left:0.5rem">Share</button>
           </div>
         </div>
         <div id="ml-status" class="ml-status"></div>
@@ -149,7 +150,7 @@
     </p>
   </main>
   <script type="module">
-    import { mountChrome, loadWasm, makeEditor, attachAltDragScrub, loadMonaco } from "./_layout.js";
+    import { mountChrome, loadWasm, makeEditor, attachAltDragScrub, loadMonaco, attachShareLink } from "./_layout.js";
     mountChrome();
 
     // ============================================================
@@ -939,6 +940,7 @@
       });
       const monaco = await loadMonaco();
       attachAltDragScrub(editor, monaco);
+      attachShareLink(editor);
       // mark first tab active
       document.querySelector('#ml-tabs button[data-tab="fit"]').classList.add("active");
       applySource(SOURCES.fit);

@@ -14,6 +14,7 @@ const NAV = [
   { href: "./ml.html", label: "ML" },
   { href: "./js-interop.html", label: "JS" },
   { href: "./ui-demo.html", label: "UI" },
+  { href: "./library.html", label: "Library" },
   { href: "./benchmarks.html", label: "Benchmarks" },
   { href: "./repl.html", label: "REPL" },
   { href: "./roadmap.html", label: "Roadmap" },
@@ -500,6 +501,52 @@ export function attachAltDragScrub(editor, monaco) {
   window.addEventListener("blur", () => {
     if (active) { document.body.style.cursor = ""; active = null; }
   });
+}
+
+// --- Share links via URL hash ----------------------------------------
+// Each editor page can call `attachShareLink(editor)` to:
+//   1. on load, if the URL hash contains `#src=<base64url>`, swap the
+//      editor's contents to the decoded source. Auto-applies via the
+//      editor's onApply hook.
+//   2. wire every `[data-share]` button on the page to copy a fresh
+//      share URL (origin + pathname + #src=encoded) to the clipboard,
+//      with a tiny visual confirm.
+function _b64urlEncode(s) {
+  return btoa(unescape(encodeURIComponent(s)))
+    .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function _b64urlDecode(s) {
+  s = s.replace(/-/g, "+").replace(/_/g, "/");
+  while (s.length % 4) s += "=";
+  return decodeURIComponent(escape(atob(s)));
+}
+export function attachShareLink(editor) {
+  // Hydrate from hash on load.
+  try {
+    const m = (window.location.hash || "").match(/[#&]src=([^&]+)/);
+    if (m && editor) {
+      const decoded = _b64urlDecode(m[1]);
+      if (decoded) editor.setValue(decoded);
+    }
+  } catch (e) {
+    console.warn("share-link: bad #src= payload —", e);
+  }
+  // Wire every share button on the page.
+  for (const btn of document.querySelectorAll("[data-share]")) {
+    btn.addEventListener("click", async () => {
+      const src = editor.getValue();
+      const url =
+        `${location.origin}${location.pathname}#src=${_b64urlEncode(src)}`;
+      try {
+        await navigator.clipboard.writeText(url);
+        const orig = btn.textContent;
+        btn.textContent = "✓ link copied";
+        setTimeout(() => (btn.textContent = orig), 1500);
+      } catch {
+        prompt("Copy share link:", url);
+      }
+    });
+  }
 }
 
 let wasmReady = null;

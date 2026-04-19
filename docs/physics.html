@@ -72,6 +72,7 @@
             <label style="font-size:0.75rem;color:var(--fg-dim)">
               <input type="checkbox" id="phys-vim-toggle"> vim mode
             </label>
+              <button data-share style="font-size:0.75rem;padding:0.25rem 0.7rem;margin-left:0.5rem">Share</button>
           </div>
         </div>
         <div id="phys-status" class="phys-status"></div>
@@ -79,7 +80,7 @@
     </div>
   </main>
   <script type="module">
-    import { mountChrome, loadWasm, makeEditor, attachAltDragScrub, loadMonaco } from "./_layout.js";
+    import { mountChrome, loadWasm, makeEditor, attachAltDragScrub, loadMonaco, attachShareLink } from "./_layout.js";
     mountChrome();
 
     // --- demo definitions ------------------------------------------------
@@ -579,6 +580,7 @@
       });
       const monaco = await loadMonaco();
       attachAltDragScrub(editor, monaco);
+      attachShareLink(editor);
       select.value = "2d-boxes";
       loadDemo("2d-boxes");
       requestAnimationFrame(tick);

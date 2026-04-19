@@ -59,6 +59,7 @@
           <label style="font-size:0.75rem;color:var(--fg-dim);margin-right:0.5rem">
             <input type="checkbox" id="ui-vim-toggle"> vim mode
           </label>
+              <button data-share style="font-size:0.75rem;padding:0.25rem 0.7rem;margin-left:0.5rem">Share</button>
           <button id="ui-apply">Force apply</button>
         </span>
       </div>
@@ -66,7 +67,7 @@
   </main>
 
   <script type="module">
-    import { mountChrome, loadWasm, makeEditor } from "./_layout.js";
+    import { mountChrome, loadWasm, makeEditor, attachShareLink } from "./_layout.js";
     import "./_ui.js";
 
     mountChrome("./ui-demo.html");
@@ -112,6 +113,7 @@
       vimStatusEl: document.getElementById("ui-vim-status"),
       vimKey: "ui-demo",
     });
+    attachShareLink(editor);
 
     document.getElementById("ui-apply").addEventListener("click", () => {
       apply(editor.getValue());
