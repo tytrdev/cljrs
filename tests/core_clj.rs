@@ -161,3 +161,101 @@ fn prn_str_returns_string() {
         _ => panic!("expected string, got {:?}", v),
     }
 }
+
+// ---------- swap-vals! / reset-vals! -------------------------------------
+
+#[test]
+fn swap_vals_returns_old_and_new() {
+    let src = r#"
+      (def a (atom 1))
+      (let [r (swap-vals! a inc)]
+        [r @a])
+    "#;
+    assert_eq!(run(src), Value::Vector(imbl::Vector::from_iter([
+        Value::Vector(imbl::Vector::from_iter([Value::Int(1), Value::Int(2)])),
+        Value::Int(2),
+    ])));
+}
+
+#[test]
+fn swap_vals_with_extra_args() {
+    let src = r#"
+      (def a (atom 10))
+      (swap-vals! a + 5)
+    "#;
+    assert_eq!(run(src), Value::Vector(imbl::Vector::from_iter([
+        Value::Int(10), Value::Int(15),
+    ])));
+}
+
+#[test]
+fn swap_vals_with_two_extra_args() {
+    let src = r#"
+      (def a (atom 1))
+      (swap-vals! a (fn [v x y] (+ v x y)) 10 100)
+    "#;
+    assert_eq!(run(src), Value::Vector(imbl::Vector::from_iter([
+        Value::Int(1), Value::Int(111),
+    ])));
+}
+
+#[test]
+fn swap_vals_variadic_via_apply() {
+    let src = r#"
+      (def a (atom 0))
+      (swap-vals! a (fn [v & xs] (apply + v xs)) 1 2 3 4 5)
+    "#;
+    assert_eq!(run(src), Value::Vector(imbl::Vector::from_iter([
+        Value::Int(0), Value::Int(15),
+    ])));
+}
+
+#[test]
+fn swap_vals_on_collection() {
+    let src = r#"
+      (def a (atom [1 2 3]))
+      (swap-vals! a conj 4)
+    "#;
+    assert_eq!(run(src), Value::Vector(imbl::Vector::from_iter([
+        Value::Vector(imbl::Vector::from_iter([Value::Int(1), Value::Int(2), Value::Int(3)])),
+        Value::Vector(imbl::Vector::from_iter([Value::Int(1), Value::Int(2), Value::Int(3), Value::Int(4)])),
+    ])));
+}
+
+#[test]
+fn reset_vals_returns_old_and_new() {
+    let src = r#"
+      (def a (atom :first))
+      (let [r (reset-vals! a :second)]
+        [r @a])
+    "#;
+    assert_eq!(run(src), Value::Vector(imbl::Vector::from_iter([
+        Value::Vector(imbl::Vector::from_iter([
+            Value::Keyword("first".into()),
+            Value::Keyword("second".into()),
+        ])),
+        Value::Keyword("second".into()),
+    ])));
+}
+
+#[test]
+fn reset_vals_first_call_old_is_initial() {
+    let src = r#"
+      (def a (atom 99))
+      (reset-vals! a 0)
+    "#;
+    assert_eq!(run(src), Value::Vector(imbl::Vector::from_iter([
+        Value::Int(99), Value::Int(0),
+    ])));
+}
+
+#[test]
+fn reset_vals_to_nil() {
+    let src = r#"
+      (def a (atom :x))
+      (reset-vals! a nil)
+    "#;
+    assert_eq!(run(src), Value::Vector(imbl::Vector::from_iter([
+        Value::Keyword("x".into()), Value::Nil,
+    ])));
+}

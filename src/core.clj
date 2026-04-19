@@ -832,3 +832,265 @@
 
 (defn prn-str [& args]
   (str (apply pr-str args) "\n"))
+
+;; ---------- control flow: case / when-first / while / time / halt-when ---
+
+;; case — single-dispatch on compile-time literal keys. Unlike Clojure's
+;; constant-time hash-table form, we expand to a chain of `=` tests; for
+;; the small clause counts in real code this is plenty fast and keeps the
+;; macro implementable without compile-time interning. A trailing odd
+;; argument is the default; if no clauses match and there's no default,
+;; an IllegalArgumentException-style ex-info is thrown — matching JVM
+;; Clojure's "No matching clause" semantics.
+;;
+;; Key forms:
+;;   (case x  k    result ...)
+;;   (case x (k1 k2) result ...)   ;; list-of-keys = match any
+;; Keys are NEVER evaluated — they're matched as data via (= x 'k).
+(defn case-emit [g clauses]
+  (cond
+    (empty? clauses)
+    ;; NB: syntax-quote here intentionally avoids a `{:value ~g}` map
+    ;; literal — the reader doesn't recurse unquotes through map keys.
+    `(throw (ex-info (str "No matching clause: " ~g) (hash-map :value ~g)))
+
+    (empty? (rest clauses))
+    ;; lone trailing clause = default value
+    (first clauses)
+
+    :else
+    (let [k    (first clauses)
+          v    (first (rest clauses))
+          more (rest (rest clauses))
+          test (if (list? k)
+                 ;; (k1 k2 k3) — match any
+                 (cons 'or (map (fn [ki] `(= ~g (quote ~ki))) k))
+                 `(= ~g (quote ~k)))]
+      `(if ~test ~v ~(case-emit g (vec more))))))
+
+(defmacro case
+  [e & clauses]
+  (let [g (gensym "case_")]
+    `(let [~g ~e]
+       ~(case-emit g (vec clauses)))))
+
+;; when-first — evaluate body with x bound to (first coll) when the
+;; coll is non-empty. Uses `seq` (not `empty?`) so it works with lazy
+;; seqs and treats `nil` as empty.
+(defmacro when-first
+  [binding & body]
+  (let [name (first binding)
+        coll (first (rest binding))]
+    `(let [s# (seq ~coll)]
+       (when s#
+         (let [~name (first s#)]
+           ~@body)))))
+
+;; while — loop body while test is truthy. Returns nil.
+(defmacro while
+  [test & body]
+  `(loop []
+     (when ~test
+       ~@body
+       (recur))))
+
+;; time — eval expr, print "Elapsed time: N msecs" and return its value.
+;; Uses (time-ms) host builtin; matches Clojure's stderr-ish format
+;; closely enough for benchmarking.
+(defmacro time
+  [expr]
+  `(let [start# (time-ms)
+         ret#   ~expr
+         end#   (time-ms)]
+     (println (str "\"Elapsed time: " (- end# start#) " msecs\""))
+     ret#))
+
+;; halt-when — transducer that halts reduction the first time pred is
+;; true. Default behaviour: result becomes the offending input. With a
+;; ret-fn, result becomes (ret-fn current-result input).
+;;
+;; To match Clojure's semantics, the halt value is wrapped in a special
+;; sentinel map {::halt v} when handed back through (reduced ...). The
+;; completion arity unwraps that sentinel and returns the bare value
+;; (without re-running rf's completion), so downstream rf state never
+;; sees the halt value as a legitimate result.
+(def __halt-key ::halt-when-sentinel)
+
+(defn halt-when
+  ([pred] (halt-when pred nil))
+  ([pred ret-fn]
+   (fn [rf]
+     (fn
+       ([] (rf))
+       ([result]
+        (if (and (map? result) (contains? result __halt-key))
+          (get result __halt-key)
+          (rf result)))
+       ([result input]
+        (if (pred input)
+          (reduced (hash-map __halt-key
+                             (if (nil? ret-fn) input (ret-fn result input))))
+          (rf result input)))))))
+
+;; ---------- atoms: swap-vals! / reset-vals! ------------------------------
+;; Both return [old-value new-value]. Non-atomic w.r.t. concurrent
+;; writers — matches the existing swap!/reset! semantics in cljrs.
+
+(defn swap-vals!
+  ([a f]
+   (let [old @a
+         new (f old)]
+     (reset! a new)
+     [old new]))
+  ([a f x]
+   (let [old @a
+         new (f old x)]
+     (reset! a new)
+     [old new]))
+  ([a f x y]
+   (let [old @a
+         new (f old x y)]
+     (reset! a new)
+     [old new]))
+  ([a f x y & more]
+   (let [old @a
+         new (apply f old x y more)]
+     (reset! a new)
+     [old new])))
+
+(defn reset-vals! [a newval]
+  (let [old @a]
+    (reset! a newval)
+    [old newval]))
+
+;; ---------- hierarchies --------------------------------------------------
+;; A hierarchy is a map with three keys, each itself a map from tag to
+;; the set of related tags:
+;;   :parents      tag -> direct parents
+;;   :ancestors    tag -> transitive ancestors (parents + their ancestors)
+;;   :descendants  tag -> transitive descendants
+;;
+;; Tags are typically keywords or symbols, but anything `=`-comparable
+;; works. Numeric/Class isa? (e.g. (isa? 42 Number)) is JVM-specific and
+;; intentionally NOT supported here.
+;;
+;; The 1-arity forms read/write a global hierarchy stored in an atom so
+;; (derive ::child ::parent) mutates shared state, mirroring Clojure.
+
+(defn make-hierarchy []
+  {:parents {} :ancestors {} :descendants {}})
+
+(def __global-hierarchy (atom (make-hierarchy)))
+
+(defn __h-get-set [h k tag]
+  (or (get (get h k) tag) #{}))
+
+(defn __add-rel [m k v]
+  ;; m is tag->set; ensure (m k) contains v (and exists).
+  (let [cur (or (get m k) #{})]
+    (assoc m k (conj cur v))))
+
+(defn __union-into [m k vs]
+  ;; m is tag->set; union vs into (m k).
+  (let [cur (or (get m k) #{})]
+    (assoc m k (reduce conj cur vs))))
+
+(defn __remove-rel [m k v]
+  (let [cur (or (get m k) #{})
+        nxt (disj cur v)]
+    (if (empty? nxt)
+      (dissoc m k)
+      (assoc m k nxt))))
+
+;; derive — 2-arity mutates the global hierarchy; 3-arity returns an
+;; updated hierarchy. Self-derivation throws; cyclic derivations throw.
+(defn derive
+  ([tag parent]
+   (swap! __global-hierarchy (fn [h] (derive h tag parent)))
+   nil)
+  ([h tag parent]
+   (cond
+     (= tag parent)
+     (throw (ex-info "tag must not be its own parent" {:tag tag}))
+
+     (contains? (__h-get-set h :ancestors tag) parent)
+     h  ;; already derived
+
+     (or (= tag parent)
+         (contains? (__h-get-set h :ancestors parent) tag))
+     (throw (ex-info "Cyclic derivation" {:tag tag :parent parent}))
+
+     :else
+     (let [parents     (:parents h)
+           ancestors   (:ancestors h)
+           descendants (:descendants h)
+           ;; All ancestors of parent (incl parent itself) become
+           ;; ancestors of tag and of every descendant of tag.
+           parent-and-ancs (conj (__h-get-set h :ancestors parent) parent)
+           tag-and-descs   (conj (__h-get-set h :descendants tag) tag)
+           new-parents     (__add-rel parents tag parent)
+           new-ancestors   (reduce (fn [m d] (__union-into m d parent-and-ancs))
+                                   ancestors
+                                   tag-and-descs)
+           new-descendants (reduce (fn [m a] (__union-into m a tag-and-descs))
+                                   descendants
+                                   parent-and-ancs)]
+       {:parents new-parents
+        :ancestors new-ancestors
+        :descendants new-descendants}))))
+
+(defn underive
+  ([tag parent]
+   (swap! __global-hierarchy (fn [h] (underive h tag parent)))
+   nil)
+  ([h tag parent]
+   (if-not (contains? (__h-get-set h :parents tag) parent)
+     h
+     ;; Rebuild the hierarchy from scratch over the surviving direct
+     ;; parent edges. This is O(edges^2) but trivially correct — and
+     ;; the alternative (subtracting the right ancestor sets in place)
+     ;; is subtle when multiple paths exist.
+     (let [old-parents (:parents h)
+           pruned      (__remove-rel old-parents tag parent)
+           edges       (reduce (fn [acc [child ps]]
+                                 (reduce (fn [a p] (conj a [child p])) acc ps))
+                               []
+                               pruned)]
+       (reduce (fn [hh [c p]] (derive hh c p))
+               (make-hierarchy)
+               edges)))))
+
+(defn parents
+  ([tag] (parents @__global-hierarchy tag))
+  ([h tag]
+   (let [s (get (:parents h) tag)]
+     (when (and s (not (empty? s))) s))))
+
+(defn ancestors
+  ([tag] (ancestors @__global-hierarchy tag))
+  ([h tag]
+   (let [s (get (:ancestors h) tag)]
+     (when (and s (not (empty? s))) s))))
+
+(defn descendants
+  ([tag] (descendants @__global-hierarchy tag))
+  ([h tag]
+   (let [s (get (:descendants h) tag)]
+     (when (and s (not (empty? s))) s))))
+
+(defn isa?
+  ([child parent] (isa? @__global-hierarchy child parent))
+  ([h child parent]
+   (cond
+     (= child parent) true
+
+     (and (vector? child) (vector? parent))
+     (and (= (count child) (count parent))
+          (loop [i 0]
+            (cond
+              (= i (count child)) true
+              (isa? h (get child i) (get parent i)) (recur (+ i 1))
+              :else false)))
+
+     :else
+     (contains? (__h-get-set h :ancestors child) parent))))
