@@ -845,11 +845,16 @@
     const STEP_BUDGET_MS = 16;
     let lastStepMs = 0;
 
+    let warnedSlowStep = false;
     function step() {
       if (!repl || !running) return false;
       const t0 = performance.now();
       const out = repl.call_ints("train-step!", []);
       lastStepMs = performance.now() - t0;
+      if (lastStepMs > 50 && !warnedSlowStep) {
+        warnedSlowStep = true;
+        console.warn(`[ml] slow step on ${activeTab}: ${lastStepMs.toFixed(1)}ms — capping training at ${(TRAIN_CPU_FRACTION*100)|0}% CPU`);
+      }
       if (out.length === 0) {
         const err = repl.eval("(train-step!)");
         reportRuntimeError("train-step!", err);
@@ -905,26 +910,25 @@
       lossX.stroke();
     }
 
-    // Train ticks live on setTimeout so each step is a separate task,
-    // letting the browser run other work (input, paint, GC) between
-    // steps. Render lives on rAF and is independent — viz is throttled
-    // because each call allocates a fresh autograd graph.
+    // Train ticks run on setTimeout with an adaptive backoff: after each
+    // step we wait ~3x the step duration before the next tick, capping
+    // training at ~25% CPU. That keeps the UI responsive even when one
+    // step takes 200ms (tree-walker on heavy showcases).
+    // Render lives on rAF and is independent — viz is throttled because
+    // each call allocates a fresh autograd graph.
     let trainTimer = null;
     let vizFrameCounter = 0;
-    const VIZ_THROTTLE = 4; // run (viz) every Nth rAF
+    const VIZ_THROTTLE = 6; // run (viz) every Nth rAF
+    const TRAIN_CPU_FRACTION = 0.25; // upper bound on UI thread
 
     function trainTick() {
       trainTimer = null;
       if (!running) return;
-      const t0 = performance.now();
-      // Run as many cheap steps as fit in budget, but at least one.
-      let did = step();
-      while (did && performance.now() - t0 < STEP_BUDGET_MS) {
-        did = step();
-      }
-      // setTimeout(0) clamps to ~4ms but yields to the event loop —
-      // exactly what we want.
-      trainTimer = setTimeout(trainTick, 0);
+      step();
+      // Adaptive backoff. With f=0.25, delay = 3*stepMs.
+      const idle = (1 / TRAIN_CPU_FRACTION - 1) * lastStepMs;
+      const delay = Math.max(0, Math.ceil(idle));
+      trainTimer = setTimeout(trainTick, delay);
     }
 
     function startTrain() {
@@ -978,6 +982,7 @@
       if (!repl || !editor) return;
       stopTrain();
       runtimeError = null;
+      warnedSlowStep = false;
       console.time(`[ml] reset+apply ${name}`);
       repl.reset();
       editor.setValue(SOURCES[name]);
