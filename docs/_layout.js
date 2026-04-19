@@ -206,6 +206,161 @@ export async function makeEditor(container, opts = {}) {
   return editor;
 }
 
+/// Wire Alt/Ctrl + mousedown on numbers (drag to scrub) and on
+/// `"#rrggbb"` string literals (click to open a color picker) for a
+/// Monaco editor. The editor's onApply hook handles re-evaluation.
+///
+/// Uses `editor.getTargetAtClientPoint` to find the source position
+/// under the cursor, then scans the line text for a numeric literal
+/// or quoted hex color spanning that column. Edits go through
+/// `editor.executeEdits` so Monaco's undo/redo and change events stay
+/// coherent.
+export function attachAltDragScrub(editor, monaco) {
+  const dom = editor.getDomNode();
+  if (!dom) return;
+
+  // ----- helpers -----
+  const NUM_RE   = /-?\d+(?:\.\d+)?/g;
+  const HEX_RE   = /"#[0-9a-fA-F]{6}"/g;
+  function modOf(e) { return !!(e.altKey || e.ctrlKey); }
+
+  // Find a token (number or quoted hex color) on `line` whose
+  // [start..end) column range contains `col` (1-based, Monaco-style).
+  function findTokenAt(line, col) {
+    HEX_RE.lastIndex = 0;
+    let m;
+    while ((m = HEX_RE.exec(line)) != null) {
+      const s = m.index + 1, e = s + m[0].length; // 1-based cols
+      if (col >= s && col < e) {
+        return { kind: "color", text: m[0], startCol: s, endCol: e };
+      }
+    }
+    NUM_RE.lastIndex = 0;
+    while ((m = NUM_RE.exec(line)) != null) {
+      const s = m.index + 1, e = s + m[0].length;
+      if (col >= s && col < e) {
+        return { kind: "number", text: m[0], startCol: s, endCol: e };
+      }
+    }
+    return null;
+  }
+
+  function parseNumberText(s) {
+    const v = parseFloat(s);
+    if (!Number.isFinite(v)) return null;
+    const dot = s.indexOf(".");
+    const decimals = dot >= 0 ? s.length - dot - 1 : 0;
+    return { value: v, decimals };
+  }
+  function formatNumber(v, decimals) {
+    if (decimals === 0) return String(Math.round(v));
+    return v.toFixed(decimals);
+  }
+
+  // ----- color picker (lazy, shared) -----
+  let colorInput = null;
+  function ensureColorInput() {
+    if (colorInput) return colorInput;
+    colorInput = document.createElement("input");
+    colorInput.type = "color";
+    Object.assign(colorInput.style, {
+      position: "fixed", width: "1px", height: "1px",
+      opacity: "0", pointerEvents: "none",
+    });
+    document.body.appendChild(colorInput);
+    return colorInput;
+  }
+
+  // ----- state -----
+  let active = null; // { startValue, decimals, startX, line, startCol, endCol }
+  let colorCtx = null; // { line, startCol, endCol }
+
+  function replaceRange(line, startCol, endCol, text) {
+    const range = new monaco.Range(line, startCol, line, endCol);
+    editor.executeEdits("alt-drag-scrub", [
+      { range, text, forceMoveMarkers: true },
+    ]);
+    return startCol + text.length; // new endCol
+  }
+
+  // Suppress mousedown so Monaco doesn't move the cursor / start a
+  // drag-select while we're scrubbing.
+  dom.addEventListener("mousedown", (e) => {
+    if (!modOf(e)) return;
+    const target = editor.getTargetAtClientPoint(e.clientX, e.clientY);
+    if (!target || !target.position) return;
+    const { lineNumber, column } = target.position;
+    const lineText = editor.getModel().getLineContent(lineNumber);
+    const tok = findTokenAt(lineText, column);
+    if (!tok) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (tok.kind === "color") {
+      const ci = ensureColorInput();
+      ci.value = tok.text.slice(2, 8).toLowerCase();
+      ci.style.left = (e.clientX - 6) + "px";
+      ci.style.top  = (e.clientY - 6) + "px";
+      ci.style.pointerEvents = "auto";
+      colorCtx = { line: lineNumber, startCol: tok.startCol, endCol: tok.endCol };
+      // single shared listeners (idempotent re-bind via marker)
+      if (!ci._cljrsBound) {
+        ci._cljrsBound = true;
+        ci.addEventListener("input", () => {
+          if (!colorCtx) return;
+          const replacement = `"${ci.value}"`;
+          const newEnd = replaceRange(
+            colorCtx.line, colorCtx.startCol, colorCtx.endCol, replacement);
+          colorCtx.endCol = newEnd;
+        });
+        ci.addEventListener("change", () => {
+          colorCtx = null;
+          ci.style.pointerEvents = "none";
+        });
+      }
+      ci.click();
+      return;
+    }
+
+    // number scrub
+    const parsed = parseNumberText(tok.text);
+    if (!parsed) return;
+    active = {
+      startValue: parsed.value,
+      decimals: parsed.decimals,
+      startX: e.clientX,
+      line: lineNumber,
+      startCol: tok.startCol,
+      endCol: tok.endCol,
+    };
+    document.body.style.cursor = "ew-resize";
+  }, true);
+
+  window.addEventListener("mousemove", (e) => {
+    if (!active) return;
+    const dx = e.clientX - active.startX;
+    const mag = Math.max(0.1, Math.abs(active.startValue));
+    const coarse = active.decimals === 0 ? 1 : Math.max(0.001, mag * 0.02);
+    const step = e.shiftKey ? coarse * 10 : coarse;
+    let v = active.startValue + dx * step;
+    if (active.decimals === 0) v = Math.round(v);
+    const newText = formatNumber(v, active.decimals);
+    const newEnd = replaceRange(active.line, active.startCol, active.endCol, newText);
+    active.endCol = newEnd;
+    e.preventDefault();
+  }, true);
+
+  window.addEventListener("mouseup", () => {
+    if (!active) return;
+    document.body.style.cursor = "";
+    active = null;
+  }, true);
+  window.addEventListener("blur", () => {
+    if (active) { document.body.style.cursor = ""; active = null; }
+  });
+}
+
 let wasmReady = null;
 
 export async function loadWasm() {

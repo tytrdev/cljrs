@@ -63,43 +63,6 @@
     }
     .pf-timeline-label.past { color: #ffbf66; }
     .pf-timeline-label.live { color: #8ec07c; }
-    /* Scrubbable numbers. When a scrub modifier (Alt OR Ctrl) is held,
-       the highlight overlay captures pointer events and number tokens
-       become draggable. The .pf-scrub-mode class goes on the editor
-       container, which is itself the .repl element. */
-    .pf-scrub-mode.repl .repl-hl-wrap .repl-hl { pointer-events: auto !important; cursor: default; }
-    .pf-scrub-mode.repl .repl-hl-wrap textarea { pointer-events: none !important; }
-    .pf-scrub-mode.repl .repl-hl .tok-number {
-      cursor: ew-resize;
-      background: rgba(255, 204, 96, 0.14);
-      border-radius: 2px;
-      outline: 1px solid rgba(255, 204, 96, 0.3);
-    }
-    .pf-scrub-mode.repl .repl-hl .tok-number:hover,
-    .repl .repl-hl .tok-number.pf-scrubbing {
-      background: rgba(255, 204, 96, 0.35);
-      outline-color: rgba(255, 204, 96, 0.8);
-    }
-    /* Hex-color string literals: tinted in their own color as a
-       swatch-affordance, always visible. Stronger in scrub mode. */
-    .repl .repl-hl .tok-color {
-      background-color: color-mix(in srgb, var(--swatch) 18%, transparent);
-      outline: 1px solid color-mix(in srgb, var(--swatch) 55%, transparent);
-      border-radius: 2px;
-    }
-    .pf-scrub-mode.repl .repl-hl .tok-color {
-      cursor: pointer;
-      background-color: color-mix(in srgb, var(--swatch) 40%, transparent);
-      outline-color: color-mix(in srgb, var(--swatch) 90%, transparent);
-    }
-    .pf-scrub-mode.repl .repl-hl .tok-color:hover {
-      background-color: color-mix(in srgb, var(--swatch) 65%, transparent);
-    }
-    .pf-scrub-hint {
-      font-size: 0.7rem;
-      color: #ffbf66;
-      font-family: ui-monospace, monospace;
-    }
   </style>
 </head>
 <body>
@@ -145,8 +108,14 @@
           <input type="range" id="pf-scrub" min="0" max="300" value="300" step="1">
           <span class="pf-timeline-label live" id="pf-scrub-label">live</span>
         </div>
-        <div class="repl" id="pf-editor">
-          <textarea id="pf-src" spellcheck="false" style="min-height:380px"></textarea>
+        <div class="repl" id="pf-editor-wrap">
+          <div id="pf-editor" style="height:380px;width:100%"></div>
+          <div class="repl-toolbar" style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+            <span id="pf-vim-status" style="font-family:ui-monospace,monospace;font-size:0.75rem;color:var(--fg-dim)"></span>
+            <label style="font-size:0.75rem;color:var(--fg-dim)">
+              <input type="checkbox" id="pf-vim-toggle"> vim mode
+            </label>
+          </div>
         </div>
         <div id="pf-status" class="pf-status"></div>
       </div>
@@ -161,7 +130,7 @@
     </ul>
   </main>
   <script type="module">
-    import { mountChrome, loadWasm, attachHighlightOverlay } from "./_layout.js";
+    import { mountChrome, loadWasm, makeEditor, attachAltDragScrub, loadMonaco } from "./_layout.js";
     mountChrome();
 
     const INITIAL_SOURCE = `;; ============================================================
@@ -366,9 +335,7 @@
     const canvas    = document.getElementById("pf-canvas");
     const ctx       = canvas.getContext("2d");
     const W = canvas.width, H = canvas.height;
-    const ta        = document.getElementById("pf-src");
     const stage     = document.getElementById("pf-stage");
-    const editorEl  = document.getElementById("pf-editor");
     const status    = document.getElementById("pf-status");
     const overlay   = document.getElementById("pf-overlay");
     const fpsEl     = document.getElementById("pf-fps");
@@ -379,7 +346,7 @@
     const scrub     = document.getElementById("pf-scrub");
     const scrubLabel = document.getElementById("pf-scrub-label");
 
-    ta.value = INITIAL_SOURCE;
+    let editor = null;
 
     // --- state -----------------------------------------------------------
 
@@ -387,7 +354,6 @@
     let paused = false;
     let ghostOn = true;
     let platformsFlat = [];
-    let debounceTimer = null;
     let playerPW = 16, playerPH = 22;
     let lastPlayer = [50, 300, 0, 0, 0, 0];
     let predicted = new Float32Array(0);
@@ -732,196 +698,19 @@
       stage.focus();
     });
 
-    ta.addEventListener("input", () => {
-      clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => applySource(ta.value), 400);
-    });
-
-    // --- scrubbable numbers (Alt OR Ctrl + drag) -----------------------
-    // Hold either modifier, hover a number in the source, drag to scrub.
-    // Ctrl is supported because window managers like aerospace grab Alt
-    // on macOS.
-
-    let scrubModHeld = false;
-    let scrubbingNumber = null; // {startValue, startX, start, len, decimals, span}
-
-    function modFromEvent(e) {
-      return !!(e.altKey || e.ctrlKey);
-    }
-    function setScrubMode(on) {
-      if (scrubModHeld === on) return;
-      scrubModHeld = on;
-      editorEl.classList.toggle("pf-scrub-mode", on);
-    }
-    function syncModFromEvent(e) {
-      setScrubMode(modFromEvent(e));
-      if (!modFromEvent(e)) endNumberScrub();
-    }
-    // Listen broadly so we don't miss modifier changes while focus drifts.
-    ["keydown", "keyup", "mousemove", "mousedown", "mouseup"].forEach((ev) => {
-      window.addEventListener(ev, syncModFromEvent, true);
-    });
-    window.addEventListener("blur", () => { setScrubMode(false); endNumberScrub(); });
-
-    function parseNumberText(s) {
-      const v = parseFloat(s);
-      if (!Number.isFinite(v)) return null;
-      const dot = s.indexOf(".");
-      const decimals = dot >= 0 ? s.length - dot - 1 : 0;
-      return { value: v, decimals };
-    }
-
-    function formatNumber(v, decimals, wasNeg) {
-      if (decimals === 0) {
-        const rounded = Math.round(v);
-        return String(rounded);
-      }
-      return v.toFixed(decimals);
-    }
-
-    // Hidden native color input reused for every hex-color click.
-    // Positioned off-screen at first; re-seated and .click()-ed when a
-    // string literal that looks like a hex color gets alt/ctrl-clicked.
-    const colorInput = document.createElement("input");
-    colorInput.type = "color";
-    colorInput.style.position = "fixed";
-    colorInput.style.width = "1px";
-    colorInput.style.height = "1px";
-    colorInput.style.opacity = "0";
-    colorInput.style.pointerEvents = "none";
-    document.body.appendChild(colorInput);
-    let colorEditCtx = null; // {start, len, quoted:bool}
-
-    function tokenFromTarget(target) {
-      let t = target;
-      for (let n = 0; n < 3 && t; n++) {
-        if (t.classList && t.dataset && t.dataset.s != null &&
-            (t.classList.contains("tok-number") || t.classList.contains("tok-string")))
-          return t;
-        t = t.parentElement;
-      }
-      return null;
-    }
-
-    function replaceRange(start, len, replacement) {
-      ta.value = ta.value.slice(0, start) + replacement + ta.value.slice(start + len);
-      ta.dispatchEvent(new Event("input"));
-      clearTimeout(debounceTimer);
-      applySource(ta.value);
-    }
-
-    const HEX_COLOR_RE = /^"(#[0-9a-fA-F]{6})"$/;
-
-    editorEl.addEventListener("mousedown", (e) => {
-      if (!modFromEvent(e)) return;
-      const t = tokenFromTarget(e.target);
-      if (!t) return;
-      const start = parseInt(t.dataset.s, 10);
-      const len = parseInt(t.dataset.l, 10);
-      const text = ta.value.slice(start, start + len);
-
-      // --- color picker path: tok-string holding "#rrggbb" ---
-      if (t.classList.contains("tok-string")) {
-        const m = text.match(HEX_COLOR_RE);
-        if (!m) return;
-        e.preventDefault();
-        e.stopPropagation();
-        colorEditCtx = { start, len };
-        colorInput.value = m[1].toLowerCase();
-        // Position the picker near the click so the native popup
-        // anchors sensibly (macOS drops it at the field location).
-        colorInput.style.left = (e.clientX - 6) + "px";
-        colorInput.style.top  = (e.clientY - 6) + "px";
-        colorInput.style.pointerEvents = "auto";
-        colorInput.click();
-        return;
-      }
-
-      // --- number scrub path ---
-      if (!t.classList.contains("tok-number")) return;
-      e.preventDefault();
-      e.stopPropagation();
-      const parsed = parseNumberText(text);
-      if (!parsed) return;
-      scrubbingNumber = {
-        startValue: parsed.value,
-        decimals: parsed.decimals,
-        start,
-        len,
-        startX: e.clientX,
-        span: t,
-      };
-      t.classList.add("pf-scrubbing");
-      document.body.style.cursor = "ew-resize";
-    }, true);
-
-    // Color picker live updates — each change replaces the string
-    // literal in place. 'input' fires as the user scrubs the picker;
-    // 'change' fires on commit.
-    colorInput.addEventListener("input", () => {
-      if (!colorEditCtx) return;
-      const newHex = colorInput.value;
-      const quoted = `"${newHex}"`;
-      replaceRange(colorEditCtx.start, colorEditCtx.len, quoted);
-      colorEditCtx.len = quoted.length;
-    });
-    colorInput.addEventListener("change", () => {
-      colorEditCtx = null;
-      colorInput.style.pointerEvents = "none";
-      stage.focus();
-    });
-
-    function applyNumberDrag(clientX, shiftKey) {
-      const ctx = scrubbingNumber;
-      if (!ctx) return;
-      const dx = clientX - ctx.startX;
-      // scale per-pixel delta by the magnitude of the original value so
-      // small values are fine-tunable and big values aren't sluggish
-      const mag = Math.max(0.1, Math.abs(ctx.startValue));
-      const coarse = ctx.decimals === 0 ? 1 : Math.max(0.05, mag * 0.02);
-      const step = shiftKey ? coarse * 10 : coarse;
-      let newValue = ctx.startValue + dx * step;
-      if (ctx.decimals === 0) newValue = Math.round(newValue);
-      const newText = formatNumber(newValue, ctx.decimals, ctx.startValue < 0);
-      const before = ta.value.slice(0, ctx.start);
-      const after  = ta.value.slice(ctx.start + ctx.len);
-      ta.value = before + newText + after;
-      ctx.len = newText.length;
-      // Re-sync highlight overlay (dispatches input which also starts
-      // the debounced applySource — but we'll apply immediately below).
-      ta.dispatchEvent(new Event("input"));
-      clearTimeout(debounceTimer);
-      applySource(ta.value);
-    }
-
-    function endNumberScrub() {
-      if (!scrubbingNumber) return;
-      document.body.style.cursor = "";
-      // span may have been rebuilt by the highlight re-run; clear class
-      // via a fresh query.
-      document.querySelectorAll(".tok-number.pf-scrubbing").forEach(n => n.classList.remove("pf-scrubbing"));
-      scrubbingNumber = null;
-    }
-
-    window.addEventListener("mousemove", (e) => {
-      if (scrubbingNumber) {
-        applyNumberDrag(e.clientX, e.shiftKey);
-        e.preventDefault();
-      }
-    }, true);
-    window.addEventListener("mouseup", () => endNumberScrub(), true);
-    ta.addEventListener("keydown", (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-        e.preventDefault();
-        clearTimeout(debounceTimer);
-        applySource(ta.value);
-      }
-    });
-
     (async () => {
-      await attachHighlightOverlay(editorEl, ta);
       const mod = await loadWasm();
       repl = new mod.Repl();
+      editor = await makeEditor(document.getElementById("pf-editor"), {
+        value: INITIAL_SOURCE,
+        onApply: applySource,
+        debounceMs: 400,
+        vimToggleEl: document.getElementById("pf-vim-toggle"),
+        vimStatusEl: document.getElementById("pf-vim-status"),
+        vimKey: "platformer",
+      });
+      const monaco = await loadMonaco();
+      attachAltDragScrub(editor, monaco);
       applySource(INITIAL_SOURCE);
       requestAnimationFrame(tick);
     })();

@@ -91,20 +91,6 @@
       padding: 0 4px; border-radius: 3px;
       font-family: inherit;
     }
-    /* Scrubbable numbers (matches synth.html) */
-    .sq-scrub-mode.repl .repl-hl-wrap .repl-hl { pointer-events: auto !important; cursor: default; }
-    .sq-scrub-mode.repl .repl-hl-wrap textarea { pointer-events: none !important; }
-    .sq-scrub-mode.repl .repl-hl .tok-number {
-      cursor: ew-resize;
-      background: rgba(255, 204, 96, 0.14);
-      border-radius: 2px;
-      outline: 1px solid rgba(255, 204, 96, 0.3);
-    }
-    .sq-scrub-mode.repl .repl-hl .tok-number:hover,
-    .repl .repl-hl .tok-number.sq-scrubbing {
-      background: rgba(255, 204, 96, 0.35);
-      outline-color: rgba(255, 204, 96, 0.8);
-    }
   </style>
 </head>
 <body>
@@ -148,8 +134,14 @@
           </label>
           <span id="sq-meter">—</span>
         </div>
-        <div class="repl" id="sq-editor">
-          <textarea id="sq-src" spellcheck="false" style="min-height:520px"></textarea>
+        <div class="repl" id="sq-editor-wrap">
+          <div id="sq-editor" style="height:520px;width:100%"></div>
+          <div class="repl-toolbar" style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+            <span id="sq-vim-status" style="font-family:ui-monospace,monospace;font-size:0.75rem;color:var(--fg-dim)"></span>
+            <label style="font-size:0.75rem;color:var(--fg-dim)">
+              <input type="checkbox" id="sq-vim-toggle"> vim mode
+            </label>
+          </div>
         </div>
         <div id="sq-status" class="sq-status"></div>
       </div>
@@ -164,7 +156,7 @@
     </ul>
   </main>
   <script type="module">
-    import { mountChrome, loadWasm, attachHighlightOverlay } from "./_layout.js";
+    import { mountChrome, loadWasm, makeEditor, attachAltDragScrub, loadMonaco } from "./_layout.js";
     mountChrome();
 
     const INITIAL_SOURCE = `;; ============================================================
@@ -199,14 +191,12 @@
     const gridEl = document.getElementById("sq-grid");
     const melRowEl = document.getElementById("sq-mel-row");
     const overlay = document.getElementById("sq-overlay");
-    const ta = document.getElementById("sq-src");
-    const editorEl = document.getElementById("sq-editor");
     const status = document.getElementById("sq-status");
     const playBtn = document.getElementById("sq-play");
     const masterSlider = document.getElementById("sq-master");
     const meterEl = document.getElementById("sq-meter");
 
-    ta.value = INITIAL_SOURCE;
+    let editor = null;
 
     // --- state -----------------------------------------------------------
     let repl = null;
@@ -214,7 +204,6 @@
     let master = null;
     let analyser = null;
     let playing = false;
-    let debounceTimer = null;
 
     // Score caches (refreshed on every applySource).
     let bpm = 120;
@@ -497,114 +486,19 @@
       requestAnimationFrame(drawMeter);
     }
 
-    // --- debounced source apply + scrubbable numbers --------------------
-    ta.addEventListener("input", () => {
-      clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => applySource(ta.value), 300);
-    });
-    ta.addEventListener("keydown", (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-        e.preventDefault();
-        clearTimeout(debounceTimer);
-        applySource(ta.value);
-      }
-    });
-
-    let scrubModHeld = false;
-    let scrubbingNumber = null;
-    function modFromEvent(e) { return !!(e.altKey || e.ctrlKey); }
-    function setScrubMode(on) {
-      if (scrubModHeld === on) return;
-      scrubModHeld = on;
-      editorEl.classList.toggle("sq-scrub-mode", on);
-    }
-    function syncModFromEvent(e) {
-      setScrubMode(modFromEvent(e));
-      if (!modFromEvent(e)) endNumberScrub();
-    }
-    ["keydown", "keyup", "mousemove", "mousedown", "mouseup"].forEach((ev) => {
-      window.addEventListener(ev, syncModFromEvent, true);
-    });
-    window.addEventListener("blur", () => { setScrubMode(false); endNumberScrub(); });
-
-    function parseNumberText(s) {
-      const v = parseFloat(s);
-      if (!Number.isFinite(v)) return null;
-      const dot = s.indexOf(".");
-      const decimals = dot >= 0 ? s.length - dot - 1 : 0;
-      return { value: v, decimals };
-    }
-    function formatNumber(v, decimals) {
-      if (decimals === 0) return String(Math.round(v));
-      return v.toFixed(decimals);
-    }
-    function tokenFromTarget(target) {
-      let t = target;
-      for (let n = 0; n < 3 && t; n++) {
-        if (t.classList && t.dataset && t.dataset.s != null &&
-            t.classList.contains("tok-number")) return t;
-        t = t.parentElement;
-      }
-      return null;
-    }
-
-    editorEl.addEventListener("mousedown", (e) => {
-      if (!modFromEvent(e)) return;
-      const t = tokenFromTarget(e.target);
-      if (!t) return;
-      const start = parseInt(t.dataset.s, 10);
-      const len = parseInt(t.dataset.l, 10);
-      const text = ta.value.slice(start, start + len);
-      const parsed = parseNumberText(text);
-      if (!parsed) return;
-      e.preventDefault(); e.stopPropagation();
-      scrubbingNumber = {
-        startValue: parsed.value,
-        decimals: parsed.decimals,
-        start, len,
-        startX: e.clientX,
-        span: t,
-      };
-      t.classList.add("sq-scrubbing");
-      document.body.style.cursor = "ew-resize";
-    }, true);
-
-    function applyNumberDrag(clientX, shiftKey) {
-      const c = scrubbingNumber;
-      if (!c) return;
-      const dx = clientX - c.startX;
-      const mag = Math.max(0.1, Math.abs(c.startValue));
-      const coarse = c.decimals === 0 ? 1 : Math.max(0.01, mag * 0.02);
-      const step = shiftKey ? coarse * 10 : coarse;
-      let newValue = c.startValue + dx * step;
-      if (c.decimals === 0) newValue = Math.round(newValue);
-      const newText = formatNumber(newValue, c.decimals);
-      const before = ta.value.slice(0, c.start);
-      const after  = ta.value.slice(c.start + c.len);
-      ta.value = before + newText + after;
-      c.len = newText.length;
-      ta.dispatchEvent(new Event("input"));
-      clearTimeout(debounceTimer);
-      applySource(ta.value);
-    }
-
-    function endNumberScrub() {
-      if (!scrubbingNumber) return;
-      document.body.style.cursor = "";
-      document.querySelectorAll(".tok-number.sq-scrubbing").forEach(n => n.classList.remove("sq-scrubbing"));
-      scrubbingNumber = null;
-    }
-
-    window.addEventListener("mousemove", (e) => {
-      if (scrubbingNumber) { applyNumberDrag(e.clientX, e.shiftKey); e.preventDefault(); }
-    }, true);
-    window.addEventListener("mouseup", () => endNumberScrub(), true);
-
     // --- boot ------------------------------------------------------------
     (async () => {
-      await attachHighlightOverlay(editorEl, ta);
       const mod = await loadWasm();
       repl = new mod.Repl();
+      editor = await makeEditor(document.getElementById("sq-editor"), {
+        value: INITIAL_SOURCE,
+        onApply: applySource,
+        vimToggleEl: document.getElementById("sq-vim-toggle"),
+        vimStatusEl: document.getElementById("sq-vim-status"),
+        vimKey: "sequencer",
+      });
+      const monaco = await loadMonaco();
+      attachAltDragScrub(editor, monaco);
       applySource(INITIAL_SOURCE);
       requestAnimationFrame(drawMeter);
     })();

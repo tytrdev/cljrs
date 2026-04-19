@@ -65,15 +65,21 @@
           <button id="phys-reset">Reset</button>
           <span id="phys-fps">—</span>
         </div>
-        <div class="repl" id="phys-editor">
-          <textarea id="phys-src" spellcheck="false" style="min-height:380px"></textarea>
+        <div class="repl" id="phys-editor-wrap">
+          <div id="phys-editor" style="height:380px;width:100%"></div>
+          <div class="repl-toolbar" style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+            <span id="phys-vim-status" style="font-family:ui-monospace,monospace;font-size:0.75rem;color:var(--fg-dim)"></span>
+            <label style="font-size:0.75rem;color:var(--fg-dim)">
+              <input type="checkbox" id="phys-vim-toggle"> vim mode
+            </label>
+          </div>
         </div>
         <div id="phys-status" class="phys-status"></div>
       </div>
     </div>
   </main>
   <script type="module">
-    import { mountChrome, loadWasm, attachHighlightOverlay } from "./_layout.js";
+    import { mountChrome, loadWasm, makeEditor, attachAltDragScrub, loadMonaco } from "./_layout.js";
     mountChrome();
 
     // --- demo definitions ------------------------------------------------
@@ -467,8 +473,7 @@
 
     const canvas = document.getElementById("phys-canvas");
     const ctx = canvas.getContext("2d");
-    const ta = document.getElementById("phys-src");
-    const editorEl = document.getElementById("phys-editor");
+    let editor = null;
     const select = document.getElementById("phys-demo");
     const status = document.getElementById("phys-status");
     const fpsEl = document.getElementById("phys-fps");
@@ -486,7 +491,7 @@
     let paused = false;
     let currentDemo = null;
     let lastFloats = new Float32Array(0);
-    let debounceTimer = null;
+    let suppressApply = false;
 
     function applySource(src) {
       if (!repl) return;
@@ -512,12 +517,12 @@
 
     function loadDemo(key) {
       currentDemo = DEMOS[key];
-      ta.value = currentDemo.source;
-      // Resync the highlight overlay (which listens on input) without
-      // also kicking off the debounce — cancel it right after.
-      ta.dispatchEvent(new Event("input"));
-      clearTimeout(debounceTimer);
-      debounceTimer = null;
+      // setValue triggers onApply (debounced); call applySource directly
+      // and suppress the queued auto-apply so we don't double-eval.
+      suppressApply = true;
+      editor.setValue(currentDemo.source);
+      // Re-allow apply after the debounce flushes.
+      setTimeout(() => { suppressApply = false; }, 600);
       applySource(currentDemo.source);
     }
 
@@ -558,25 +563,22 @@
       pauseBtn.textContent = paused ? "Resume" : "Pause";
     });
     resetBtn.addEventListener("click", () => {
-      applySource(ta.value);
-    });
-
-    ta.addEventListener("input", () => {
-      clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => applySource(ta.value), 500);
-    });
-    ta.addEventListener("keydown", (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-        e.preventDefault();
-        clearTimeout(debounceTimer);
-        applySource(ta.value);
-      }
+      applySource(editor.getValue());
     });
 
     (async () => {
-      await attachHighlightOverlay(editorEl, ta);
       const mod = await loadWasm();
       repl = new mod.Repl();
+      editor = await makeEditor(document.getElementById("phys-editor"), {
+        value: DEMOS["2d-boxes"].source,
+        onApply: (src) => { if (!suppressApply) applySource(src); },
+        debounceMs: 500,
+        vimToggleEl: document.getElementById("phys-vim-toggle"),
+        vimStatusEl: document.getElementById("phys-vim-status"),
+        vimKey: "physics",
+      });
+      const monaco = await loadMonaco();
+      attachAltDragScrub(editor, monaco);
       select.value = "2d-boxes";
       loadDemo("2d-boxes");
       requestAnimationFrame(tick);
