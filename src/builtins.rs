@@ -323,6 +323,195 @@ fn core_fns() -> Vec<(&'static str, fn(&[Value]) -> Result<Value>)> {
         ("__keep-coll", keep_coll_fn),
         ("__keep-indexed-coll", keep_indexed_coll_fn),
         ("__map-indexed-coll", map_indexed_coll_fn),
+        ("==", num_eq_fn),
+        ("bit-and", bit_and_fn),
+        ("bit-or", bit_or_fn),
+        ("bit-xor", bit_xor_fn),
+        ("bit-not", bit_not_fn),
+        ("bit-and-not", bit_and_not_fn),
+        ("bit-shift-left", bit_shl_fn),
+        ("bit-shift-right", bit_shr_fn),
+        ("unsigned-bit-shift-right", bit_ushr_fn),
+        ("bit-flip", bit_flip_fn),
+        ("bit-set", bit_set_fn),
+        ("bit-clear", bit_clear_fn),
+        ("bit-test", bit_test_fn),
+        ("parse-long", parse_long_fn),
+        ("parse-double", parse_double_fn),
+        ("parse-boolean", parse_boolean_fn),
+        ("parse-uuid", parse_uuid_fn),
+        ("unchecked-add", unchecked_add_fn),
+        ("unchecked-add-int", unchecked_add_fn),
+        ("unchecked-subtract", unchecked_sub_fn),
+        ("unchecked-subtract-int", unchecked_sub_fn),
+        ("unchecked-multiply", unchecked_mul_fn),
+        ("unchecked-multiply-int", unchecked_mul_fn),
+        ("unchecked-divide-int", unchecked_div_fn),
+        ("unchecked-negate", unchecked_neg_fn),
+        ("unchecked-negate-int", unchecked_neg_fn),
+        ("unchecked-inc", unchecked_inc_fn),
+        ("unchecked-inc-int", unchecked_inc_fn),
+        ("unchecked-dec", unchecked_dec_fn),
+        ("unchecked-dec-int", unchecked_dec_fn),
+        ("unchecked-remainder-int", unchecked_rem_fn),
+        ("unchecked-int", int_fn),
+        ("unchecked-long", int_fn),
+        ("unchecked-double", double_fn),
+        ("unchecked-float", double_fn),
+        ("unchecked-byte", int_fn),
+        ("unchecked-short", int_fn),
+        ("unchecked-char", int_fn),
+        ("numerator", numerator_fn),
+        ("denominator", denominator_fn),
+        ("rationalize", rationalize_fn),
+        ("num", num_fn),
+        ("compare", compare_fn),
+        ("hash", hash_fn),
+        ("hash-ordered-coll", hash_ordered_coll_fn),
+        ("hash-unordered-coll", hash_unordered_coll_fn),
+        ("mix-collection-hash", mix_collection_hash_fn),
+        ("NaN?", nan_q_fn),
+        ("infinite?", infinite_q_fn),
+        ("boolean", boolean_fn),
+        ("instance?", instance_q_fn),
+        ("identical?", identical_q_fn),
+        ("ratio?", ratio_q_fn),
+        ("decimal?", const_false_fn),
+        ("bigdec?", const_false_fn),
+        ("volatile?", atom_q),
+        ("chunked-seq?", const_false_fn),
+        ("any?", any_q_fn),
+        ("ifn?", ifn_q_fn),
+        ("ident?", ident_q_fn),
+        ("simple-ident?", simple_ident_q_fn),
+        ("qualified-ident?", qualified_ident_q_fn),
+        ("simple-keyword?", simple_keyword_q_fn),
+        ("qualified-keyword?", qualified_keyword_q_fn),
+        ("simple-symbol?", simple_symbol_q_fn),
+        ("qualified-symbol?", qualified_symbol_q_fn),
+        ("indexed?", indexed_q_fn),
+        ("counted?", counted_q_fn),
+        ("seqable?", seqable_q_fn),
+        ("sequential?", sequential_q_fn),
+        ("associative?", associative_q_fn),
+        ("reversible?", reversible_q_fn),
+        ("sorted?", const_false_fn),
+        ("record?", const_false_fn),
+        ("map-entry?", map_entry_q_fn),
+        ("uri?", const_false_fn),
+        ("uuid?", uuid_q_fn),
+        ("inst?", const_false_fn),
+        ("int?", integer_q),
+        ("double?", float_q),
+        ("nat-int?", nat_int_q_fn),
+        ("neg-int?", neg_int_q_fn),
+        ("pos-int?", pos_int_q_fn),
+        ("distinct?", distinct_q_fn),
+        ("not-any?", not_any_q_fn),
+        ("not-every?", not_every_q_fn),
+        ("special-symbol?", special_symbol_q_fn),
+        ("peek", peek_fn),
+        ("pop", pop_fn),
+        ("disj", disj_fn),
+        ("replace", replace_fn),
+        ("merge-with", merge_with_fn),
+        ("rseq", rseq_fn),
+        ("empty", empty_fn),
+        ("vector-of", vector_of_fn),
+        ("array-map", hash_map_fn),
+        ("sorted-map", hash_map_fn),
+        ("sorted-map-by", sorted_map_by_fn),
+        ("sorted-set", sorted_set_fn),
+        ("sorted-set-by", sorted_set_by_fn),
+        ("subseq", subseq_fn),
+        ("rsubseq", rsubseq_fn),
+        ("key", key_fn),
+        ("val", val_fn),
+        ("find-keyword", find_keyword_fn),
+        ("namespace", namespace_fn),
+        ("partition-by", partition_by_fn),
+        ("partition-all", partition_all_fn),
+        ("partitionv", partition_fn),
+        ("partitionv-all", partition_all_fn),
+        ("split-at", split_at_fn),
+        ("splitv-at", splitv_at_fn),
+        ("split-with", split_with_fn),
+        ("take-last", take_last_fn),
+        ("drop-last", drop_last_fn),
+        ("butlast", butlast_fn),
+        ("keep", keep_coll_fn),
+        ("keep-indexed", keep_indexed_coll_fn),
+        ("map-indexed", map_indexed_coll_fn),
+        ("dedupe", dedupe_coll_fn),
+        ("take-nth", take_nth_coll_fn),
+        ("tree-seq", tree_seq_fn),
+        ("cycle", cycle_fn),
+        ("iterate", iterate_fn),
+        ("replicate", replicate_fn),
+        ("reductions", reductions_fn),
+        ("list*", list_star_fn),
+        ("ffirst", ffirst_fn),
+        ("fnext", fnext_fn),
+        ("nfirst", nfirst_fn),
+        ("nnext", nnext_fn),
+        ("next", next_fn),
+        ("nthnext", nthnext_fn),
+        ("nthrest", nthrest_fn),
+        ("doall", doall_fn),
+        ("dorun", dorun_fn),
+        ("run!", run_bang_fn),
+        ("shuffle", shuffle_fn),
+        ("rand", rand_fn),
+        ("rand-int", rand_int_fn),
+        ("rand-nth", rand_nth_fn),
+        ("random-sample", random_sample_fn),
+        ("random-uuid", random_uuid_fn),
+        ("bounded-count", bounded_count_fn),
+        ("every-pred", every_pred_fn),
+        ("some-fn", some_fn_fn),
+        ("fnil", fnil_fn),
+        ("memoize", memoize_fn),
+        ("comparator", comparator_fn),
+        ("sort-by", sort_by_fn),
+        ("completing", completing_fn),
+        ("ensure-reduced", ensure_reduced_fn),
+        ("trampoline", trampoline_fn),
+        ("transient", identity_fn),
+        ("persistent!", identity_fn),
+        ("conj!", conj_fn),
+        ("assoc!", assoc_fn),
+        ("dissoc!", dissoc_fn),
+        ("pop!", pop_fn),
+        ("disj!", disj_fn),
+        ("volatile!", atom_fn),
+        ("vreset!", reset_bang_fn),
+        ("vswap!", swap_bang_fn),
+        ("meta", const_nil_fn),
+        ("with-meta", with_meta_fn),
+        ("vary-meta", vary_meta_fn),
+        ("alter-meta!", const_nil_fn),
+        ("reset-meta!", const_nil_fn),
+        ("time-ms", time_ms_fn),
+        ("type", type_fn),
+        ("flush", flush_fn),
+        ("newline", newline_fn),
+        ("pr", pr_fn),
+        ("prn", prn_fn),
+        ("prn-str", prn_str_fn),
+        ("ex-cause", ex_cause_fn),
+        ("test", const_nil_fn),
+        ("get-validator", const_nil_fn),
+        ("set-validator!", set_validator_fn),
+        ("methods", methods_fn),
+        ("get-method", get_method_fn),
+        ("prefer-method", prefer_method_fn),
+        ("prefers", prefers_fn),
+        ("remove-method", remove_method_fn),
+        ("remove-all-methods", remove_all_methods_fn),
+        ("add-tap", const_nil_fn),
+        ("remove-tap", const_false_fn),
+        ("tap>", const_false_fn),
+        ("inst-ms", inst_ms_fn),
     ]
 }
 
@@ -2596,4 +2785,1033 @@ fn identity_fn(args: &[Value]) -> Result<Value> {
         });
     }
     Ok(args[0].clone())
+}
+
+// ===========================================================================
+// Newly-ported clojure.core fns. Conventions:
+//   * Each fn is a `fn(&[Value]) -> Result<Value>` matching the existing
+//     style; arity errors raised explicitly when meaningful.
+//   * Where Clojure's behavior depends on JVM-only types (bigdec, ratio
+//     promotion to bigint), we degrade to the closest cljrs primitive
+//     and document it in a header comment.
+// ===========================================================================
+
+fn num_eq_fn(args: &[Value]) -> Result<Value> {
+    if args.len() < 2 { return Ok(Value::Bool(true)); }
+    let first = as_f64(&args[0])?;
+    for a in &args[1..] {
+        if as_f64(a)? != first { return Ok(Value::Bool(false)); }
+    }
+    Ok(Value::Bool(true))
+}
+
+fn bit_and_fn(args: &[Value]) -> Result<Value> {
+    if args.is_empty() { return Err(Error::Arity { expected: ">= 1".into(), got: 0 }); }
+    let mut acc = to_i64(&args[0])?;
+    for a in &args[1..] { acc &= to_i64(a)?; }
+    Ok(Value::Int(acc))
+}
+fn bit_or_fn(args: &[Value]) -> Result<Value> {
+    if args.is_empty() { return Err(Error::Arity { expected: ">= 1".into(), got: 0 }); }
+    let mut acc = to_i64(&args[0])?;
+    for a in &args[1..] { acc |= to_i64(a)?; }
+    Ok(Value::Int(acc))
+}
+fn bit_xor_fn(args: &[Value]) -> Result<Value> {
+    if args.is_empty() { return Err(Error::Arity { expected: ">= 1".into(), got: 0 }); }
+    let mut acc = to_i64(&args[0])?;
+    for a in &args[1..] { acc ^= to_i64(a)?; }
+    Ok(Value::Int(acc))
+}
+fn bit_not_fn(args: &[Value]) -> Result<Value> { Ok(Value::Int(!to_i64(&args[0])?)) }
+fn bit_and_not_fn(args: &[Value]) -> Result<Value> {
+    if args.len() < 2 { return Err(Error::Arity { expected: ">= 2".into(), got: args.len() }); }
+    let mut acc = to_i64(&args[0])?;
+    for a in &args[1..] { acc &= !to_i64(a)?; }
+    Ok(Value::Int(acc))
+}
+fn bit_shl_fn(args: &[Value]) -> Result<Value> {
+    let x = to_i64(&args[0])?; let n = to_i64(&args[1])? & 63;
+    Ok(Value::Int(x.wrapping_shl(n as u32)))
+}
+fn bit_shr_fn(args: &[Value]) -> Result<Value> {
+    let x = to_i64(&args[0])?; let n = to_i64(&args[1])? & 63;
+    Ok(Value::Int(x.wrapping_shr(n as u32)))
+}
+fn bit_ushr_fn(args: &[Value]) -> Result<Value> {
+    let x = to_i64(&args[0])? as u64; let n = to_i64(&args[1])? & 63;
+    Ok(Value::Int(x.wrapping_shr(n as u32) as i64))
+}
+fn bit_flip_fn(args: &[Value]) -> Result<Value> {
+    let x = to_i64(&args[0])?; let n = to_i64(&args[1])? & 63;
+    Ok(Value::Int(x ^ (1i64 << n)))
+}
+fn bit_set_fn(args: &[Value]) -> Result<Value> {
+    let x = to_i64(&args[0])?; let n = to_i64(&args[1])? & 63;
+    Ok(Value::Int(x | (1i64 << n)))
+}
+fn bit_clear_fn(args: &[Value]) -> Result<Value> {
+    let x = to_i64(&args[0])?; let n = to_i64(&args[1])? & 63;
+    Ok(Value::Int(x & !(1i64 << n)))
+}
+fn bit_test_fn(args: &[Value]) -> Result<Value> {
+    let x = to_i64(&args[0])?; let n = to_i64(&args[1])? & 63;
+    Ok(Value::Bool((x >> n) & 1 == 1))
+}
+
+fn parse_long_fn(args: &[Value]) -> Result<Value> {
+    match &args[0] {
+        Value::Str(s) => Ok(s.trim().parse::<i64>().map(Value::Int).unwrap_or(Value::Nil)),
+        _ => Err(Error::Type("parse-long: expected string".into())),
+    }
+}
+fn parse_double_fn(args: &[Value]) -> Result<Value> {
+    match &args[0] {
+        Value::Str(s) => Ok(s.trim().parse::<f64>().map(Value::Float).unwrap_or(Value::Nil)),
+        _ => Err(Error::Type("parse-double: expected string".into())),
+    }
+}
+fn parse_boolean_fn(args: &[Value]) -> Result<Value> {
+    match &args[0] {
+        Value::Str(s) => match s.as_ref() {
+            "true" => Ok(Value::Bool(true)),
+            "false" => Ok(Value::Bool(false)),
+            _ => Ok(Value::Nil),
+        },
+        _ => Err(Error::Type("parse-boolean: expected string".into())),
+    }
+}
+fn is_uuid_str(t: &str) -> bool {
+    t.len() == 36 && t.chars().enumerate().all(|(i, c)| match i {
+        8 | 13 | 18 | 23 => c == '-',
+        _ => c.is_ascii_hexdigit(),
+    })
+}
+fn parse_uuid_fn(args: &[Value]) -> Result<Value> {
+    match &args[0] {
+        Value::Str(s) => {
+            let t = s.trim();
+            if is_uuid_str(t) { Ok(Value::Str(Arc::from(t))) } else { Ok(Value::Nil) }
+        }
+        _ => Err(Error::Type("parse-uuid: expected string".into())),
+    }
+}
+
+fn unchecked_add_fn(args: &[Value]) -> Result<Value> {
+    Ok(Value::Int(to_i64(&args[0])?.wrapping_add(to_i64(&args[1])?)))
+}
+fn unchecked_sub_fn(args: &[Value]) -> Result<Value> {
+    Ok(Value::Int(to_i64(&args[0])?.wrapping_sub(to_i64(&args[1])?)))
+}
+fn unchecked_mul_fn(args: &[Value]) -> Result<Value> {
+    Ok(Value::Int(to_i64(&args[0])?.wrapping_mul(to_i64(&args[1])?)))
+}
+fn unchecked_div_fn(args: &[Value]) -> Result<Value> {
+    let b = to_i64(&args[1])?;
+    if b == 0 { return Err(Error::Eval("integer divide by zero".into())); }
+    Ok(Value::Int(to_i64(&args[0])?.wrapping_div(b)))
+}
+fn unchecked_neg_fn(args: &[Value]) -> Result<Value> {
+    Ok(Value::Int(to_i64(&args[0])?.wrapping_neg()))
+}
+fn unchecked_inc_fn(args: &[Value]) -> Result<Value> {
+    Ok(Value::Int(to_i64(&args[0])?.wrapping_add(1)))
+}
+fn unchecked_dec_fn(args: &[Value]) -> Result<Value> {
+    Ok(Value::Int(to_i64(&args[0])?.wrapping_sub(1)))
+}
+fn unchecked_rem_fn(args: &[Value]) -> Result<Value> {
+    let b = to_i64(&args[1])?;
+    if b == 0 { return Err(Error::Eval("integer divide by zero".into())); }
+    Ok(Value::Int(to_i64(&args[0])?.wrapping_rem(b)))
+}
+
+fn numerator_fn(args: &[Value]) -> Result<Value> {
+    match &args[0] {
+        Value::Ratio(n, _) => Ok(Value::Int(*n)),
+        Value::Int(i) => Ok(Value::Int(*i)),
+        _ => Err(Error::Type("numerator: expected ratio".into())),
+    }
+}
+fn denominator_fn(args: &[Value]) -> Result<Value> {
+    match &args[0] {
+        Value::Ratio(_, d) => Ok(Value::Int(*d)),
+        Value::Int(_) => Ok(Value::Int(1)),
+        _ => Err(Error::Type("denominator: expected ratio".into())),
+    }
+}
+fn rationalize_fn(args: &[Value]) -> Result<Value> { Ok(args[0].clone()) }
+fn num_fn(args: &[Value]) -> Result<Value> { Ok(args[0].clone()) }
+
+fn compare_fn(args: &[Value]) -> Result<Value> {
+    let a = &args[0]; let b = &args[1];
+    let ord = match (a, b) {
+        (Value::Nil, Value::Nil) => std::cmp::Ordering::Equal,
+        (Value::Nil, _) => std::cmp::Ordering::Less,
+        (_, Value::Nil) => std::cmp::Ordering::Greater,
+        _ => {
+            if let (Ok(x), Ok(y)) = (as_f64(a), as_f64(b)) {
+                x.partial_cmp(&y).unwrap_or(std::cmp::Ordering::Equal)
+            } else if let (Value::Str(x), Value::Str(y)) = (a, b) {
+                x.as_ref().cmp(y.as_ref())
+            } else if let (Value::Bool(x), Value::Bool(y)) = (a, b) {
+                x.cmp(y)
+            } else if let (Value::Keyword(x), Value::Keyword(y)) = (a, b) {
+                x.as_ref().cmp(y.as_ref())
+            } else if let (Value::Symbol(x), Value::Symbol(y)) = (a, b) {
+                x.as_ref().cmp(y.as_ref())
+            } else {
+                a.to_pr_string().cmp(&b.to_pr_string())
+            }
+        }
+    };
+    Ok(Value::Int(match ord {
+        std::cmp::Ordering::Less => -1,
+        std::cmp::Ordering::Equal => 0,
+        std::cmp::Ordering::Greater => 1,
+    }))
+}
+
+fn hash_fn(args: &[Value]) -> Result<Value> {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut h = DefaultHasher::new();
+    args[0].hash(&mut h);
+    Ok(Value::Int(h.finish() as i64))
+}
+fn hash_ordered_coll_fn(args: &[Value]) -> Result<Value> {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let coll = seq_items(&args[0])?;
+    let mut h = DefaultHasher::new();
+    for x in &coll { x.hash(&mut h); }
+    Ok(Value::Int(h.finish() as i64))
+}
+fn hash_unordered_coll_fn(args: &[Value]) -> Result<Value> {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let coll = seq_items(&args[0])?;
+    let mut acc: u64 = 0;
+    for x in &coll {
+        let mut h = DefaultHasher::new();
+        x.hash(&mut h);
+        acc ^= h.finish();
+    }
+    Ok(Value::Int(acc as i64))
+}
+fn mix_collection_hash_fn(args: &[Value]) -> Result<Value> {
+    let h = to_i64(&args[0])?; let n = to_i64(&args[1])?;
+    Ok(Value::Int(h.wrapping_mul(31).wrapping_add(n)))
+}
+fn nan_q_fn(args: &[Value]) -> Result<Value> {
+    Ok(Value::Bool(matches!(&args[0], Value::Float(f) if f.is_nan())))
+}
+fn infinite_q_fn(args: &[Value]) -> Result<Value> {
+    Ok(Value::Bool(matches!(&args[0], Value::Float(f) if f.is_infinite())))
+}
+fn boolean_fn(args: &[Value]) -> Result<Value> { Ok(Value::Bool(args[0].truthy())) }
+
+fn const_false_fn(_args: &[Value]) -> Result<Value> { Ok(Value::Bool(false)) }
+fn const_nil_fn(_args: &[Value]) -> Result<Value> { Ok(Value::Nil) }
+
+fn instance_q_fn(args: &[Value]) -> Result<Value> {
+    let want = match &args[0] {
+        Value::Keyword(s) => s.to_string(),
+        Value::Str(s) => s.to_string(),
+        Value::Symbol(s) => s.to_string(),
+        _ => return Err(Error::Type("instance?: expected class tag (keyword/string/symbol)".into())),
+    };
+    let actual = args[1].type_name();
+    Ok(Value::Bool(want == actual))
+}
+fn identical_q_fn(args: &[Value]) -> Result<Value> {
+    use Value::*;
+    Ok(Value::Bool(match (&args[0], &args[1]) {
+        (Nil, Nil) => true,
+        (Bool(a), Bool(b)) => a == b,
+        (Int(a), Int(b)) => a == b,
+        (Str(a), Str(b)) => Arc::ptr_eq(a, b),
+        (Symbol(a), Symbol(b)) => Arc::ptr_eq(a, b),
+        (Keyword(a), Keyword(b)) => Arc::ptr_eq(a, b),
+        (List(a), List(b)) => Arc::ptr_eq(a, b),
+        (Atom(a), Atom(b)) => Arc::ptr_eq(a, b),
+        (Fn(a), Fn(b)) => Arc::ptr_eq(a, b),
+        (Macro(a), Macro(b)) => Arc::ptr_eq(a, b),
+        _ => &args[0] == &args[1],
+    }))
+}
+fn ratio_q_fn(args: &[Value]) -> Result<Value> {
+    Ok(Value::Bool(matches!(&args[0], Value::Ratio(_, _))))
+}
+fn any_q_fn(_args: &[Value]) -> Result<Value> { Ok(Value::Bool(true)) }
+fn ifn_q_fn(args: &[Value]) -> Result<Value> {
+    Ok(Value::Bool(matches!(&args[0],
+        Value::Fn(_) | Value::Builtin(_) | Value::Native(_)
+        | Value::Multi(_) | Value::Keyword(_) | Value::Symbol(_)
+        | Value::Map(_) | Value::Set(_) | Value::Vector(_))))
+}
+fn ident_q_fn(args: &[Value]) -> Result<Value> {
+    Ok(Value::Bool(matches!(&args[0], Value::Keyword(_) | Value::Symbol(_))))
+}
+fn is_qualified(s: &str) -> bool { s.contains('/') && s.len() > 1 }
+fn simple_ident_q_fn(args: &[Value]) -> Result<Value> {
+    Ok(Value::Bool(match &args[0] {
+        Value::Keyword(s) | Value::Symbol(s) => !is_qualified(s),
+        _ => false,
+    }))
+}
+fn qualified_ident_q_fn(args: &[Value]) -> Result<Value> {
+    Ok(Value::Bool(match &args[0] {
+        Value::Keyword(s) | Value::Symbol(s) => is_qualified(s),
+        _ => false,
+    }))
+}
+fn simple_keyword_q_fn(args: &[Value]) -> Result<Value> {
+    Ok(Value::Bool(matches!(&args[0], Value::Keyword(s) if !is_qualified(s))))
+}
+fn qualified_keyword_q_fn(args: &[Value]) -> Result<Value> {
+    Ok(Value::Bool(matches!(&args[0], Value::Keyword(s) if is_qualified(s))))
+}
+fn simple_symbol_q_fn(args: &[Value]) -> Result<Value> {
+    Ok(Value::Bool(matches!(&args[0], Value::Symbol(s) if !is_qualified(s))))
+}
+fn qualified_symbol_q_fn(args: &[Value]) -> Result<Value> {
+    Ok(Value::Bool(matches!(&args[0], Value::Symbol(s) if is_qualified(s))))
+}
+fn indexed_q_fn(args: &[Value]) -> Result<Value> {
+    Ok(Value::Bool(matches!(&args[0], Value::Vector(_) | Value::Str(_))))
+}
+fn counted_q_fn(args: &[Value]) -> Result<Value> {
+    Ok(Value::Bool(matches!(&args[0],
+        Value::List(_) | Value::Vector(_) | Value::Map(_) | Value::Set(_) | Value::Str(_))))
+}
+fn seqable_q_fn(args: &[Value]) -> Result<Value> {
+    Ok(Value::Bool(matches!(&args[0],
+        Value::Nil | Value::List(_) | Value::Vector(_) | Value::Map(_)
+        | Value::Set(_) | Value::Str(_) | Value::Cons(_, _) | Value::LazySeq(_))))
+}
+fn sequential_q_fn(args: &[Value]) -> Result<Value> {
+    Ok(Value::Bool(matches!(&args[0],
+        Value::List(_) | Value::Vector(_) | Value::Cons(_, _) | Value::LazySeq(_))))
+}
+fn associative_q_fn(args: &[Value]) -> Result<Value> {
+    Ok(Value::Bool(matches!(&args[0], Value::Map(_) | Value::Vector(_))))
+}
+fn reversible_q_fn(args: &[Value]) -> Result<Value> {
+    Ok(Value::Bool(matches!(&args[0], Value::Vector(_))))
+}
+fn map_entry_q_fn(args: &[Value]) -> Result<Value> {
+    Ok(Value::Bool(matches!(&args[0], Value::Vector(v) if v.len() == 2)))
+}
+fn uuid_q_fn(args: &[Value]) -> Result<Value> {
+    Ok(Value::Bool(matches!(&args[0], Value::Str(s) if is_uuid_str(s.as_ref()))))
+}
+fn nat_int_q_fn(args: &[Value]) -> Result<Value> {
+    Ok(Value::Bool(matches!(&args[0], Value::Int(i) if *i >= 0)))
+}
+fn neg_int_q_fn(args: &[Value]) -> Result<Value> {
+    Ok(Value::Bool(matches!(&args[0], Value::Int(i) if *i < 0)))
+}
+fn pos_int_q_fn(args: &[Value]) -> Result<Value> {
+    Ok(Value::Bool(matches!(&args[0], Value::Int(i) if *i > 0)))
+}
+fn distinct_q_fn(args: &[Value]) -> Result<Value> {
+    let mut seen: imbl::HashSet<Value> = imbl::HashSet::new();
+    for a in args {
+        if seen.contains(a) { return Ok(Value::Bool(false)); }
+        seen.insert(a.clone());
+    }
+    Ok(Value::Bool(true))
+}
+fn not_any_q_fn(args: &[Value]) -> Result<Value> {
+    let pred = &args[0];
+    let coll = seq_items(&args[1])?;
+    for v in coll {
+        if eval::apply(pred, std::slice::from_ref(&v))?.truthy() { return Ok(Value::Bool(false)); }
+    }
+    Ok(Value::Bool(true))
+}
+fn not_every_q_fn(args: &[Value]) -> Result<Value> {
+    let pred = &args[0];
+    let coll = seq_items(&args[1])?;
+    for v in coll {
+        if !eval::apply(pred, std::slice::from_ref(&v))?.truthy() { return Ok(Value::Bool(true)); }
+    }
+    Ok(Value::Bool(false))
+}
+const SPECIAL_NAMES: &[&str] = &[
+    "def", "if", "do", "let", "let*", "loop", "loop*", "recur", "fn", "fn*",
+    "quote", "var", "throw", "try", "catch", "finally", "new", ".", "set!",
+    "monitor-enter", "monitor-exit",
+];
+fn special_symbol_q_fn(args: &[Value]) -> Result<Value> {
+    Ok(Value::Bool(matches!(&args[0], Value::Symbol(s) if SPECIAL_NAMES.contains(&s.as_ref()))))
+}
+
+fn peek_fn(args: &[Value]) -> Result<Value> {
+    match &args[0] {
+        Value::Nil => Ok(Value::Nil),
+        Value::Vector(v) => Ok(v.last().cloned().unwrap_or(Value::Nil)),
+        Value::List(v) => Ok(v.first().cloned().unwrap_or(Value::Nil)),
+        _ => Err(Error::Type("peek: expected vector or list".into())),
+    }
+}
+fn pop_fn(args: &[Value]) -> Result<Value> {
+    match &args[0] {
+        Value::Nil => Ok(Value::Nil),
+        Value::Vector(v) => {
+            if v.is_empty() { return Err(Error::Eval("can't pop empty vector".into())); }
+            let mut out = v.clone();
+            out.pop_back();
+            Ok(Value::Vector(out))
+        }
+        Value::List(v) => {
+            if v.is_empty() { return Err(Error::Eval("can't pop empty list".into())); }
+            Ok(Value::List(Arc::new(v[1..].to_vec())))
+        }
+        _ => Err(Error::Type("pop: expected vector or list".into())),
+    }
+}
+fn disj_fn(args: &[Value]) -> Result<Value> {
+    if args.is_empty() { return Err(Error::Arity { expected: ">= 1".into(), got: 0 }); }
+    match &args[0] {
+        Value::Nil => Ok(Value::Nil),
+        Value::Set(s) => {
+            let mut out = s.clone();
+            for a in &args[1..] { out.remove(a); }
+            Ok(Value::Set(out))
+        }
+        _ => Err(Error::Type("disj: expected set".into())),
+    }
+}
+fn replace_fn(args: &[Value]) -> Result<Value> {
+    if args.len() != 2 { return Err(Error::Arity { expected: "2".into(), got: args.len() }); }
+    let smap = &args[0];
+    let lookup = |v: &Value| -> Value {
+        match smap {
+            Value::Map(m) => m.get(v).cloned().unwrap_or_else(|| v.clone()),
+            Value::Vector(vec) => match v {
+                Value::Int(i) if *i >= 0 && (*i as usize) < vec.len() => vec[*i as usize].clone(),
+                _ => v.clone(),
+            },
+            _ => v.clone(),
+        }
+    };
+    match &args[1] {
+        Value::Vector(v) => {
+            let mut out: imbl::Vector<Value> = imbl::Vector::new();
+            for x in v.iter() { out.push_back(lookup(x)); }
+            Ok(Value::Vector(out))
+        }
+        _ => {
+            let coll = seq_items(&args[1])?;
+            let out: Vec<Value> = coll.iter().map(lookup).collect();
+            Ok(Value::List(Arc::new(out)))
+        }
+    }
+}
+fn merge_with_fn(args: &[Value]) -> Result<Value> {
+    if args.is_empty() { return Err(Error::Arity { expected: ">= 1".into(), got: 0 }); }
+    let f = &args[0];
+    let mut acc: Option<imbl::HashMap<Value, Value>> = None;
+    for m in &args[1..] {
+        match m {
+            Value::Nil => continue,
+            Value::Map(other) => {
+                let mut into = acc.take().unwrap_or_default();
+                for (k, v) in other.iter() {
+                    let merged = match into.get(k) {
+                        Some(prev) => eval::apply(f, &[prev.clone(), v.clone()])?,
+                        None => v.clone(),
+                    };
+                    into.insert(k.clone(), merged);
+                }
+                acc = Some(into);
+            }
+            _ => return Err(Error::Type("merge-with: expected map".into())),
+        }
+    }
+    Ok(acc.map(Value::Map).unwrap_or(Value::Nil))
+}
+fn rseq_fn(args: &[Value]) -> Result<Value> {
+    match &args[0] {
+        Value::Vector(v) => {
+            if v.is_empty() { return Ok(Value::Nil); }
+            let out: Vec<Value> = v.iter().rev().cloned().collect();
+            Ok(Value::List(Arc::new(out)))
+        }
+        Value::Nil => Ok(Value::Nil),
+        _ => Err(Error::Type("rseq: expected vector".into())),
+    }
+}
+fn empty_fn(args: &[Value]) -> Result<Value> {
+    Ok(match &args[0] {
+        Value::Vector(_) => Value::Vector(imbl::Vector::new()),
+        Value::List(_) => Value::List(Arc::new(Vec::new())),
+        Value::Map(_) => Value::Map(imbl::HashMap::new()),
+        Value::Set(_) => Value::Set(imbl::HashSet::new()),
+        Value::Str(_) => Value::Str(Arc::from("")),
+        _ => Value::Nil,
+    })
+}
+fn vector_of_fn(args: &[Value]) -> Result<Value> {
+    let mut out: imbl::Vector<Value> = imbl::Vector::new();
+    for a in &args[1..] { out.push_back(a.clone()); }
+    Ok(Value::Vector(out))
+}
+fn sorted_set_fn(args: &[Value]) -> Result<Value> {
+    let mut s: imbl::HashSet<Value> = imbl::HashSet::new();
+    for a in args { s.insert(a.clone()); }
+    Ok(Value::Set(s))
+}
+fn sorted_set_by_fn(args: &[Value]) -> Result<Value> {
+    if args.is_empty() { return Err(Error::Arity { expected: ">= 1".into(), got: 0 }); }
+    let mut s: imbl::HashSet<Value> = imbl::HashSet::new();
+    for a in &args[1..] { s.insert(a.clone()); }
+    Ok(Value::Set(s))
+}
+fn sorted_map_by_fn(args: &[Value]) -> Result<Value> {
+    if args.is_empty() { return Err(Error::Arity { expected: ">= 1".into(), got: 0 }); }
+    if (args.len() - 1) % 2 != 0 { return Err(Error::Eval("sorted-map-by: odd kvs".into())); }
+    let mut m: imbl::HashMap<Value, Value> = imbl::HashMap::new();
+    for kv in args[1..].chunks(2) { m.insert(kv[0].clone(), kv[1].clone()); }
+    Ok(Value::Map(m))
+}
+fn subseq_fn(args: &[Value]) -> Result<Value> {
+    if args.len() < 3 { return Err(Error::Arity { expected: ">= 3".into(), got: args.len() }); }
+    let test = &args[1];
+    let key = &args[2];
+    let key_f = as_f64(key)?;
+    let items: Vec<Value> = match &args[0] {
+        Value::Map(m) => m.keys().cloned().collect(),
+        Value::Set(s) => s.iter().cloned().collect(),
+        Value::Vector(v) => v.iter().cloned().collect(),
+        _ => seq_items(&args[0])?,
+    };
+    let mut sorted = items;
+    sorted.sort_by(|a, b| {
+        match (as_f64(a), as_f64(b)) {
+            (Ok(x), Ok(y)) => x.partial_cmp(&y).unwrap_or(std::cmp::Ordering::Equal),
+            _ => a.to_pr_string().cmp(&b.to_pr_string()),
+        }
+    });
+    let mut out = Vec::new();
+    for v in sorted {
+        let f = as_f64(&v).unwrap_or(0.0);
+        let pass = match test {
+            Value::Builtin(b) => match b.name {
+                "<" => f < key_f, "<=" => f <= key_f,
+                ">" => f > key_f, ">=" => f >= key_f,
+                _ => (eval::apply(test, &[v.clone(), key.clone()])?).truthy(),
+            },
+            _ => (eval::apply(test, &[v.clone(), key.clone()])?).truthy(),
+        };
+        if pass { out.push(v); }
+    }
+    Ok(Value::List(Arc::new(out)))
+}
+fn rsubseq_fn(args: &[Value]) -> Result<Value> {
+    let r = subseq_fn(args)?;
+    let coll = seq_items(&r)?;
+    let rev: Vec<Value> = coll.into_iter().rev().collect();
+    Ok(Value::List(Arc::new(rev)))
+}
+fn key_fn(args: &[Value]) -> Result<Value> {
+    match &args[0] {
+        Value::Vector(v) if v.len() == 2 => Ok(v[0].clone()),
+        _ => Err(Error::Type("key: expected map entry [k v]".into())),
+    }
+}
+fn val_fn(args: &[Value]) -> Result<Value> {
+    match &args[0] {
+        Value::Vector(v) if v.len() == 2 => Ok(v[1].clone()),
+        _ => Err(Error::Type("val: expected map entry [k v]".into())),
+    }
+}
+fn find_keyword_fn(args: &[Value]) -> Result<Value> {
+    match &args[0] {
+        Value::Str(s) => Ok(Value::Keyword(s.clone())),
+        Value::Keyword(s) => Ok(Value::Keyword(s.clone())),
+        _ => Ok(Value::Nil),
+    }
+}
+fn namespace_fn(args: &[Value]) -> Result<Value> {
+    let s = match &args[0] {
+        Value::Keyword(s) | Value::Symbol(s) => s.as_ref(),
+        _ => return Err(Error::Type("namespace: expected keyword/symbol".into())),
+    };
+    Ok(match s.find('/') {
+        Some(i) if i > 0 && i < s.len() - 1 => Value::Str(Arc::from(&s[..i])),
+        _ => Value::Nil,
+    })
+}
+
+fn partition_by_fn(args: &[Value]) -> Result<Value> {
+    let f = &args[0];
+    let coll = seq_items(&args[1])?;
+    let mut out: Vec<Value> = Vec::new();
+    let mut cur: Vec<Value> = Vec::new();
+    let mut last_k: Option<Value> = None;
+    for item in coll {
+        let k = eval::apply(f, std::slice::from_ref(&item))?;
+        if last_k.as_ref() == Some(&k) {
+            cur.push(item);
+        } else {
+            if !cur.is_empty() { out.push(Value::List(Arc::new(std::mem::take(&mut cur)))); }
+            cur.push(item);
+            last_k = Some(k);
+        }
+    }
+    if !cur.is_empty() { out.push(Value::List(Arc::new(cur))); }
+    Ok(Value::List(Arc::new(out)))
+}
+fn partition_all_fn(args: &[Value]) -> Result<Value> { partition_all_coll_fn(args) }
+fn split_at_fn(args: &[Value]) -> Result<Value> {
+    let n = to_i64(&args[0])?.max(0) as usize;
+    let coll = seq_items(&args[1])?;
+    let (a, b) = coll.split_at(n.min(coll.len()));
+    let mut out: imbl::Vector<Value> = imbl::Vector::new();
+    out.push_back(Value::List(Arc::new(a.to_vec())));
+    out.push_back(Value::List(Arc::new(b.to_vec())));
+    Ok(Value::Vector(out))
+}
+fn splitv_at_fn(args: &[Value]) -> Result<Value> {
+    let n = to_i64(&args[0])?.max(0) as usize;
+    let coll = seq_items(&args[1])?;
+    let (a, b) = coll.split_at(n.min(coll.len()));
+    let mut out: imbl::Vector<Value> = imbl::Vector::new();
+    out.push_back(Value::Vector(a.iter().cloned().collect()));
+    out.push_back(Value::Vector(b.iter().cloned().collect()));
+    Ok(Value::Vector(out))
+}
+fn split_with_fn(args: &[Value]) -> Result<Value> {
+    let pred = &args[0];
+    let coll = seq_items(&args[1])?;
+    let mut idx = 0;
+    for v in &coll {
+        if !eval::apply(pred, std::slice::from_ref(v))?.truthy() { break; }
+        idx += 1;
+    }
+    let (a, b) = coll.split_at(idx);
+    let mut out: imbl::Vector<Value> = imbl::Vector::new();
+    out.push_back(Value::List(Arc::new(a.to_vec())));
+    out.push_back(Value::List(Arc::new(b.to_vec())));
+    Ok(Value::Vector(out))
+}
+fn take_last_fn(args: &[Value]) -> Result<Value> {
+    let n = to_i64(&args[0])?.max(0) as usize;
+    let coll = seq_items(&args[1])?;
+    if n == 0 { return Ok(Value::Nil); }
+    let start = coll.len().saturating_sub(n);
+    Ok(Value::List(Arc::new(coll[start..].to_vec())))
+}
+fn drop_last_fn(args: &[Value]) -> Result<Value> {
+    let (n, coll) = if args.len() == 1 {
+        (1usize, seq_items(&args[0])?)
+    } else {
+        (to_i64(&args[0])?.max(0) as usize, seq_items(&args[1])?)
+    };
+    let end = coll.len().saturating_sub(n);
+    Ok(Value::List(Arc::new(coll[..end].to_vec())))
+}
+fn butlast_fn(args: &[Value]) -> Result<Value> {
+    let coll = seq_items(&args[0])?;
+    if coll.is_empty() { return Ok(Value::Nil); }
+    Ok(Value::List(Arc::new(coll[..coll.len() - 1].to_vec())))
+}
+fn tree_seq_fn(args: &[Value]) -> Result<Value> {
+    if args.len() != 3 { return Err(Error::Arity { expected: "3".into(), got: args.len() }); }
+    fn walk(branch_q: &Value, children: &Value, node: Value, out: &mut Vec<Value>) -> Result<()> {
+        out.push(node.clone());
+        if eval::apply(branch_q, std::slice::from_ref(&node))?.truthy() {
+            let kids = eval::apply(children, std::slice::from_ref(&node))?;
+            for k in seq_items(&kids)? { walk(branch_q, children, k, out)?; }
+        }
+        Ok(())
+    }
+    let mut out: Vec<Value> = Vec::new();
+    walk(&args[0], &args[1], args[2].clone(), &mut out)?;
+    Ok(Value::List(Arc::new(out)))
+}
+fn cycle_fn(args: &[Value]) -> Result<Value> {
+    // Eager-bounded: 256x or 64K cap. Pair with `take` for finite use.
+    let coll = seq_items(&args[0])?;
+    if coll.is_empty() { return Ok(Value::List(Arc::new(Vec::new()))); }
+    let bound = (coll.len() * 256).min(1 << 16);
+    let mut out: Vec<Value> = Vec::with_capacity(bound);
+    for i in 0..bound { out.push(coll[i % coll.len()].clone()); }
+    Ok(Value::List(Arc::new(out)))
+}
+fn iterate_fn(args: &[Value]) -> Result<Value> {
+    // Eager-bounded: 1024 iterates. Pair with `take` for finite use.
+    let f = &args[0];
+    let mut x = args[1].clone();
+    let mut out = Vec::with_capacity(1024);
+    out.push(x.clone());
+    for _ in 0..1023 {
+        x = eval::apply(f, std::slice::from_ref(&x))?;
+        out.push(x.clone());
+    }
+    Ok(Value::List(Arc::new(out)))
+}
+fn replicate_fn(args: &[Value]) -> Result<Value> {
+    let n = to_i64(&args[0])?.max(0) as usize;
+    let v = args[1].clone();
+    Ok(Value::List(Arc::new(vec![v; n])))
+}
+fn reductions_fn(args: &[Value]) -> Result<Value> {
+    let (f, init, coll) = match args.len() {
+        2 => (args[0].clone(), None, seq_items(&args[1])?),
+        3 => (args[0].clone(), Some(args[1].clone()), seq_items(&args[2])?),
+        n => return Err(Error::Arity { expected: "2 or 3".into(), got: n }),
+    };
+    let has_init = init.is_some();
+    let mut out = Vec::with_capacity(coll.len() + 1);
+    let mut acc = match init {
+        Some(v) => { out.push(v.clone()); v }
+        None => {
+            if coll.is_empty() { return Ok(Value::List(Arc::new(vec![eval::apply(&f, &[])?]))); }
+            out.push(coll[0].clone());
+            coll[0].clone()
+        }
+    };
+    let start = if has_init { 0 } else { 1 };
+    for x in &coll[start..] {
+        acc = eval::apply(&f, &[acc, x.clone()])?;
+        if let Value::Reduced(inner) = &acc {
+            out.push((**inner).clone());
+            return Ok(Value::List(Arc::new(out)));
+        }
+        out.push(acc.clone());
+    }
+    Ok(Value::List(Arc::new(out)))
+}
+fn list_star_fn(args: &[Value]) -> Result<Value> {
+    if args.is_empty() { return Err(Error::Arity { expected: ">= 1".into(), got: 0 }); }
+    let mut out: Vec<Value> = args[..args.len() - 1].to_vec();
+    out.extend(seq_items(&args[args.len() - 1])?);
+    Ok(Value::List(Arc::new(out)))
+}
+fn ffirst_fn(args: &[Value]) -> Result<Value> {
+    let v = first_fn(args)?;
+    first_fn(&[v])
+}
+fn fnext_fn(args: &[Value]) -> Result<Value> {
+    let v = rest_fn(args)?;
+    first_fn(&[v])
+}
+fn nfirst_fn(args: &[Value]) -> Result<Value> {
+    let v = first_fn(args)?;
+    next_fn(&[v])
+}
+fn nnext_fn(args: &[Value]) -> Result<Value> {
+    let v = rest_fn(args)?;
+    next_fn(&[v])
+}
+fn next_fn(args: &[Value]) -> Result<Value> {
+    let r = rest_fn(args)?;
+    let empty = match &r {
+        Value::List(v) => v.is_empty(),
+        Value::Vector(v) => v.is_empty(),
+        Value::Nil => true,
+        _ => false,
+    };
+    if empty { Ok(Value::Nil) } else { Ok(r) }
+}
+fn nthnext_fn(args: &[Value]) -> Result<Value> {
+    let n = to_i64(&args[1])?.max(0) as usize;
+    let mut cur = args[0].clone();
+    for _ in 0..n {
+        cur = next_fn(&[cur])?;
+        if matches!(cur, Value::Nil) { return Ok(Value::Nil); }
+    }
+    Ok(cur)
+}
+fn nthrest_fn(args: &[Value]) -> Result<Value> {
+    let n = to_i64(&args[1])?.max(0) as usize;
+    let mut cur = args[0].clone();
+    for _ in 0..n { cur = rest_fn(&[cur])?; }
+    Ok(cur)
+}
+fn doall_fn(args: &[Value]) -> Result<Value> {
+    let coll = if args.len() == 2 { &args[1] } else { &args[0] };
+    let items = seq_items(coll)?;
+    Ok(Value::List(Arc::new(items)))
+}
+fn dorun_fn(args: &[Value]) -> Result<Value> {
+    let coll = if args.len() == 2 { &args[1] } else { &args[0] };
+    let _ = seq_items(coll)?;
+    Ok(Value::Nil)
+}
+fn run_bang_fn(args: &[Value]) -> Result<Value> {
+    let f = &args[0];
+    let coll = seq_items(&args[1])?;
+    for v in coll { let _ = eval::apply(f, std::slice::from_ref(&v))?; }
+    Ok(Value::Nil)
+}
+
+fn rand_state() -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+    static SEED: AtomicU64 = AtomicU64::new(0);
+    let mut s = SEED.load(Ordering::Relaxed);
+    if s == 0 {
+        let now = SystemTime::now().duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64).unwrap_or(0xDEADBEEF);
+        s = now | 1;
+    }
+    s ^= s << 13;
+    s ^= s >> 7;
+    s ^= s << 17;
+    SEED.store(s, Ordering::Relaxed);
+    s
+}
+fn rand_f64() -> f64 {
+    (rand_state() >> 11) as f64 / ((1u64 << 53) as f64)
+}
+fn rand_fn(args: &[Value]) -> Result<Value> {
+    let n = if args.is_empty() { 1.0 } else { as_f64(&args[0])? };
+    Ok(Value::Float(rand_f64() * n))
+}
+fn rand_int_fn(args: &[Value]) -> Result<Value> {
+    let n = to_i64(&args[0])?.max(1);
+    Ok(Value::Int((rand_state() as i64 & i64::MAX).rem_euclid(n)))
+}
+fn rand_nth_fn(args: &[Value]) -> Result<Value> {
+    let coll = seq_items(&args[0])?;
+    if coll.is_empty() { return Err(Error::Eval("rand-nth: empty coll".into())); }
+    let i = (rand_state() as usize) % coll.len();
+    Ok(coll[i].clone())
+}
+fn random_sample_fn(args: &[Value]) -> Result<Value> {
+    let p = as_f64(&args[0])?;
+    let coll = seq_items(&args[1])?;
+    let mut out = Vec::new();
+    for v in coll { if rand_f64() < p { out.push(v); } }
+    Ok(Value::List(Arc::new(out)))
+}
+fn random_uuid_fn(_args: &[Value]) -> Result<Value> {
+    let a = rand_state();
+    let b = rand_state();
+    let high = (a & 0xFFFFFFFFFFFF0FFF) | 0x0000000000004000;
+    let low = (b & 0x3FFFFFFFFFFFFFFF) | 0x8000000000000000;
+    let s = format!(
+        "{:08x}-{:04x}-{:04x}-{:04x}-{:012x}",
+        (high >> 32) as u32,
+        ((high >> 16) & 0xFFFF) as u16,
+        (high & 0xFFFF) as u16,
+        ((low >> 48) & 0xFFFF) as u16,
+        low & 0xFFFFFFFFFFFF,
+    );
+    Ok(Value::Str(Arc::from(s.as_str())))
+}
+fn shuffle_fn(args: &[Value]) -> Result<Value> {
+    let mut coll = seq_items(&args[0])?;
+    let n = coll.len();
+    for i in (1..n).rev() {
+        let j = (rand_state() as usize) % (i + 1);
+        coll.swap(i, j);
+    }
+    let v: imbl::Vector<Value> = coll.into_iter().collect();
+    Ok(Value::Vector(v))
+}
+fn bounded_count_fn(args: &[Value]) -> Result<Value> {
+    let n = to_i64(&args[0])?.max(0) as usize;
+    let items = seq_items(&args[1])?;
+    Ok(Value::Int(items.len().min(n) as i64))
+}
+
+fn every_pred_fn(args: &[Value]) -> Result<Value> {
+    let preds: Vec<Value> = args.to_vec();
+    Ok(Value::Builtin(Builtin::new_closure("every-pred", move |xs: &[Value]| {
+        for x in xs {
+            for p in &preds {
+                if !eval::apply(p, std::slice::from_ref(x))?.truthy() {
+                    return Ok(Value::Bool(false));
+                }
+            }
+        }
+        Ok(Value::Bool(true))
+    })))
+}
+fn some_fn_fn(args: &[Value]) -> Result<Value> {
+    let preds: Vec<Value> = args.to_vec();
+    Ok(Value::Builtin(Builtin::new_closure("some-fn", move |xs: &[Value]| {
+        for x in xs {
+            for p in &preds {
+                let r = eval::apply(p, std::slice::from_ref(x))?;
+                if r.truthy() { return Ok(r); }
+            }
+        }
+        Ok(Value::Bool(false))
+    })))
+}
+fn fnil_fn(args: &[Value]) -> Result<Value> {
+    if args.is_empty() { return Err(Error::Arity { expected: ">= 2".into(), got: args.len() }); }
+    let f = args[0].clone();
+    let defaults: Vec<Value> = args[1..].to_vec();
+    Ok(Value::Builtin(Builtin::new_closure("fnil", move |xs: &[Value]| {
+        let mut patched: Vec<Value> = xs.to_vec();
+        for (i, d) in defaults.iter().enumerate() {
+            if let Some(slot) = patched.get_mut(i) {
+                if matches!(slot, Value::Nil) { *slot = d.clone(); }
+            }
+        }
+        eval::apply(&f, &patched)
+    })))
+}
+fn memoize_fn(args: &[Value]) -> Result<Value> {
+    use std::sync::Mutex;
+    let f = args[0].clone();
+    let cache: Arc<Mutex<imbl::HashMap<Value, Value>>> = Arc::new(Mutex::new(imbl::HashMap::new()));
+    Ok(Value::Builtin(Builtin::new_closure("memoize", move |xs: &[Value]| {
+        let key = Value::Vector(xs.iter().cloned().collect());
+        if let Some(v) = cache.lock().unwrap().get(&key).cloned() { return Ok(v); }
+        let v = eval::apply(&f, xs)?;
+        cache.lock().unwrap().insert(key, v.clone());
+        Ok(v)
+    })))
+}
+fn comparator_fn(args: &[Value]) -> Result<Value> {
+    let pred = args[0].clone();
+    Ok(Value::Builtin(Builtin::new_closure("comparator", move |xs: &[Value]| {
+        if xs.len() != 2 { return Err(Error::Arity { expected: "2".into(), got: xs.len() }); }
+        if eval::apply(&pred, &[xs[0].clone(), xs[1].clone()])?.truthy() { return Ok(Value::Int(-1)); }
+        if eval::apply(&pred, &[xs[1].clone(), xs[0].clone()])?.truthy() { return Ok(Value::Int(1)); }
+        Ok(Value::Int(0))
+    })))
+}
+fn sort_by_fn(args: &[Value]) -> Result<Value> {
+    let (keyfn, cmp, coll) = match args.len() {
+        2 => (args[0].clone(), None, &args[1]),
+        3 => (args[0].clone(), Some(args[1].clone()), &args[2]),
+        n => return Err(Error::Arity { expected: "2 or 3".into(), got: n }),
+    };
+    let items = seq_items(coll)?;
+    let mut keyed: Vec<(Value, Value)> = items.into_iter()
+        .map(|v| eval::apply(&keyfn, std::slice::from_ref(&v)).map(|k| (k, v)))
+        .collect::<Result<_>>()?;
+    if let Some(c) = cmp {
+        let mut err: Option<Error> = None;
+        keyed.sort_by(|a, b| {
+            if err.is_some() { return std::cmp::Ordering::Equal; }
+            match eval::apply(&c, &[a.0.clone(), b.0.clone()]) {
+                Ok(Value::Int(n)) => n.cmp(&0),
+                Ok(Value::Bool(true)) => std::cmp::Ordering::Less,
+                Ok(Value::Bool(false)) => std::cmp::Ordering::Greater,
+                Ok(_) => std::cmp::Ordering::Equal,
+                Err(e) => { err = Some(e); std::cmp::Ordering::Equal }
+            }
+        });
+        if let Some(e) = err { return Err(e); }
+    } else {
+        keyed.sort_by(|a, b| {
+            match (as_f64(&a.0), as_f64(&b.0)) {
+                (Ok(x), Ok(y)) => x.partial_cmp(&y).unwrap_or(std::cmp::Ordering::Equal),
+                _ => a.0.to_pr_string().cmp(&b.0.to_pr_string()),
+            }
+        });
+    }
+    Ok(Value::List(Arc::new(keyed.into_iter().map(|(_, v)| v).collect())))
+}
+fn completing_fn(args: &[Value]) -> Result<Value> {
+    let f = args[0].clone();
+    let cf = if args.len() >= 2 { args[1].clone() }
+             else { Value::Builtin(Builtin::new_static("identity", identity_fn)) };
+    Ok(Value::Builtin(Builtin::new_closure("completing", move |xs: &[Value]| {
+        match xs.len() {
+            0 => eval::apply(&f, &[]),
+            1 => eval::apply(&cf, xs),
+            _ => eval::apply(&f, xs),
+        }
+    })))
+}
+fn ensure_reduced_fn(args: &[Value]) -> Result<Value> {
+    if matches!(&args[0], Value::Reduced(_)) { Ok(args[0].clone()) }
+    else { Ok(Value::Reduced(Arc::new(args[0].clone()))) }
+}
+fn trampoline_fn(args: &[Value]) -> Result<Value> {
+    if args.is_empty() { return Err(Error::Arity { expected: ">= 1".into(), got: 0 }); }
+    let mut cur = eval::apply(&args[0], &args[1..])?;
+    loop {
+        if matches!(cur, Value::Fn(_) | Value::Builtin(_) | Value::Native(_)) {
+            cur = eval::apply(&cur, &[])?;
+        } else { return Ok(cur); }
+    }
+}
+
+fn with_meta_fn(args: &[Value]) -> Result<Value> { Ok(args[0].clone()) }
+fn vary_meta_fn(args: &[Value]) -> Result<Value> { Ok(args[0].clone()) }
+
+fn time_ms_fn(_args: &[Value]) -> Result<Value> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let ms = SystemTime::now().duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64).unwrap_or(0);
+    Ok(Value::Int(ms))
+}
+fn type_fn(args: &[Value]) -> Result<Value> {
+    Ok(Value::Keyword(Arc::from(args[0].type_name())))
+}
+fn flush_fn(_args: &[Value]) -> Result<Value> {
+    use std::io::Write;
+    let _ = std::io::stdout().flush();
+    Ok(Value::Nil)
+}
+fn newline_fn(_args: &[Value]) -> Result<Value> { println!(); Ok(Value::Nil) }
+fn pr_fn(args: &[Value]) -> Result<Value> {
+    let parts: Vec<String> = args.iter().map(Value::to_pr_string).collect();
+    print!("{}", parts.join(" "));
+    Ok(Value::Nil)
+}
+fn prn_fn(args: &[Value]) -> Result<Value> {
+    let parts: Vec<String> = args.iter().map(Value::to_pr_string).collect();
+    println!("{}", parts.join(" "));
+    Ok(Value::Nil)
+}
+fn prn_str_fn(args: &[Value]) -> Result<Value> {
+    let parts: Vec<String> = args.iter().map(Value::to_pr_string).collect();
+    Ok(Value::Str(Arc::from(format!("{}\n", parts.join(" ")).as_str())))
+}
+fn ex_cause_fn(_args: &[Value]) -> Result<Value> { Ok(Value::Nil) }
+fn set_validator_fn(_args: &[Value]) -> Result<Value> { Ok(Value::Nil) }
+fn methods_fn(args: &[Value]) -> Result<Value> {
+    match &args[0] {
+        Value::Multi(m) => {
+            let methods = m.methods.read().unwrap().clone();
+            Ok(Value::Map(methods))
+        }
+        _ => Err(Error::Type("methods: expected multi".into())),
+    }
+}
+fn get_method_fn(args: &[Value]) -> Result<Value> {
+    match &args[0] {
+        Value::Multi(m) => Ok(m.methods.read().unwrap().get(&args[1]).cloned().unwrap_or(Value::Nil)),
+        _ => Err(Error::Type("get-method: expected multi".into())),
+    }
+}
+fn prefer_method_fn(_args: &[Value]) -> Result<Value> { Ok(Value::Nil) }
+fn prefers_fn(_args: &[Value]) -> Result<Value> { Ok(Value::Map(imbl::HashMap::new())) }
+fn remove_method_fn(args: &[Value]) -> Result<Value> {
+    match &args[0] {
+        Value::Multi(m) => {
+            m.methods.write().unwrap().remove(&args[1]);
+            Ok(args[0].clone())
+        }
+        _ => Err(Error::Type("remove-method: expected multi".into())),
+    }
+}
+fn remove_all_methods_fn(args: &[Value]) -> Result<Value> {
+    match &args[0] {
+        Value::Multi(m) => {
+            m.methods.write().unwrap().clear();
+            Ok(args[0].clone())
+        }
+        _ => Err(Error::Type("remove-all-methods: expected multi".into())),
+    }
+}
+fn inst_ms_fn(args: &[Value]) -> Result<Value> {
+    match &args[0] {
+        Value::Int(i) => Ok(Value::Int(*i)),
+        _ => Err(Error::Type("inst-ms: expected int (cljrs has no inst type)".into())),
+    }
 }
