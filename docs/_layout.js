@@ -219,6 +219,16 @@ export function attachAltDragScrub(editor, monaco) {
   const dom = editor.getDomNode();
   if (!dom) return;
 
+  // Disable Monaco's Alt-as-multicursor and column-selection so our
+  // Alt+drag wins on macOS (where Alt-click otherwise opens a column
+  // selection).
+  try {
+    editor.updateOptions({
+      multiCursorModifier: "ctrlCmd",
+      columnSelection: false,
+    });
+  } catch {}
+
   // ----- helpers -----
   const NUM_RE   = /-?\d+(?:\.\d+)?/g;
   const HEX_RE   = /"#[0-9a-fA-F]{6}"/g;
@@ -284,9 +294,13 @@ export function attachAltDragScrub(editor, monaco) {
   }
 
   // Suppress mousedown so Monaco doesn't move the cursor / start a
-  // drag-select while we're scrubbing.
-  dom.addEventListener("mousedown", (e) => {
+  // drag-select / column-select while we're scrubbing. We have to
+  // catch on the WINDOW in capture phase + stopImmediatePropagation,
+  // because Monaco attaches its own capture listeners on inner
+  // overlay nodes that would otherwise run first.
+  window.addEventListener("mousedown", (e) => {
     if (!modOf(e)) return;
+    if (!dom.contains(e.target)) return;
     const target = editor.getTargetAtClientPoint(e.clientX, e.clientY);
     if (!target || !target.position) return;
     const { lineNumber, column } = target.position;
@@ -296,6 +310,7 @@ export function attachAltDragScrub(editor, monaco) {
 
     e.preventDefault();
     e.stopPropagation();
+    e.stopImmediatePropagation();
 
     if (tok.kind === "color") {
       const ci = ensureColorInput();
@@ -336,6 +351,22 @@ export function attachAltDragScrub(editor, monaco) {
     };
     document.body.style.cursor = "ew-resize";
   }, true);
+
+  // Belt-and-braces: also block click + contextmenu while a modifier is
+  // held over the editor so Monaco can't claim them mid-scrub.
+  for (const ev of ["click", "contextmenu"]) {
+    window.addEventListener(ev, (e) => {
+      if (!modOf(e)) return;
+      if (!dom.contains(e.target)) return;
+      const target = editor.getTargetAtClientPoint(e.clientX, e.clientY);
+      if (!target || !target.position) return;
+      const lineText = editor.getModel().getLineContent(target.position.lineNumber);
+      if (!findTokenAt(lineText, target.position.column)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+    }, true);
+  }
 
   window.addEventListener("mousemove", (e) => {
     if (!active) return;
