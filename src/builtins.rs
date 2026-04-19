@@ -262,6 +262,10 @@ fn core_fns() -> Vec<(&'static str, fn(&[Value]) -> Result<Value>)> {
         ("floor", floor_fn),
         ("ceil", ceil_fn),
         ("round", round_fn),
+        ("int", int_fn),
+        ("long", int_fn),
+        ("double", double_fn),
+        ("float", double_fn),
         ("Math/PI", pi_fn),
         ("atom", atom_fn),
         ("deref", deref_fn),
@@ -1490,6 +1494,27 @@ fn log_fn(args: &[Value]) -> Result<Value> { Ok(Value::Float(as_f64(&args[0])?.l
 fn floor_fn(args: &[Value]) -> Result<Value> { Ok(Value::Float(as_f64(&args[0])?.floor())) }
 fn ceil_fn(args: &[Value]) -> Result<Value> { Ok(Value::Float(as_f64(&args[0])?.ceil())) }
 fn round_fn(args: &[Value]) -> Result<Value> { Ok(Value::Int(as_f64(&args[0])?.round() as i64)) }
+fn int_fn(args: &[Value]) -> Result<Value> {
+    // Truncation toward zero (Clojure's `int` / `long` semantics on
+    // floats; ints pass through). Strings parse if numeric.
+    Ok(match &args[0] {
+        Value::Int(i) => Value::Int(*i),
+        Value::Float(f) => Value::Int(*f as i64),
+        Value::Ratio(n, d) => Value::Int(*n / *d),
+        Value::Bool(b) => Value::Int(if *b { 1 } else { 0 }),
+        Value::Str(s) => match s.parse::<i64>() {
+            Ok(i) => Value::Int(i),
+            Err(_) => match s.parse::<f64>() {
+                Ok(f) => Value::Int(f as i64),
+                Err(_) => return Err(Error::Type(format!("int: cannot parse {s:?}"))),
+            },
+        },
+        v => return Err(Error::Type(format!("int: cannot convert {}", v.type_name()))),
+    })
+}
+fn double_fn(args: &[Value]) -> Result<Value> {
+    Ok(Value::Float(as_f64(&args[0])?))
+}
 
 // ---- Seq utilities -----------------------------------------------------
 

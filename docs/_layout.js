@@ -101,6 +101,111 @@ export function mountChrome(activePath) {
   highlightAll().catch(() => {});
 }
 
+// --- Monaco editor (lazy) ----------------------------------------------
+// Vendored via jsdelivr's AMD loader. First call injects loader.js,
+// subsequent calls hit the cached promise. The same loader is reused
+// for monaco-vim.
+
+const MONACO_VS = "https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs";
+const MONACO_VIM = "https://unpkg.com/monaco-vim@0.4.1/dist/monaco-vim";
+
+let monacoReady = null;
+function injectScript(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = src; s.onload = resolve; s.onerror = reject;
+    document.head.appendChild(s);
+  });
+}
+export function loadMonaco() {
+  if (monacoReady) return monacoReady;
+  monacoReady = (async () => {
+    await injectScript(`${MONACO_VS}/loader.js`);
+    window.require.config({
+      paths: { vs: MONACO_VS, "monaco-vim": MONACO_VIM },
+    });
+    return await new Promise((resolve) =>
+      window.require(["vs/editor/editor.main"], () => resolve(window.monaco))
+    );
+  })();
+  return monacoReady;
+}
+let monacoVimReady = null;
+export function loadMonacoVim() {
+  if (monacoVimReady) return monacoVimReady;
+  monacoVimReady = (async () => {
+    await loadMonaco();
+    return await new Promise((resolve) =>
+      window.require(["monaco-vim"], (vim) => resolve(vim))
+    );
+  })();
+  return monacoVimReady;
+}
+
+/// Create a Monaco editor mounted into `container` configured for cljrs.
+/// Options:
+///   value           — initial source string
+///   onApply(src)    — called debounced on edit (default 300ms) and on
+///                     Cmd/Ctrl+Enter; if absent, no auto-apply wiring
+///   debounceMs      — auto-apply delay (default 300)
+///   vimToggleEl     — checkbox input element; if present, wires vim mode
+///   vimStatusEl     — element to hold vim status bar (mode/keys)
+///   vimKey          — localStorage key suffix (`cljrs.<key>.vim`); default 'editor'
+///   monacoOptions   — extra options merged into monaco.editor.create
+export async function makeEditor(container, opts = {}) {
+  const monaco = await loadMonaco();
+  const editor = monaco.editor.create(container, {
+    value: opts.value || "",
+    language: "clojure",
+    theme: "vs-dark",
+    fontSize: opts.fontSize || 13,
+    minimap: { enabled: false },
+    scrollBeyondLastLine: false,
+    automaticLayout: true,
+    tabSize: 2,
+    lineNumbers: opts.lineNumbers || "on",
+    renderWhitespace: "selection",
+    wordWrap: "off",
+    ...(opts.monacoOptions || {}),
+  });
+
+  if (opts.onApply) {
+    const debounceMs = opts.debounceMs ?? 300;
+    let timer = null;
+    editor.onDidChangeModelContent(() => {
+      clearTimeout(timer);
+      timer = setTimeout(() => opts.onApply(editor.getValue()), debounceMs);
+    });
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
+      clearTimeout(timer);
+      opts.onApply(editor.getValue());
+    });
+  }
+
+  if (opts.vimToggleEl) {
+    const vimLib = await loadMonacoVim();
+    const key = `cljrs.${opts.vimKey || "editor"}.vim`;
+    let vimMode = null;
+    const setVim = (on) => {
+      if (on && !vimMode) {
+        vimMode = vimLib.initVimMode(editor, opts.vimStatusEl);
+      } else if (!on && vimMode) {
+        vimMode.dispose();
+        vimMode = null;
+        if (opts.vimStatusEl) opts.vimStatusEl.textContent = "";
+      }
+      try { localStorage.setItem(key, on ? "1" : "0"); } catch {}
+      opts.vimToggleEl.checked = on;
+    };
+    opts.vimToggleEl.addEventListener("change", () =>
+      setVim(opts.vimToggleEl.checked)
+    );
+    if (localStorage.getItem(key) === "1") setVim(true);
+  }
+
+  return editor;
+}
+
 let wasmReady = null;
 
 export async function loadWasm() {

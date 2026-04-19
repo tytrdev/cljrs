@@ -146,23 +146,36 @@
 ;; --- dad joke (fetch) -----------------------------------------
 ;; icanhazdadjoke.com returns plain text when you set Accept:
 ;; text/plain; we just request the JSON endpoint and grep.
+;; Naive JSON pluck: extract the value of a quoted string field
+;; without a real parser. Returns nil if anything looks off so the
+;; caller can degrade gracefully.
+(defn pluck-string-field [body field]
+  (let [needle (str "\\"" field "\\"")
+        i (clojure.string/index-of body needle)]
+    (when i
+      (let [after (+ i (count needle))
+            colon (clojure.string/index-of body ":" after)]
+        (when colon
+          (let [open (clojure.string/index-of body "\\"" colon)]
+            (when open
+              (let [close (clojure.string/index-of body "\\"" (inc open))]
+                (when close
+                  (subs body (inc open) close))))))))))
+
 (defn show-joke [body]
-  (let [el (js/get-element "ji-joke")]
-    (if body
-      ;; Naive JSON pluck: pull the value of "joke" out of the
-      ;; response. Good enough for a demo; replace with a real
-      ;; JSON parser when cljrs grows one.
-      (let [i (clojure.string/index-of body "\\"joke\\"")
-            tail (subs body (+ i 8))
-            j (clojure.string/index-of tail "\\"")
-            k (clojure.string/index-of (subs tail (inc j)) "\\"")]
-        (js/set-text! el (subs tail (inc j) (+ (inc j) k))))
-      (js/set-text! el "(fetch failed)"))))
+  (let [el (js/get-element "ji-joke")
+        joke (when body (pluck-string-field body "value"))]
+    (cond
+      joke (js/set-text! el joke)
+      body (js/set-text! el (str "(no joke field; got " (subs body 0 (min 80 (count body))) "...)"))
+      :else (js/set-text! el "(fetch failed)"))))
 
 (js/on! (js/get-element "ji-joke-btn") "click"
         (fn []
           (js/set-text! (js/get-element "ji-joke") "loading…")
-          (js/fetch-text "https://icanhazdadjoke.com/"
+          ;; chucknorris.io returns JSON ({"value": "..."}) by default,
+          ;; CORS-enabled, and doesn't require an Accept header.
+          (js/fetch-text "https://api.chucknorris.io/jokes/random"
                          show-joke)))
 
 ;; --- todo list w/ localStorage --------------------------------
