@@ -13,6 +13,7 @@ const NAV = [
   { href: "./sequencer.html", label: "Sequencer" },
   { href: "./ml.html", label: "ML" },
   { href: "./js-interop.html", label: "JS" },
+  { href: "./ui-demo.html", label: "UI" },
   { href: "./benchmarks.html", label: "Benchmarks" },
   { href: "./repl.html", label: "REPL" },
   { href: "./roadmap.html", label: "Roadmap" },

@@ -49,13 +49,19 @@ import re, sys, pathlib
 path = pathlib.Path(sys.argv[1])
 rendered = sys.argv[2]
 src = path.read_text()
-new = re.sub(
-    r'<div id="cljrs-root">.*?</div>',
-    f'<div id="cljrs-root">{rendered}</div>',
+# Inject between explicit <!--ssr--> ... <!--/ssr--> markers inside the
+# mount div. Idempotent: re-running cleanly replaces previous content
+# without the nested-</div> ambiguity that broke regex matching.
+new, n = re.subn(
+    r'<!--ssr-->.*?<!--/ssr-->',
+    f'<!--ssr-->{rendered}<!--/ssr-->',
     src,
     count=1,
     flags=re.DOTALL,
 )
+if n == 0:
+    print(f"build-ui: {path} has no <!--ssr-->...<!--/ssr--> markers", file=sys.stderr)
+    sys.exit(1)
 path.write_text(new)
 PY
 }
