@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Matmul benchmark</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main>
+    <h2>Matmul benchmark — cljrs vs numpy / jax / pytorch</h2>
+    <p class="bench-hint">
+      Square float32 matrix multiplication: <code>C = A · B</code> with
+      <code>A, B &in; ℝ<sup>N×N</sup></code>. We build random matrices via
+      <code>(ml/randn N N)</code>, then time
+      <code>(ml/matmul A B)</code> and <code>(ml/matmul-gpu A B)</code>
+      via <code>performance.now()</code> around the wasm REPL call.
+      Each configuration runs 3 times; we report the median.
+      GFLOPS = 2·N³ / time / 1e9.
+    </p>
+    <p class="bench-hint">
+      The <em>reference</em> columns are conservative numbers from
+      published f32 matmul benchmarks on a typical mid-grade machine
+      (Apple M2, 8-core, single-threaded numpy 1.26 + OpenBLAS;
+      JAX 0.4 with XLA JIT on the same CPU). They are <em>not</em>
+      measured live in your browser — they're a fixed yardstick so
+      you can read the cljrs columns in context. Your machine, your
+      browser's wasm SIMD support, and thermal state will all move
+      the cljrs numbers around.
+    </p>
+
+    <div class="bench-toolbar">
+      <label class="bench-label">
+        Sizes:
+        <label class="bench-check"><input type="checkbox" class="bench-size" value="256" checked> 256</label>
+        <label class="bench-check"><input type="checkbox" class="bench-size" value="512" checked> 512</label>
+        <label class="bench-check"><input type="checkbox" class="bench-size" value="1024"> 1024</label>
+      </label>
+      <label class="bench-check" title="Use ml/matmul-gpu (wgpu compute on native; CPU fallback in the browser).">
+        <input type="checkbox" id="bench-gpu"> Also run GPU matmul
+      </label>
+      <button id="bench-run">Run benchmark</button>
+      <span id="bench-meter" class="bench-meter">idle</span>
+    </div>
+
+    <div id="bench-note" class="bench-note"></div>
+
+    <div class="bench-table-wrap">
+      <table class="bench-table" id="bench-table">
+        <thead>
+          <tr>
+            <th>N</th>
+            <th>cljrs CPU<br><span class="bench-sub">ms (median)</span></th>
+            <th>cljrs CPU<br><span class="bench-sub">GFLOPS</span></th>
+            <th>cljrs GPU<br><span class="bench-sub">ms (median)</span></th>
+            <th>cljrs GPU<br><span class="bench-sub">GFLOPS</span></th>
+            <th>numpy ref<br><span class="bench-sub">GFLOPS</span></th>
+            <th>JAX ref<br><span class="bench-sub">GFLOPS</span></th>
+            <th>PyTorch ref<br><span class="bench-sub">GFLOPS</span></th>
+          </tr>
+        </thead>
+        <tbody id="bench-tbody">
+          <tr><td colspan="8" class="bench-empty">click <b>Run benchmark</b> to start</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Chart</h3>
+    <p class="bench-hint">
+      Bars are GFLOPS (higher is better). cljrs columns appear once a run finishes.
+    </p>
+    <canvas id="bench-chart" class="bench-chart" width="900" height="320"></canvas>
+
+    <h3>Reference baselines</h3>
+    <ul class="bench-refs">
+      <li>
+        <b>numpy 1.26 + OpenBLAS</b>, single-threaded, Apple M2,
+        f32, square matmul. Typical sustained throughput for the sizes shown.
+      </li>
+      <li>
+        <b>JAX 0.4 + XLA JIT</b>, CPU backend, Apple M2, f32, square matmul.
+        Includes JIT warmup amortized over many calls.
+      </li>
+      <li>
+        <b>PyTorch 2.x + MKL/Accelerate</b>, CPU, single-threaded,
+        Apple M2, f32, square matmul.
+      </li>
+    </ul>
+    <p class="bench-hint">
+      For honest comparison you should run those same benchmarks on
+      <em>your</em> machine; the cljrs numbers above are real and
+      live, the reference numbers are not. We'll publish a per-machine
+      script in a follow-up.
+    </p>
+
+    <h3>Notes on the cljrs path</h3>
+    <ul class="bench-refs">
+      <li>
+        The CPU matmul is a naive triple loop in <code>cljrs-ml</code>
+        (no blocking, no SIMD intrinsics, no threading). It exists to
+        prove the autograd graph works; a tiled / packed kernel is on
+        the roadmap. Don't read these numbers as cljrs's <em>ceiling</em>.
+      </li>
+      <li>
+        <code>ml/matmul-gpu</code> dispatches a wgpu compute kernel on
+        native targets. In the browser wasm build it currently falls
+        back to the same CPU kernel (a one-time warning is emitted to
+        the console) — WebGPU access from inside our wasm crate isn't
+        wired up yet.
+      </li>
+      <li>
+        Wall time includes the wasm/JS boundary and the cljrs
+        opaque-tensor wrapper, but <em>excludes</em> the
+        <code>(ml/randn …)</code> matrix construction (those are built
+        once before timing).
+      </li>
+    </ul>
+  </main>
+  <script type="module">
+    import { mountChrome, loadWasm } from "./_layout.js";
+    mountChrome();
+
+    // -----------------------------------------------------------------
+    // Hardcoded reference baselines. f32 square matmul GFLOPS, single-
+    // threaded on a typical Apple M2. Conservative — chosen so cljrs's
+    // current naive kernel doesn't look artificially good.
+    //
+    // Sources / sanity:
+    //   - numpy + OpenBLAS hits 80-150 GFLOPS f32 single-thread on M2.
+    //   - JAX/XLA-CPU is roughly comparable, slightly lower at small N.
+    //   - PyTorch with MKL/Accelerate is in the same band.
+    // We pick mid-band numbers and label them clearly as reference.
+    // -----------------------------------------------------------------
+    const REFERENCE = {
+      256:  { numpy:  80, jax:  60, torch:  85 },
+      512:  { numpy: 120, jax: 110, torch: 125 },
+      1024: { numpy: 140, jax: 130, torch: 145 },
+    };
+
+    const RUNS_PER_CONFIG = 3;
+
+    const tbody = document.getElementById("bench-tbody");
+    const meter = document.getElementById("bench-meter");
+    const runBtn = document.getElementById("bench-run");
+    const gpuBox = document.getElementById("bench-gpu");
+    const note = document.getElementById("bench-note");
+    const chart = document.getElementById("bench-chart");
+    const cx = chart.getContext("2d");
+
+    let repl = null;
+    let booting = true;
+
+    runBtn.disabled = true;
+    meter.textContent = "loading wasm…";
+
+    (async () => {
+      const mod = await loadWasm();
+      repl = new mod.Repl();
+      // Detect whether the cljrs builtins expose ml/matmul-gpu.
+      const probe = repl.eval("(if (resolve 'cljrs.ml/matmul-gpu) 1 0)");
+      // Detect WebGPU at the browser level (purely informational —
+      // the cljrs wasm build doesn't actually use it yet).
+      const webgpu = !!navigator.gpu;
+      const lines = [];
+      if (!webgpu) {
+        lines.push("WebGPU not available in this browser — GPU column would have no path to a real device anyway.");
+      }
+      lines.push("Note: in the browser wasm build, ml/matmul-gpu currently falls back to the CPU kernel (see Notes below). On native, it dispatches a wgpu compute shader.");
+      note.textContent = lines.join(" ");
+      meter.textContent = "ready";
+      runBtn.disabled = false;
+      booting = false;
+    })().catch(e => {
+      meter.textContent = "wasm load failed: " + e;
+      console.error(e);
+    });
+
+    function median(xs) {
+      const s = xs.slice().sort((a, b) => a - b);
+      const m = s.length >> 1;
+      return s.length % 2 ? s[m] : 0.5 * (s[m - 1] + s[m]);
+    }
+
+    function gflops(N, ms) {
+      if (!isFinite(ms) || ms <= 0) return NaN;
+      // 2 * N^3 ops (multiply + add per element pair)
+      return (2 * N * N * N) / (ms / 1000) / 1e9;
+    }
+
+    function fmtMs(ms) {
+      if (!isFinite(ms)) return "—";
+      if (ms < 10) return ms.toFixed(2);
+      if (ms < 100) return ms.toFixed(1);
+      return Math.round(ms).toString();
+    }
+
+    function fmtG(g) {
+      if (!isFinite(g)) return "—";
+      if (g < 10) return g.toFixed(2);
+      if (g < 100) return g.toFixed(1);
+      return Math.round(g).toString();
+    }
+
+    async function ensureMatrices(N) {
+      // (re)build A and B at size N. Done outside timing.
+      const src = `(do (def A (cljrs.ml/randn ${N} ${N})) (def B (cljrs.ml/randn ${N} ${N})) :ok)`;
+      const r = repl.eval(src);
+      if (typeof r === "string" && (r.startsWith("read error") || r.startsWith("eval error"))) {
+        throw new Error("setup failed: " + r);
+      }
+    }
+
+    async function timeOnce(expr) {
+      // Yield to the UI thread, then time a single eval call.
+      await new Promise(r => setTimeout(r, 0));
+      const t0 = performance.now();
+      const r = repl.eval(expr);
+      const dt = performance.now() - t0;
+      if (typeof r === "string" && (r.startsWith("read error") || r.startsWith("eval error"))) {
+        throw new Error(expr + " -> " + r);
+      }
+      return dt;
+    }
+
+    function selectedSizes() {
+      return Array.from(document.querySelectorAll(".bench-size"))
+        .filter(c => c.checked)
+        .map(c => parseInt(c.value, 10));
+    }
+
+    let results = []; // {N, cpuMs, cpuG, gpuMs, gpuG}
+
+    function renderTable() {
+      if (results.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="8" class="bench-empty">click <b>Run benchmark</b> to start</td></tr>`;
+        return;
+      }
+      const rows = results.map(r => {
+        const ref = REFERENCE[r.N] || {};
+        return `<tr>
+          <td><b>${r.N}</b></td>
+          <td>${fmtMs(r.cpuMs)}</td>
+          <td>${fmtG(r.cpuG)}</td>
+          <td>${fmtMs(r.gpuMs)}</td>
+          <td>${fmtG(r.gpuG)}</td>
+          <td class="bench-ref">${ref.numpy ?? "—"}</td>
+          <td class="bench-ref">${ref.jax ?? "—"}</td>
+          <td class="bench-ref">${ref.torch ?? "—"}</td>
+        </tr>`;
+      });
+      tbody.innerHTML = rows.join("");
+    }
+
+    function renderChart() {
+      const W = chart.width, H = chart.height;
+      cx.fillStyle = "#0b0d14";
+      cx.fillRect(0, 0, W, H);
+      if (results.length === 0) {
+        cx.fillStyle = "#9aa";
+        cx.font = "12px ui-monospace, monospace";
+        cx.fillText("(no results yet)", 12, 22);
+        return;
+      }
+      // Bars per N: cpu, gpu, numpy, jax, torch
+      const series = ["cpu", "gpu", "numpy", "jax", "torch"];
+      const colors = {
+        cpu:   "#7cd98a",
+        gpu:   "#4a8cff",
+        numpy: "#ffd966",
+        jax:   "#cc8aff",
+        torch: "#ff7a7a",
+      };
+      let maxG = 0;
+      for (const r of results) {
+        if (isFinite(r.cpuG)) maxG = Math.max(maxG, r.cpuG);
+        if (isFinite(r.gpuG)) maxG = Math.max(maxG, r.gpuG);
+        const ref = REFERENCE[r.N] || {};
+        for (const s of ["numpy", "jax", "torch"]) {
+          if (ref[s]) maxG = Math.max(maxG, ref[s]);
+        }
+      }
+      if (maxG <= 0) maxG = 1;
+      const padL = 50, padR = 16, padT = 16, padB = 56;
+      const plotW = W - padL - padR;
+      const plotH = H - padT - padB;
+
+      // Y-axis grid + labels
+      cx.strokeStyle = "#1d2029";
+      cx.fillStyle = "#9aa";
+      cx.font = "10px ui-monospace, monospace";
+      const ticks = 5;
+      for (let i = 0; i <= ticks; i++) {
+        const y = padT + plotH - (i / ticks) * plotH;
+        cx.beginPath(); cx.moveTo(padL, y); cx.lineTo(padL + plotW, y); cx.stroke();
+        const lbl = ((i / ticks) * maxG).toFixed(0);
+        cx.fillText(lbl, 8, y + 3);
+      }
+      cx.fillText("GFLOPS", 8, padT - 4);
+
+      // Groups along X
+      const gW = plotW / results.length;
+      const barW = (gW - 12) / series.length;
+      results.forEach((r, gi) => {
+        const ref = REFERENCE[r.N] || {};
+        const values = {
+          cpu: r.cpuG,
+          gpu: r.gpuG,
+          numpy: ref.numpy,
+          jax: ref.jax,
+          torch: ref.torch,
+        };
+        series.forEach((s, si) => {
+          const v = values[s];
+          if (!isFinite(v) || v == null) return;
+          const x = padL + gi * gW + 6 + si * barW;
+          const h = (v / maxG) * plotH;
+          const y = padT + plotH - h;
+          cx.fillStyle = colors[s];
+          cx.fillRect(x, y, barW - 2, h);
+        });
+        // Group label
+        cx.fillStyle = "#cdd";
+        cx.font = "11px ui-monospace, monospace";
+        const lbl = `N=${r.N}`;
+        const lblX = padL + gi * gW + (gW - cx.measureText(lbl).width) / 2;
+        cx.fillText(lbl, lblX, padT + plotH + 16);
+      });
+
+      // Legend
+      let lx = padL;
+      const ly = H - 16;
+      cx.font = "10px ui-monospace, monospace";
+      for (const s of series) {
+        cx.fillStyle = colors[s];
+        cx.fillRect(lx, ly, 10, 10);
+        cx.fillStyle = "#cdd";
+        const label = s === "cpu"   ? "cljrs CPU"
+                    : s === "gpu"   ? "cljrs GPU"
+                    : s === "numpy" ? "numpy (ref)"
+                    : s === "jax"   ? "JAX (ref)"
+                    :                 "PyTorch (ref)";
+        cx.fillText(label, lx + 14, ly + 9);
+        lx += 14 + cx.measureText(label).width + 16;
+      }
+    }
+
+    async function runBench() {
+      if (booting || !repl) return;
+      const sizes = selectedSizes();
+      if (sizes.length === 0) {
+        meter.textContent = "select at least one size";
+        return;
+      }
+      runBtn.disabled = true;
+      results = [];
+      renderTable();
+      renderChart();
+      const wantGpu = gpuBox.checked;
+      try {
+        for (const N of sizes) {
+          meter.textContent = `N=${N}: building matrices…`;
+          await ensureMatrices(N);
+
+          const cpuTimes = [];
+          for (let i = 0; i < RUNS_PER_CONFIG; i++) {
+            meter.textContent = `N=${N}: CPU run ${i + 1}/${RUNS_PER_CONFIG}…`;
+            cpuTimes.push(await timeOnce("(cljrs.ml/matmul A B)"));
+          }
+          const cpuMs = median(cpuTimes);
+          const cpuG = gflops(N, cpuMs);
+
+          let gpuMs = NaN, gpuG = NaN;
+          if (wantGpu) {
+            const gpuTimes = [];
+            for (let i = 0; i < RUNS_PER_CONFIG; i++) {
+              meter.textContent = `N=${N}: GPU run ${i + 1}/${RUNS_PER_CONFIG}…`;
+              gpuTimes.push(await timeOnce("(cljrs.ml/matmul-gpu A B)"));
+            }
+            gpuMs = median(gpuTimes);
+            gpuG = gflops(N, gpuMs);
+          }
+
+          results.push({ N, cpuMs, cpuG, gpuMs, gpuG });
+          renderTable();
+          renderChart();
+        }
+        meter.textContent = "done";
+      } catch (e) {
+        console.error(e);
+        meter.textContent = "error: " + (e && e.message ? e.message : e);
+      } finally {
+        runBtn.disabled = false;
+      }
+    }
+
+    runBtn.addEventListener("click", runBench);
+  </script>
+</body>
+</html>
