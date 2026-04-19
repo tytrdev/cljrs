@@ -1,0 +1,530 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Synth</title>
+  <link rel="stylesheet" href="./style.css">
+  <style>
+    .sy-wrap { display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-start; }
+    .sy-stage {
+      background: #0b0d14;
+      border: 1px solid var(--border, #333);
+      border-radius: 4px;
+      flex: 0 0 auto;
+      position: relative;
+    }
+    .sy-stage canvas { display: block; }
+    .sy-overlay {
+      position: absolute; top: 6px; left: 10px;
+      color: #9aa;
+      font: 0.7rem ui-monospace, monospace;
+      pointer-events: none;
+      text-shadow: 0 0 2px #000;
+    }
+    .sy-col {
+      flex: 1 1 400px;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .sy-toolbar {
+      display: flex; gap: 0.5rem; align-items: center;
+      font-size: 0.8rem; color: var(--fg-dim);
+      flex-wrap: wrap;
+    }
+    .sy-toolbar button {
+      font-family: inherit; font-size: 0.8rem; padding: 0.25rem 0.7rem;
+    }
+    .sy-toolbar input[type="range"] { vertical-align: middle; }
+    .sy-status {
+      font-family: ui-monospace, monospace;
+      font-size: 0.75rem;
+      color: var(--fg-dim);
+      min-height: 1em;
+      white-space: pre-wrap;
+    }
+    .sy-status.err { color: #ff6666; }
+    .sy-status.ok { color: #8ec07c; }
+    .sy-hint { font-size: 0.75rem; color: var(--fg-dim); }
+    .sy-hint kbd {
+      background: #1d2029; border: 1px solid #333;
+      padding: 0 4px; border-radius: 3px;
+      font-family: inherit;
+    }
+    /* Scrubbable numbers, same pattern as platformer.html */
+    .sy-scrub-mode.repl .repl-hl-wrap .repl-hl { pointer-events: auto !important; cursor: default; }
+    .sy-scrub-mode.repl .repl-hl-wrap textarea { pointer-events: none !important; }
+    .sy-scrub-mode.repl .repl-hl .tok-number {
+      cursor: ew-resize;
+      background: rgba(255, 204, 96, 0.14);
+      border-radius: 2px;
+      outline: 1px solid rgba(255, 204, 96, 0.3);
+    }
+    .sy-scrub-mode.repl .repl-hl .tok-number:hover,
+    .repl .repl-hl .tok-number.sy-scrubbing {
+      background: rgba(255, 204, 96, 0.35);
+      outline-color: rgba(255, 204, 96, 0.8);
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h2>Synth — live coded</h2>
+    <p class="sy-hint" style="margin-top:-0.4rem">
+      Inspired by <a href="https://sonic-pi.net/">Sonic Pi</a>,
+      <a href="http://overtone.github.io/">Overtone</a>, and
+      <a href="https://tidalcycles.org/">TidalCycles</a> — live-coded
+      music as a first-class way to explore sound.
+    </p>
+    <p>
+      A single-voice subtractive synth whose patch parameters are
+      authored in Clojure. The DSP graph (oscillator → filter → gain →
+      output) is a fixed Web Audio graph in the browser; every edit to
+      the source re-reads the params and pushes them onto the audio
+      nodes with <code>setValueAtTime</code>. Hold <b>Alt</b> (or
+      <b>Ctrl</b>) and drag any number to scrub it live while the note
+      plays. The canvas on the left is an oscilloscope fed from an
+      <code>AnalyserNode</code>.
+    </p>
+    <p class="sy-hint">
+      Why this split? The cljrs tree-walker is fast enough for
+      per-frame game logic but not for 48&thinsp;kHz per-sample DSP.
+      Patch-level params through Clojure, sample-level DSP in Web
+      Audio — the <code>call_floats</code> WASM hook is also in place
+      for a future all-Clojure buffer-render path.
+    </p>
+
+    <div class="sy-wrap">
+      <div class="sy-stage">
+        <canvas id="sy-canvas" width="420" height="420"></canvas>
+        <div class="sy-overlay" id="sy-overlay">silent</div>
+      </div>
+      <div class="sy-col">
+        <div class="sy-toolbar">
+          <button id="sy-play">Start</button>
+          <button id="sy-note" title="Retrigger the envelope">Trigger</button>
+          <label style="display:flex;align-items:center;gap:0.3rem">
+            master
+            <input type="range" id="sy-master" min="0" max="1" step="0.01" value="0.4">
+          </label>
+          <span id="sy-meter">—</span>
+        </div>
+        <div class="repl" id="sy-editor">
+          <textarea id="sy-src" spellcheck="false" style="min-height:420px"></textarea>
+        </div>
+        <div id="sy-status" class="sy-status"></div>
+      </div>
+    </div>
+
+    <h3>What's happening</h3>
+    <ul>
+      <li>Each <code>def</code> at the top of the source is a patch knob. Editing one and pausing for ~400 ms triggers <code>applySource</code>, which re-reads the knobs with <code>repl.eval_floats</code> and schedules new values on the matching Web Audio nodes.</li>
+      <li><code>WAVE-TYPE</code> is a keyword — JS reads its name via <code>repl.eval</code>, maps it to an <code>OscillatorNode.type</code>.</li>
+      <li><code>Trigger</code> re-runs the ADSR envelope by calling <code>(patch)</code> on the cljrs side, which returns the full flat param vector the JS graph consumes.</li>
+      <li>The new <code>repl.call_floats(name, Float32Array)</code> WASM method is what a full DSP-in-Clojure port would use — a per-callback fn dispatch that skips the reader.</li>
+    </ul>
+  </main>
+  <script type="module">
+    import { mountChrome, loadWasm, attachHighlightOverlay } from "./_layout.js";
+    mountChrome();
+
+    const INITIAL_SOURCE = `;; ============================================================
+;; Synth — patch params live here. Edits apply on a short debounce.
+;;   hold Alt (or Ctrl) and drag any number to scrub it live
+;;   press "Trigger" to retrigger the envelope
+;; ============================================================
+
+;; --- pitch + wave ---
+(def FREQ        220.0)   ; base frequency, Hz
+(def DETUNE        7.0)   ; cents
+(def WAVE-TYPE   :sawtooth)   ; :sine :square :sawtooth :triangle
+
+;; --- filter (biquad low-pass) ---
+(def FILTER-CUTOFF  900.0)   ; Hz
+(def FILTER-Q         6.0)
+
+;; --- amp envelope (seconds) ---
+(def ATTACK   0.02)
+(def DECAY    0.15)
+(def SUSTAIN  0.6)    ; 0..1
+(def RELEASE  0.35)
+
+;; --- LFO modulating filter cutoff ---
+(def LFO-RATE    4.0)    ; Hz
+(def LFO-DEPTH 300.0)    ; Hz of cutoff swing
+
+;; --- voice gain ---
+(def GAIN 0.5)
+
+;; The JS side pulls this flat vector on every apply. Order is a
+;; contract with synth.html. Keep it stable.
+(defn patch []
+  [FREQ DETUNE
+   FILTER-CUTOFF FILTER-Q
+   ATTACK DECAY SUSTAIN RELEASE
+   LFO-RATE LFO-DEPTH
+   GAIN])
+
+;; Future hook: if/when the tree-walker can keep up, swap this in
+;; for a full Clojure DSP path via repl.call_floats.
+(defn render-buffer [_buf-idx _sr _n]
+  ;; placeholder — returns an empty vec today.
+  [])
+`;
+
+    // --- elements --------------------------------------------------------
+
+    const canvas = document.getElementById("sy-canvas");
+    const ctx    = canvas.getContext("2d");
+    const W = canvas.width, H = canvas.height;
+    const ta     = document.getElementById("sy-src");
+    const editorEl = document.getElementById("sy-editor");
+    const status = document.getElementById("sy-status");
+    const overlay = document.getElementById("sy-overlay");
+    const playBtn = document.getElementById("sy-play");
+    const noteBtn = document.getElementById("sy-note");
+    const masterSlider = document.getElementById("sy-master");
+    const meterEl = document.getElementById("sy-meter");
+
+    ta.value = INITIAL_SOURCE;
+
+    // --- state -----------------------------------------------------------
+
+    let repl = null;
+    let audio = null;      // AudioContext
+    let master = null;     // master GainNode
+    let voice = null;      // { osc, filter, gain, lfo, lfoGain, analyser }
+    let playing = false;
+    let debounceTimer = null;
+    let currentPatch = null;
+
+    function setStatus(msg, cls) {
+      status.className = cls ? `sy-status ${cls}` : "sy-status";
+      status.textContent = msg;
+    }
+
+    function waveTypeFromKeyword(s) {
+      // repl.eval("WAVE-TYPE") returns something like ":sawtooth"
+      const m = s.match(/^:(sine|square|sawtooth|triangle)$/);
+      return m ? m[1] : "sawtooth";
+    }
+
+    // Pull the patch vector + wave type from the Clojure env.
+    function readPatch() {
+      if (!repl) return null;
+      const floats = repl.eval_floats("(patch)");
+      if (floats.length < 11) return null;
+      const waveStr = repl.eval("WAVE-TYPE").trim();
+      return {
+        freq:         floats[0],
+        detune:       floats[1],
+        filterCutoff: floats[2],
+        filterQ:      floats[3],
+        attack:       floats[4],
+        decay:        floats[5],
+        sustain:      floats[6],
+        release:      floats[7],
+        lfoRate:      floats[8],
+        lfoDepth:     floats[9],
+        gain:         floats[10],
+        wave:         waveTypeFromKeyword(waveStr),
+      };
+    }
+
+    function applySource(src) {
+      if (!repl) return false;
+      setStatus("…");
+      const result = repl.eval(src);
+      if (result.startsWith("read error") || result.startsWith("eval error")) {
+        setStatus(result, "err");
+        return false;
+      }
+      setStatus("applied.", "ok");
+      const p = readPatch();
+      if (p) {
+        currentPatch = p;
+        if (voice) pushPatch(p, false);
+      }
+      return true;
+    }
+
+    // --- audio graph -----------------------------------------------------
+
+    function ensureAudio() {
+      if (audio) return audio;
+      audio = new (window.AudioContext || window.webkitAudioContext)();
+      master = audio.createGain();
+      master.gain.value = parseFloat(masterSlider.value);
+      master.connect(audio.destination);
+      return audio;
+    }
+
+    function buildVoice(p) {
+      const now = audio.currentTime;
+      const osc = audio.createOscillator();
+      osc.type = p.wave;
+      osc.frequency.setValueAtTime(p.freq, now);
+      osc.detune.setValueAtTime(p.detune, now);
+
+      const filter = audio.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.setValueAtTime(p.filterCutoff, now);
+      filter.Q.setValueAtTime(p.filterQ, now);
+
+      const lfo = audio.createOscillator();
+      lfo.type = "sine";
+      lfo.frequency.setValueAtTime(p.lfoRate, now);
+      const lfoGain = audio.createGain();
+      lfoGain.gain.setValueAtTime(p.lfoDepth, now);
+      lfo.connect(lfoGain).connect(filter.frequency);
+
+      const gain = audio.createGain();
+      gain.gain.setValueAtTime(0, now);
+
+      const analyser = audio.createAnalyser();
+      analyser.fftSize = 1024;
+
+      osc.connect(filter).connect(gain).connect(analyser).connect(master);
+
+      osc.start();
+      lfo.start();
+      return { osc, filter, gain, lfo, lfoGain, analyser };
+    }
+
+    // Push new param values onto the existing graph. If `retrigger` is
+    // true, re-run the ADSR from zero.
+    function pushPatch(p, retrigger) {
+      if (!voice || !audio) return;
+      const now = audio.currentTime;
+      voice.osc.type = p.wave;
+      voice.osc.frequency.setValueAtTime(p.freq, now);
+      voice.osc.detune.setValueAtTime(p.detune, now);
+      voice.filter.frequency.setValueAtTime(p.filterCutoff, now);
+      voice.filter.Q.setValueAtTime(p.filterQ, now);
+      voice.lfo.frequency.setValueAtTime(p.lfoRate, now);
+      voice.lfoGain.gain.setValueAtTime(p.lfoDepth, now);
+
+      if (retrigger) {
+        // ADSR: ramp to peak over attack, decay to sustain*gain, hold.
+        const g = voice.gain.gain;
+        g.cancelScheduledValues(now);
+        g.setValueAtTime(0, now);
+        g.linearRampToValueAtTime(p.gain, now + Math.max(0.001, p.attack));
+        g.linearRampToValueAtTime(
+          p.gain * p.sustain,
+          now + Math.max(0.001, p.attack) + Math.max(0.001, p.decay));
+      } else {
+        // Non-retrigger param edit: gently glide the held gain so changes
+        // to GAIN are audible without clicks.
+        const g = voice.gain.gain;
+        const held = p.gain * p.sustain;
+        g.cancelScheduledValues(now);
+        g.setValueAtTime(g.value, now);
+        g.linearRampToValueAtTime(held, now + 0.05);
+      }
+    }
+
+    function startPlaying() {
+      ensureAudio();
+      if (audio.state === "suspended") audio.resume();
+      if (!currentPatch) currentPatch = readPatch();
+      if (!currentPatch) return;
+      voice = buildVoice(currentPatch);
+      pushPatch(currentPatch, true);
+      playing = true;
+      playBtn.textContent = "Stop";
+      overlay.textContent = "playing";
+    }
+
+    function stopPlaying() {
+      if (!voice || !audio) return;
+      const now = audio.currentTime;
+      const p = currentPatch || {};
+      const rel = Math.max(0.01, p.release ?? 0.2);
+      voice.gain.gain.cancelScheduledValues(now);
+      voice.gain.gain.setValueAtTime(voice.gain.gain.value, now);
+      voice.gain.gain.linearRampToValueAtTime(0, now + rel);
+      const v = voice;
+      setTimeout(() => {
+        try { v.osc.stop(); v.lfo.stop(); } catch (_) {}
+      }, rel * 1000 + 50);
+      voice = null;
+      playing = false;
+      playBtn.textContent = "Start";
+      overlay.textContent = "silent";
+    }
+
+    playBtn.addEventListener("click", () => {
+      if (playing) stopPlaying(); else startPlaying();
+    });
+    noteBtn.addEventListener("click", () => {
+      if (!playing) { startPlaying(); return; }
+      if (currentPatch) pushPatch(currentPatch, true);
+    });
+    masterSlider.addEventListener("input", () => {
+      if (master) master.gain.setValueAtTime(
+        parseFloat(masterSlider.value), audio.currentTime);
+    });
+
+    // --- oscilloscope ----------------------------------------------------
+
+    const scopeBuf = new Float32Array(1024);
+
+    function drawScope() {
+      ctx.fillStyle = "#0b0d14";
+      ctx.fillRect(0, 0, W, H);
+      // grid
+      ctx.strokeStyle = "#1d2029";
+      ctx.lineWidth = 1;
+      for (let i = 1; i < 4; i++) {
+        const y = (H * i) / 4;
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+      }
+      ctx.strokeStyle = "#2a2f3d";
+      ctx.beginPath(); ctx.moveTo(0, H / 2); ctx.lineTo(W, H / 2); ctx.stroke();
+
+      if (voice && voice.analyser) {
+        voice.analyser.getFloatTimeDomainData(scopeBuf);
+        let peak = 0;
+        ctx.strokeStyle = "#7cd98a";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        const n = scopeBuf.length;
+        for (let i = 0; i < n; i++) {
+          const s = scopeBuf[i];
+          if (Math.abs(s) > peak) peak = Math.abs(s);
+          const x = (i / (n - 1)) * W;
+          const y = H / 2 - s * (H / 2 - 6);
+          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+        meterEl.textContent = `peak ${peak.toFixed(2)}`;
+      } else {
+        meterEl.textContent = "—";
+        ctx.strokeStyle = "#333";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(0, H / 2); ctx.lineTo(W, H / 2); ctx.stroke();
+      }
+      requestAnimationFrame(drawScope);
+    }
+
+    // --- debounced source apply + scrubbable numbers --------------------
+
+    ta.addEventListener("input", () => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => applySource(ta.value), 300);
+    });
+    ta.addEventListener("keydown", (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        clearTimeout(debounceTimer);
+        applySource(ta.value);
+      }
+    });
+
+    let scrubModHeld = false;
+    let scrubbingNumber = null;
+
+    function modFromEvent(e) { return !!(e.altKey || e.ctrlKey); }
+    function setScrubMode(on) {
+      if (scrubModHeld === on) return;
+      scrubModHeld = on;
+      editorEl.classList.toggle("sy-scrub-mode", on);
+    }
+    function syncModFromEvent(e) {
+      setScrubMode(modFromEvent(e));
+      if (!modFromEvent(e)) endNumberScrub();
+    }
+    ["keydown", "keyup", "mousemove", "mousedown", "mouseup"].forEach((ev) => {
+      window.addEventListener(ev, syncModFromEvent, true);
+    });
+    window.addEventListener("blur", () => { setScrubMode(false); endNumberScrub(); });
+
+    function parseNumberText(s) {
+      const v = parseFloat(s);
+      if (!Number.isFinite(v)) return null;
+      const dot = s.indexOf(".");
+      const decimals = dot >= 0 ? s.length - dot - 1 : 0;
+      return { value: v, decimals };
+    }
+    function formatNumber(v, decimals) {
+      if (decimals === 0) return String(Math.round(v));
+      return v.toFixed(decimals);
+    }
+    function tokenFromTarget(target) {
+      let t = target;
+      for (let n = 0; n < 3 && t; n++) {
+        if (t.classList && t.dataset && t.dataset.s != null &&
+            t.classList.contains("tok-number")) return t;
+        t = t.parentElement;
+      }
+      return null;
+    }
+
+    editorEl.addEventListener("mousedown", (e) => {
+      if (!modFromEvent(e)) return;
+      const t = tokenFromTarget(e.target);
+      if (!t) return;
+      const start = parseInt(t.dataset.s, 10);
+      const len = parseInt(t.dataset.l, 10);
+      const text = ta.value.slice(start, start + len);
+      const parsed = parseNumberText(text);
+      if (!parsed) return;
+      e.preventDefault(); e.stopPropagation();
+      scrubbingNumber = {
+        startValue: parsed.value,
+        decimals: parsed.decimals,
+        start, len,
+        startX: e.clientX,
+        span: t,
+      };
+      t.classList.add("sy-scrubbing");
+      document.body.style.cursor = "ew-resize";
+    }, true);
+
+    function applyNumberDrag(clientX, shiftKey) {
+      const c = scrubbingNumber;
+      if (!c) return;
+      const dx = clientX - c.startX;
+      const mag = Math.max(0.1, Math.abs(c.startValue));
+      const coarse = c.decimals === 0 ? 1 : Math.max(0.01, mag * 0.02);
+      const step = shiftKey ? coarse * 10 : coarse;
+      let newValue = c.startValue + dx * step;
+      if (c.decimals === 0) newValue = Math.round(newValue);
+      const newText = formatNumber(newValue, c.decimals);
+      const before = ta.value.slice(0, c.start);
+      const after  = ta.value.slice(c.start + c.len);
+      ta.value = before + newText + after;
+      c.len = newText.length;
+      ta.dispatchEvent(new Event("input"));
+      clearTimeout(debounceTimer);
+      applySource(ta.value);
+    }
+
+    function endNumberScrub() {
+      if (!scrubbingNumber) return;
+      document.body.style.cursor = "";
+      document.querySelectorAll(".tok-number.sy-scrubbing").forEach(n => n.classList.remove("sy-scrubbing"));
+      scrubbingNumber = null;
+    }
+
+    window.addEventListener("mousemove", (e) => {
+      if (scrubbingNumber) { applyNumberDrag(e.clientX, e.shiftKey); e.preventDefault(); }
+    }, true);
+    window.addEventListener("mouseup", () => endNumberScrub(), true);
+
+    // --- boot ------------------------------------------------------------
+
+    (async () => {
+      await attachHighlightOverlay(editorEl, ta);
+      const mod = await loadWasm();
+      repl = new mod.Repl();
+      applySource(INITIAL_SOURCE);
+      requestAnimationFrame(drawScope);
+    })();
+  </script>
+</body>
+</html>

@@ -132,6 +132,44 @@ impl Repl {
         out
     }
 
+    /// Fast-path for live audio/DSP demos: look up a Clojure fn by name
+    /// and call it with pre-built f32 args, returning a flat `Vec<f32>`.
+    /// Same flattening contract as `call_ints` / `eval_floats`, but the
+    /// inputs are floats — needed by the synth page where buffer-index
+    /// and sample-rate are naturally floats and we cannot afford to
+    /// reparse the source per audio callback.
+    pub fn call_floats(&self, name: &str, args: Vec<f32>) -> Vec<f32> {
+        use cljrs::value::Value;
+        let f = match self.env.lookup(name) {
+            Ok(v) => v,
+            Err(_) => return Vec::new(),
+        };
+        let arg_vals: Vec<Value> = args.into_iter().map(|x| Value::Float(x as f64)).collect();
+        let result = match eval::apply(&f, &arg_vals) {
+            Ok(v) => v,
+            Err(_) => return Vec::new(),
+        };
+        fn push_num(out: &mut Vec<f32>, v: &Value) -> bool {
+            match v {
+                Value::Float(f) => { out.push(*f as f32); true }
+                Value::Int(i) => { out.push(*i as f32); true }
+                _ => false,
+            }
+        }
+        let mut out: Vec<f32> = Vec::new();
+        if let Value::Vector(xs) = &result {
+            for x in xs.iter() {
+                if push_num(&mut out, x) { continue; }
+                if let Value::Vector(inner) = x {
+                    for y in inner.iter() {
+                        push_num(&mut out, y);
+                    }
+                }
+            }
+        }
+        out
+    }
+
     /// Reset to a fresh prelude-initialized env.
     pub fn reset(&mut self) {
         self.env = Env::new();
