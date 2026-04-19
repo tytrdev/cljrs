@@ -164,18 +164,38 @@ def scan_core_clj() -> set[str] | None:
     """Top-level defns/defs/defmacros from core.clj. None if missing."""
     if not CORE_CLJ.exists():
         return None
+    return _scan_clj_defs(CORE_CLJ)
+
+
+# Generic top-level def scanner usable for any cljrs source file. Skips
+# private (defn-) and `__internal` names. Caller is responsible for
+# attributing the result to the right namespace.
+def _scan_clj_defs(path: Path) -> set[str]:
     out: set[str] = set()
-    for line in CORE_CLJ.read_text().splitlines():
+    for line in path.read_text().splitlines():
         m = DEF_FORM.match(line)
         if not m:
             continue
         kind, name = m.group(1), m.group(2)
         if kind == "defn-":
-            continue  # private
+            continue
         if name.startswith("__"):
             continue
         out.add(name)
-    return out or set()
+    return out
+
+
+def scan_extra_ns(path: Path, expected_ns: str) -> set[str]:
+    """Scan a cljrs file that opens with (ns NAMESPACE) and return its
+    top-level defs IF the file's ns declaration matches expected_ns.
+    Returns empty set if the file is missing or the ns doesn't match."""
+    if not path.exists():
+        return set()
+    text = path.read_text()
+    m = re.search(r'\(\s*ns\s+([^\s)]+)', text)
+    if not m or m.group(1) != expected_ns:
+        return set()
+    return _scan_clj_defs(path)
 
 
 # ---------------------------------------------------------------------------
@@ -308,12 +328,20 @@ def main() -> None:
     special_forms = scan_special_forms()
     installed_core = builtin_core | core_clj_defs | special_forms
 
+    # cljrs-authored ports of standard namespaces. Each file declares
+    # (ns clojure.X) at the top so we can attribute its defs cleanly.
+    extras = {
+        "clojure.string": ROOT / "src" / "cljrs_string.clj",
+        "clojure.set":    ROOT / "src" / "cljrs_set.clj",
+        "clojure.walk":   ROOT / "src" / "cljrs_walk.clj",
+        "clojure.edn":    ROOT / "src" / "cljrs_edn.clj",
+    }
     per_ns = {
-        "clojure.core": installed_core,
-        "clojure.string": builtin_string,
-        "clojure.set": set(),
-        "clojure.walk": set(),
-        "clojure.edn": set(),
+        "clojure.core":   installed_core,
+        "clojure.string": builtin_string | scan_extra_ns(extras["clojure.string"], "clojure.string"),
+        "clojure.set":    scan_extra_ns(extras["clojure.set"],    "clojure.set"),
+        "clojure.walk":   scan_extra_ns(extras["clojure.walk"],   "clojure.walk"),
+        "clojure.edn":    scan_extra_ns(extras["clojure.edn"],    "clojure.edn"),
     }
 
     sections_html: list[str] = []
