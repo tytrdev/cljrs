@@ -931,13 +931,16 @@
     const VIZ_THROTTLE = 6; // run (viz) every Nth rAF
     const TRAIN_CPU_FRACTION = 0.25; // upper bound on UI thread
 
+    // Minimum spacing between ticks regardless of step cost. Prevents
+    // 200+ steps/sec from drowning the page in wasm allocations even
+    // when each step is tiny (1-2ms).
+    const MIN_TICK_MS = 16;
     function trainTick() {
       trainTimer = null;
       if (!running) return;
       step();
-      // Adaptive backoff. With f=0.25, delay = 3*stepMs.
       const idle = (1 / TRAIN_CPU_FRACTION - 1) * lastStepMs;
-      const delay = Math.max(0, Math.ceil(idle));
+      const delay = Math.max(MIN_TICK_MS, Math.ceil(idle));
       trainTimer = setTimeout(trainTick, delay);
     }
 
