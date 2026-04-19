@@ -56,8 +56,23 @@ const TAG_VAL: &str = "js/value";
 
 pub fn install(env: &Env) {
     let prev = env.current_ns();
-    env.set_current_ns("cljrs.js");
+    // Install under both `js` (short, what demos write) and `cljrs.js`
+    // (qualified; matches the project naming convention so user code in
+    // a different ns can `(require '[cljrs.js :as foo])` if they want).
+    env.set_current_ns("js");
 
+    bind(env, "log", log_fn);
+    bind(env, "now", now_fn);
+    bind(env, "get-element", get_element_fn);
+    bind(env, "set-text!", set_text_fn);
+    bind(env, "set-html!", set_html_fn);
+    bind(env, "on!", on_fn);
+    bind(env, "local-get", local_get_fn);
+    bind(env, "local-set!", local_set_fn);
+    bind(env, "fetch-text", fetch_text_fn);
+
+    // Mirror under cljrs.js so qualified-name lookups also resolve.
+    env.set_current_ns("cljrs.js");
     bind(env, "log", log_fn);
     bind(env, "now", now_fn);
     bind(env, "get-element", get_element_fn);
