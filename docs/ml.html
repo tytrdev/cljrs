@@ -851,6 +851,10 @@
       const t0 = performance.now();
       const out = repl.call_ints("train-step!", []);
       lastStepMs = performance.now() - t0;
+      // Log every Nth step so we can see real wall-clock cost.
+      if (stepCount < 5 || stepCount % 20 === 0) {
+        console.log(`[ml] step ${stepCount} on ${activeTab}: ${lastStepMs.toFixed(1)}ms (out.len=${out.length})`);
+      }
       if (lastStepMs > 50 && !warnedSlowStep) {
         warnedSlowStep = true;
         console.warn(`[ml] slow step on ${activeTab}: ${lastStepMs.toFixed(1)}ms — capping training at ${(TRAIN_CPU_FRACTION*100)|0}% CPU`);
@@ -1025,6 +1029,18 @@
       requestAnimationFrame(frame);
       // Boot paused — user clicks Run to begin training. Eliminates the
       // automatic CPU saturation right after a heavy tab switch.
+      window.repl = repl; // expose for console debugging
+      window.stepOnce = () => {
+        const t0 = performance.now();
+        const out = repl.call_ints("train-step!", []);
+        const ms = performance.now() - t0;
+        console.log(`[ml] manual step: ${ms.toFixed(1)}ms, out.len=${out.length}, out[0]=${out[0]}`);
+        if (out.length === 0) {
+          const err = repl.eval("(train-step!)");
+          console.log(`[ml] manual step error: ${err}`);
+        }
+      };
+      console.log("[ml] ready. Try window.stepOnce() in the console.");
     })();
   </script>
 </body>
