@@ -251,6 +251,41 @@ footer {
   min-height: 1.4em;
 }
 .run-example .repl-out.err { color: var(--danger); }
+/* Same overlay-stacking trick the .repl block uses: when wireRepl
+   wraps the textarea in .repl-hl-wrap, hide the textarea text so the
+   highlighted <pre> is the only visible glyph layer. Without this,
+   both layers paint and the user sees doubled code. */
+.run-example .repl-hl-wrap {
+  position: relative;
+  min-height: 120px;
+}
+.run-example .repl-hl-wrap .repl-hl {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 0.8rem;
+  border: none;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  line-height: 1.45;
+  tab-size: 2;
+  white-space: pre;
+  overflow: auto;
+  color: var(--fg);
+  background: transparent;
+  pointer-events: none;
+  box-sizing: border-box;
+}
+.run-example .repl-hl-wrap textarea {
+  position: relative;
+  color: transparent;
+  caret-color: var(--accent);
+  background: transparent;
+}
+.run-example .repl-hl-wrap textarea::selection {
+  background: rgba(125, 211, 252, 0.25);
+  color: transparent;
+}
 
 /* Library docs sidebar layout. Used by lib-*.html via mountLibrarySidebar. */
 .lib-layout {
