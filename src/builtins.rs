@@ -116,7 +116,20 @@ fn install_prelude(env: &Env) {
     const TEST_NS: &str = include_str!("cljrs_test.clj");
     const MUSIC_NS: &str = include_str!("cljrs_music.clj");
     const UI_NS: &str = include_str!("cljrs_ui.clj");
-    for (label, src) in [("core.clj", PRELUDE), ("cljrs_test.clj", TEST_NS), ("cljrs_music.clj", MUSIC_NS), ("cljrs_ui.clj", UI_NS)] {
+    // clojure.set / clojure.walk / clojure.edn — pure cljrs ports of
+    // the standard-library namespaces. See src/cljrs_{set,walk,edn}.clj.
+    const SET_NS: &str = include_str!("cljrs_set.clj");
+    const WALK_NS: &str = include_str!("cljrs_walk.clj");
+    const EDN_NS: &str = include_str!("cljrs_edn.clj");
+    for (label, src) in [
+        ("core.clj", PRELUDE),
+        ("cljrs_test.clj", TEST_NS),
+        ("cljrs_music.clj", MUSIC_NS),
+        ("cljrs_ui.clj", UI_NS),
+        ("cljrs_set.clj", SET_NS),
+        ("cljrs_walk.clj", WALK_NS),
+        ("cljrs_edn.clj", EDN_NS),
+    ] {
         let forms = match crate::reader::read_all(src) {
             Ok(f) => f,
             Err(e) => panic!("cljrs prelude {label} parse failed: {e}"),
