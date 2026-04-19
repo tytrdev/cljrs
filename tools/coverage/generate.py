@@ -223,7 +223,7 @@ PAGE_TEMPLATE = """<!doctype html>
   </style>
 </head>
 <body>
-  <main>
+  <main class="prose">
     <h2>Coverage</h2>
     <p>
       Auto-generated diff between cljrs's installed names and the public

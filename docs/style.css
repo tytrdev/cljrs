@@ -111,10 +111,18 @@ header nav { flex: 1; align-items: center; }
 .nav-group .nav-dropdown a.active { color: var(--accent); }
 
 main {
-  max-width: 900px;
+  /* Bumped from 900px — most pages on this site embed an editor or a
+     side-by-side stage+source layout. The old width forced the editor
+     into ~700px usable, which wraps a lot of cljrs around column 65.
+     1240px gives the editor enough room to comfortably breathe while
+     still keeping prose lines readable on standard text-only pages. */
+  max-width: 1240px;
   margin: 0 auto;
   padding: 3rem 2rem;
 }
+/* Optional cap for prose-heavy pages (Overview, Syntax, Roadmap) that
+   benefit from a narrower measure. Add class="prose" to <main>. */
+main.prose { max-width: 820px; }
 main h2 {
   font-size: 1.6rem;
   margin-top: 2.5rem;
@@ -356,7 +364,7 @@ footer {
   display: flex;
   gap: 2rem;
   align-items: flex-start;
-  max-width: 1140px;
+  max-width: 1240px;
   margin: 0 auto;
   padding: 2rem;
 }
