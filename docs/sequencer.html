@@ -1,0 +1,613 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Sequencer</title>
+  <link rel="stylesheet" href="./style.css">
+  <style>
+    .sq-wrap { display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-start; }
+    .sq-stage {
+      background: #0b0d14;
+      border: 1px solid var(--border, #333);
+      border-radius: 4px;
+      flex: 0 0 auto;
+      padding: 0.6rem;
+      min-width: 540px;
+    }
+    .sq-grid {
+      display: grid;
+      grid-template-columns: 5.5rem repeat(16, 1.6rem);
+      grid-auto-rows: 1.6rem;
+      gap: 3px;
+      font: 0.7rem ui-monospace, monospace;
+      align-items: center;
+    }
+    .sq-label {
+      color: #9aa;
+      text-align: right;
+      padding-right: 0.4rem;
+      user-select: none;
+    }
+    .sq-cell {
+      width: 1.6rem; height: 1.6rem;
+      border-radius: 3px;
+      background: #1a1d27;
+      border: 1px solid #2a2f3d;
+      box-sizing: border-box;
+    }
+    .sq-cell.on  { background: #7cd98a; border-color: #8ec07c; }
+    .sq-cell.beat { box-shadow: inset 0 0 0 1px rgba(255,255,255,0.06); }
+    .sq-cell.head { outline: 2px solid #ffcc60; outline-offset: -2px; }
+    .sq-cell.head.on { background: #ffd97a; }
+
+    .sq-mel-row { display: grid; grid-template-columns: 5.5rem repeat(16, 1.6rem); gap: 3px; align-items: center; margin-top: 0.3rem; }
+    .sq-mel-cell {
+      width: 1.6rem; height: 1.6rem;
+      border-radius: 3px;
+      background: #11141d;
+      border: 1px solid #222;
+      color: #8ec07c;
+      font: 0.6rem ui-monospace, monospace;
+      display: flex; align-items: center; justify-content: center;
+      box-sizing: border-box;
+    }
+    .sq-mel-cell.head { outline: 2px solid #ffcc60; outline-offset: -2px; }
+
+    .sq-overlay {
+      color: #9aa;
+      font: 0.7rem ui-monospace, monospace;
+      margin-top: 0.6rem;
+    }
+
+    .sq-col {
+      flex: 1 1 420px;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .sq-toolbar {
+      display: flex; gap: 0.5rem; align-items: center;
+      font-size: 0.8rem; color: var(--fg-dim);
+      flex-wrap: wrap;
+    }
+    .sq-toolbar button {
+      font-family: inherit; font-size: 0.8rem; padding: 0.25rem 0.7rem;
+    }
+    .sq-toolbar input[type="range"] { vertical-align: middle; }
+    .sq-status {
+      font-family: ui-monospace, monospace;
+      font-size: 0.75rem;
+      color: var(--fg-dim);
+      min-height: 1em;
+      white-space: pre-wrap;
+    }
+    .sq-status.err { color: #ff6666; }
+    .sq-status.ok { color: #8ec07c; }
+    .sq-hint { font-size: 0.75rem; color: var(--fg-dim); }
+    .sq-hint kbd {
+      background: #1d2029; border: 1px solid #333;
+      padding: 0 4px; border-radius: 3px;
+      font-family: inherit;
+    }
+    /* Scrubbable numbers (matches synth.html) */
+    .sq-scrub-mode.repl .repl-hl-wrap .repl-hl { pointer-events: auto !important; cursor: default; }
+    .sq-scrub-mode.repl .repl-hl-wrap textarea { pointer-events: none !important; }
+    .sq-scrub-mode.repl .repl-hl .tok-number {
+      cursor: ew-resize;
+      background: rgba(255, 204, 96, 0.14);
+      border-radius: 2px;
+      outline: 1px solid rgba(255, 204, 96, 0.3);
+    }
+    .sq-scrub-mode.repl .repl-hl .tok-number:hover,
+    .repl .repl-hl .tok-number.sq-scrubbing {
+      background: rgba(255, 204, 96, 0.35);
+      outline-color: rgba(255, 204, 96, 0.8);
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h2>Sequencer — live coded</h2>
+    <p class="sq-hint" style="margin-top:-0.4rem">
+      In the spirit of <a href="https://tidalcycles.org/">TidalCycles</a> and
+      <a href="https://sonic-pi.net/">Sonic Pi</a>: rhythms and melodies are
+      vectors of data in Clojure. Edit the source, the grid and the
+      drum machine update. Companion to the
+      <a href="./synth.html">subtractive synth</a> demo.
+    </p>
+    <p>
+      A 16-step, 4-track step sequencer. Three percussion tracks
+      (kick / snare / hat) plus a melody line whose pitches come from
+      the <code>cljrs.music</code> library — try changing the scale
+      from <code>:minor</code> to <code>:dorian</code> or
+      <code>:pentatonic</code> and watch the melody re-harmonize on
+      the next bar. Web Audio handles sample-accurate scheduling; the
+      cljrs runtime owns the score.
+    </p>
+    <p class="sq-hint">
+      Hold <b>Alt</b> (or <b>Ctrl</b>) and drag any number — try
+      <code>BPM</code> — to scrub it live. Press
+      <kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Enter</kbd> to apply
+      immediately.
+    </p>
+
+    <div class="sq-wrap">
+      <div class="sq-stage">
+        <div class="sq-grid" id="sq-grid"></div>
+        <div class="sq-mel-row" id="sq-mel-row"></div>
+        <div class="sq-overlay" id="sq-overlay">stopped · — bpm</div>
+      </div>
+      <div class="sq-col">
+        <div class="sq-toolbar">
+          <button id="sq-play">Start</button>
+          <label style="display:flex;align-items:center;gap:0.3rem">
+            master
+            <input type="range" id="sq-master" min="0" max="1" step="0.01" value="0.5">
+          </label>
+          <span id="sq-meter">—</span>
+        </div>
+        <div class="repl" id="sq-editor">
+          <textarea id="sq-src" spellcheck="false" style="min-height:520px"></textarea>
+        </div>
+        <div id="sq-status" class="sq-status"></div>
+      </div>
+    </div>
+
+    <h3>What's happening</h3>
+    <ul>
+      <li>The Clojure source defines four 16-element vectors and a BPM. <code>applySource</code> re-reads them with <code>repl.eval_floats</code> on every edit (300 ms debounce) — the JS sequencer reads the freshest pattern at the start of every step.</li>
+      <li>The melody line uses <code>(cljrs.music/scale 60 :minor)</code> to map step indices into MIDI notes, demonstrating data-driven harmony from the <code>cljrs.music</code> library.</li>
+      <li>Web Audio scheduling: a setInterval-driven lookahead walks the next ~100 ms of steps and queues drum hits / oscillator notes with <code>audioCtx.currentTime</code>, the standard <a href="https://web.dev/audio-scheduling/">Chris Wilson scheduling pattern</a>. The cljrs interpreter is fast enough for per-frame logic but sample-accurate timing belongs in the audio thread.</li>
+      <li>The grid you see is a <em>view</em> of the Clojure data, not a backing store — there's no checkbox state in JS, only what the source defines.</li>
+    </ul>
+  </main>
+  <script type="module">
+    import { mountChrome, loadWasm, attachHighlightOverlay } from "./_layout.js";
+    mountChrome();
+
+    const INITIAL_SOURCE = `;; ============================================================
+;; Step sequencer — 16 steps × 4 tracks. Edits apply on a short
+;; debounce; the JS scheduler picks up new patterns at the next step.
+;;   hold Alt (or Ctrl) and drag any number to scrub it live
+;; ============================================================
+
+(def BPM 120)
+
+;; --- drum patterns (1 = hit, 0 = rest) ---
+(def KICK   [1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0])
+(def SNARE  [0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 0])
+(def HAT    [1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0])
+
+;; --- melody — indices into a scale from cljrs.music ---
+;; Try swapping :minor for :dorian, :pentatonic, :blues …
+(def MELODY (let [scl (cljrs.music/scale 60 :minor)
+                  pat [0 2 4 5 7 4 2 0 0 2 4 7 9 7 5 4]]
+              (mapv (fn [i] (nth scl (mod i (count scl)))) pat)))
+
+;; The JS side pulls each pattern with eval_floats. Order is a
+;; contract with sequencer.html — keep names + counts stable.
+(defn bpm [] [BPM])
+(defn kick   [] KICK)
+(defn snare  [] SNARE)
+(defn hat    [] HAT)
+(defn melody [] MELODY)
+`;
+
+    // --- elements --------------------------------------------------------
+    const gridEl = document.getElementById("sq-grid");
+    const melRowEl = document.getElementById("sq-mel-row");
+    const overlay = document.getElementById("sq-overlay");
+    const ta = document.getElementById("sq-src");
+    const editorEl = document.getElementById("sq-editor");
+    const status = document.getElementById("sq-status");
+    const playBtn = document.getElementById("sq-play");
+    const masterSlider = document.getElementById("sq-master");
+    const meterEl = document.getElementById("sq-meter");
+
+    ta.value = INITIAL_SOURCE;
+
+    // --- state -----------------------------------------------------------
+    let repl = null;
+    let audio = null;
+    let master = null;
+    let analyser = null;
+    let playing = false;
+    let debounceTimer = null;
+
+    // Score caches (refreshed on every applySource).
+    let bpm = 120;
+    const STEPS = 16;
+    let kick   = new Array(STEPS).fill(0);
+    let snare  = new Array(STEPS).fill(0);
+    let hat    = new Array(STEPS).fill(0);
+    let melody = new Array(STEPS).fill(60);
+
+    // Scheduler state.
+    let nextStepTime = 0;       // audio-clock seconds
+    let currentStep  = 0;       // 0..STEPS-1
+    let displayStep  = -1;      // last step we lit on the grid
+    let schedulerHandle = null;
+    const LOOKAHEAD_S = 0.1;    // schedule this far ahead
+    const TICK_MS     = 25;     // interval timer cadence
+
+    function setStatus(msg, cls) {
+      status.className = cls ? `sq-status ${cls}` : "sq-status";
+      status.textContent = msg;
+    }
+
+    // --- grid view -------------------------------------------------------
+    // Build a fresh grid every applySource — cheap, and the source is
+    // the single source of truth.
+    const TRACK_NAMES = ["kick", "snare", "hat"];
+    function trackVec(name) {
+      if (name === "kick")  return kick;
+      if (name === "snare") return snare;
+      if (name === "hat")   return hat;
+      return [];
+    }
+
+    function midiToName(n) {
+      const NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+      const oct = Math.floor(n / 12) - 1;
+      return NAMES[((n % 12) + 12) % 12] + oct;
+    }
+
+    function rebuildGrid() {
+      gridEl.innerHTML = "";
+      for (const t of TRACK_NAMES) {
+        const lab = document.createElement("div");
+        lab.className = "sq-label";
+        lab.textContent = t;
+        gridEl.appendChild(lab);
+        const vec = trackVec(t);
+        for (let i = 0; i < STEPS; i++) {
+          const cell = document.createElement("div");
+          cell.className = "sq-cell" + (vec[i] ? " on" : "")
+                         + (i % 4 === 0 ? " beat" : "");
+          cell.dataset.step = i;
+          cell.dataset.track = t;
+          gridEl.appendChild(cell);
+        }
+      }
+
+      melRowEl.innerHTML = "";
+      const lab = document.createElement("div");
+      lab.className = "sq-label";
+      lab.textContent = "melody";
+      melRowEl.appendChild(lab);
+      for (let i = 0; i < STEPS; i++) {
+        const c = document.createElement("div");
+        c.className = "sq-mel-cell";
+        c.textContent = midiToName(melody[i] | 0);
+        c.dataset.step = i;
+        c.dataset.track = "melody";
+        melRowEl.appendChild(c);
+      }
+      displayStep = -1; // force playhead repaint
+    }
+
+    function paintPlayhead(step) {
+      if (step === displayStep) return;
+      gridEl.querySelectorAll(".sq-cell.head").forEach(n => n.classList.remove("head"));
+      melRowEl.querySelectorAll(".sq-mel-cell.head").forEach(n => n.classList.remove("head"));
+      gridEl.querySelectorAll(`.sq-cell[data-step="${step}"]`).forEach(n => n.classList.add("head"));
+      const m = melRowEl.querySelector(`.sq-mel-cell[data-step="${step}"]`);
+      if (m) m.classList.add("head");
+      displayStep = step;
+    }
+
+    // --- pull patterns from cljrs ---------------------------------------
+    function pullVec(call, n) {
+      const f = repl.eval_floats(call);
+      const out = new Array(n).fill(0);
+      for (let i = 0; i < n && i < f.length; i++) out[i] = f[i];
+      return out;
+    }
+
+    function readScore() {
+      if (!repl) return false;
+      const b = repl.eval_floats("(bpm)");
+      if (b.length >= 1 && Number.isFinite(b[0])) bpm = Math.max(20, b[0]);
+      kick   = pullVec("(kick)",   STEPS);
+      snare  = pullVec("(snare)",  STEPS);
+      hat    = pullVec("(hat)",    STEPS);
+      melody = pullVec("(melody)", STEPS);
+      return true;
+    }
+
+    function applySource(src) {
+      if (!repl) return false;
+      setStatus("…");
+      const result = repl.eval(src);
+      if (result.startsWith("read error") || result.startsWith("eval error")) {
+        setStatus(result, "err");
+        return false;
+      }
+      if (!readScore()) {
+        setStatus("score read failed", "err");
+        return false;
+      }
+      rebuildGrid();
+      updateOverlay();
+      setStatus("applied.", "ok");
+      return true;
+    }
+
+    function updateOverlay() {
+      overlay.textContent = (playing ? "playing" : "stopped")
+        + ` · ${bpm.toFixed(1)} bpm · 16th = ${(15 / bpm).toFixed(3)} s`;
+    }
+
+    // --- audio graph + scheduling ---------------------------------------
+    // Standard Chris Wilson "lookahead scheduler":
+    //   a setInterval ticks at TICK_MS and walks every step whose
+    //   start time is within the next LOOKAHEAD_S, queuing it on the
+    //   audio clock. The audio clock is what's actually heard; the JS
+    //   timer only has to be correct on average.
+    function ensureAudio() {
+      if (audio) return audio;
+      audio = new (window.AudioContext || window.webkitAudioContext)();
+      master = audio.createGain();
+      master.gain.value = parseFloat(masterSlider.value);
+      analyser = audio.createAnalyser();
+      analyser.fftSize = 1024;
+      master.connect(analyser).connect(audio.destination);
+      return audio;
+    }
+
+    function midiToHz(n) { return 440 * Math.pow(2, (n - 69) / 12); }
+
+    function scheduleKick(t) {
+      const osc = audio.createOscillator();
+      const g = audio.createGain();
+      osc.frequency.setValueAtTime(120, t);
+      osc.frequency.exponentialRampToValueAtTime(40, t + 0.12);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.9, t + 0.005);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.25);
+      osc.connect(g).connect(master);
+      osc.start(t); osc.stop(t + 0.3);
+    }
+
+    function scheduleSnare(t) {
+      // Noise burst through bandpass + body sine.
+      const sr = audio.sampleRate;
+      const buf = audio.createBuffer(1, sr * 0.25, sr);
+      const d = buf.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+      const noise = audio.createBufferSource();
+      noise.buffer = buf;
+      const bp = audio.createBiquadFilter();
+      bp.type = "bandpass"; bp.frequency.value = 1800; bp.Q.value = 0.8;
+      const ng = audio.createGain();
+      ng.gain.setValueAtTime(0.0001, t);
+      ng.gain.exponentialRampToValueAtTime(0.6, t + 0.005);
+      ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+      noise.connect(bp).connect(ng).connect(master);
+      noise.start(t); noise.stop(t + 0.25);
+
+      const body = audio.createOscillator();
+      const bg = audio.createGain();
+      body.frequency.setValueAtTime(220, t);
+      bg.gain.setValueAtTime(0.0001, t);
+      bg.gain.exponentialRampToValueAtTime(0.4, t + 0.005);
+      bg.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+      body.connect(bg).connect(master);
+      body.start(t); body.stop(t + 0.15);
+    }
+
+    function scheduleHat(t) {
+      const sr = audio.sampleRate;
+      const buf = audio.createBuffer(1, sr * 0.05, sr);
+      const d = buf.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+      const noise = audio.createBufferSource();
+      noise.buffer = buf;
+      const hp = audio.createBiquadFilter();
+      hp.type = "highpass"; hp.frequency.value = 7000;
+      const g = audio.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.25, t + 0.002);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+      noise.connect(hp).connect(g).connect(master);
+      noise.start(t); noise.stop(t + 0.06);
+    }
+
+    function scheduleMelodyNote(t, midi) {
+      const osc = audio.createOscillator();
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(midiToHz(midi), t);
+      const g = audio.createGain();
+      const dur = Math.min(0.18, 60.0 / bpm / 4 * 0.9);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.35, t + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      osc.connect(g).connect(master);
+      osc.start(t); osc.stop(t + dur + 0.02);
+    }
+
+    function scheduleStep(stepIdx, t) {
+      if (kick[stepIdx])  scheduleKick(t);
+      if (snare[stepIdx]) scheduleSnare(t);
+      if (hat[stepIdx])   scheduleHat(t);
+      const m = melody[stepIdx] | 0;
+      if (m > 0) scheduleMelodyNote(t, m);
+      // Schedule a UI tick so the playhead lights up right when the
+      // audio fires. We use setTimeout offset by audio-vs-wallclock.
+      const delayMs = Math.max(0, (t - audio.currentTime) * 1000);
+      setTimeout(() => paintPlayhead(stepIdx), delayMs);
+    }
+
+    function schedulerTick() {
+      const stepDur = 60.0 / bpm / 4; // 16th note in seconds
+      while (nextStepTime < audio.currentTime + LOOKAHEAD_S) {
+        scheduleStep(currentStep, nextStepTime);
+        nextStepTime += stepDur;
+        currentStep = (currentStep + 1) % STEPS;
+      }
+    }
+
+    function startPlaying() {
+      ensureAudio();
+      if (audio.state === "suspended") audio.resume();
+      currentStep = 0;
+      nextStepTime = audio.currentTime + 0.05;
+      schedulerHandle = setInterval(schedulerTick, TICK_MS);
+      playing = true;
+      playBtn.textContent = "Stop";
+      updateOverlay();
+    }
+
+    function stopPlaying() {
+      if (schedulerHandle != null) {
+        clearInterval(schedulerHandle);
+        schedulerHandle = null;
+      }
+      playing = false;
+      playBtn.textContent = "Start";
+      paintPlayhead(-1);
+      updateOverlay();
+    }
+
+    playBtn.addEventListener("click", () => {
+      if (playing) stopPlaying(); else startPlaying();
+    });
+    masterSlider.addEventListener("input", () => {
+      if (master) master.gain.setValueAtTime(
+        parseFloat(masterSlider.value),
+        audio ? audio.currentTime : 0);
+    });
+
+    // --- meter (peak from analyser) -------------------------------------
+    const meterBuf = new Float32Array(1024);
+    function drawMeter() {
+      if (analyser) {
+        analyser.getFloatTimeDomainData(meterBuf);
+        let peak = 0;
+        for (let i = 0; i < meterBuf.length; i++) {
+          const a = Math.abs(meterBuf[i]);
+          if (a > peak) peak = a;
+        }
+        meterEl.textContent = `peak ${peak.toFixed(2)}`;
+      } else {
+        meterEl.textContent = "—";
+      }
+      requestAnimationFrame(drawMeter);
+    }
+
+    // --- debounced source apply + scrubbable numbers --------------------
+    ta.addEventListener("input", () => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => applySource(ta.value), 300);
+    });
+    ta.addEventListener("keydown", (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        clearTimeout(debounceTimer);
+        applySource(ta.value);
+      }
+    });
+
+    let scrubModHeld = false;
+    let scrubbingNumber = null;
+    function modFromEvent(e) { return !!(e.altKey || e.ctrlKey); }
+    function setScrubMode(on) {
+      if (scrubModHeld === on) return;
+      scrubModHeld = on;
+      editorEl.classList.toggle("sq-scrub-mode", on);
+    }
+    function syncModFromEvent(e) {
+      setScrubMode(modFromEvent(e));
+      if (!modFromEvent(e)) endNumberScrub();
+    }
+    ["keydown", "keyup", "mousemove", "mousedown", "mouseup"].forEach((ev) => {
+      window.addEventListener(ev, syncModFromEvent, true);
+    });
+    window.addEventListener("blur", () => { setScrubMode(false); endNumberScrub(); });
+
+    function parseNumberText(s) {
+      const v = parseFloat(s);
+      if (!Number.isFinite(v)) return null;
+      const dot = s.indexOf(".");
+      const decimals = dot >= 0 ? s.length - dot - 1 : 0;
+      return { value: v, decimals };
+    }
+    function formatNumber(v, decimals) {
+      if (decimals === 0) return String(Math.round(v));
+      return v.toFixed(decimals);
+    }
+    function tokenFromTarget(target) {
+      let t = target;
+      for (let n = 0; n < 3 && t; n++) {
+        if (t.classList && t.dataset && t.dataset.s != null &&
+            t.classList.contains("tok-number")) return t;
+        t = t.parentElement;
+      }
+      return null;
+    }
+
+    editorEl.addEventListener("mousedown", (e) => {
+      if (!modFromEvent(e)) return;
+      const t = tokenFromTarget(e.target);
+      if (!t) return;
+      const start = parseInt(t.dataset.s, 10);
+      const len = parseInt(t.dataset.l, 10);
+      const text = ta.value.slice(start, start + len);
+      const parsed = parseNumberText(text);
+      if (!parsed) return;
+      e.preventDefault(); e.stopPropagation();
+      scrubbingNumber = {
+        startValue: parsed.value,
+        decimals: parsed.decimals,
+        start, len,
+        startX: e.clientX,
+        span: t,
+      };
+      t.classList.add("sq-scrubbing");
+      document.body.style.cursor = "ew-resize";
+    }, true);
+
+    function applyNumberDrag(clientX, shiftKey) {
+      const c = scrubbingNumber;
+      if (!c) return;
+      const dx = clientX - c.startX;
+      const mag = Math.max(0.1, Math.abs(c.startValue));
+      const coarse = c.decimals === 0 ? 1 : Math.max(0.01, mag * 0.02);
+      const step = shiftKey ? coarse * 10 : coarse;
+      let newValue = c.startValue + dx * step;
+      if (c.decimals === 0) newValue = Math.round(newValue);
+      const newText = formatNumber(newValue, c.decimals);
+      const before = ta.value.slice(0, c.start);
+      const after  = ta.value.slice(c.start + c.len);
+      ta.value = before + newText + after;
+      c.len = newText.length;
+      ta.dispatchEvent(new Event("input"));
+      clearTimeout(debounceTimer);
+      applySource(ta.value);
+    }
+
+    function endNumberScrub() {
+      if (!scrubbingNumber) return;
+      document.body.style.cursor = "";
+      document.querySelectorAll(".tok-number.sq-scrubbing").forEach(n => n.classList.remove("sq-scrubbing"));
+      scrubbingNumber = null;
+    }
+
+    window.addEventListener("mousemove", (e) => {
+      if (scrubbingNumber) { applyNumberDrag(e.clientX, e.shiftKey); e.preventDefault(); }
+    }, true);
+    window.addEventListener("mouseup", () => endNumberScrub(), true);
+
+    // --- boot ------------------------------------------------------------
+    (async () => {
+      await attachHighlightOverlay(editorEl, ta);
+      const mod = await loadWasm();
+      repl = new mod.Repl();
+      applySource(INITIAL_SOURCE);
+      requestAnimationFrame(drawMeter);
+    })();
+  </script>
+</body>
+</html>

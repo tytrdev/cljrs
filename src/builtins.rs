@@ -99,7 +99,8 @@ const TRANSDUCER_BUILTIN_ALIASES: &[(&str, &str)] = &[
 fn install_prelude(env: &Env) {
     const PRELUDE: &str = include_str!("core.clj");
     const TEST_NS: &str = include_str!("cljrs_test.clj");
-    for (label, src) in [("core.clj", PRELUDE), ("cljrs_test.clj", TEST_NS)] {
+    const MUSIC_NS: &str = include_str!("cljrs_music.clj");
+    for (label, src) in [("core.clj", PRELUDE), ("cljrs_test.clj", TEST_NS), ("cljrs_music.clj", MUSIC_NS)] {
         let forms = match crate::reader::read_all(src) {
             Ok(f) => f,
             Err(e) => panic!("cljrs prelude {label} parse failed: {e}"),
