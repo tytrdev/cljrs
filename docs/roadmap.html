@@ -15,23 +15,30 @@
       <li>Tree walker, reader, macro system.</li>
       <li>MLIR-JIT path for type-hinted fns.</li>
       <li>Persistent collections, destructuring, threading and control macros.</li>
-      <li>Atoms, <code>try</code>/<code>catch</code>, about 125 builtins.</li>
+      <li>Atoms, <code>try</code>/<code>catch</code>, 300+ host builtins.</li>
+      <li><code>clojure.core</code> 405/662, plus 100% of <code>clojure.string</code> (21/21), <code>clojure.set</code> (12/12), <code>clojure.walk</code> (10/10), <code>clojure.edn</code> (2/2). See <a href="./coverage.html">Coverage</a>.</li>
+      <li><code>defprotocol</code>, <code>defrecord</code>, multimethods, lazy seqs, transducers, regex.</li>
+      <li>Real namespaces with <code>:require</code> / <code>:as</code> / <code>:refer</code>.</li>
+      <li><code>cljrs.test</code> with <code>deftest</code> / <code>is</code> / <code>testing</code> / <code>run-tests</code>.</li>
       <li>Live-coded CPU demos with editor, sliders, time scrubbing.</li>
+      <li>Live-coded browser demos: platformer (replay-on-resume), Conway's Life (live rule edits), synth (presets + effects), step sequencer (cljrs.ui + randomize), ML training showcase.</li>
       <li>Headless recorder (<code>bin/record</code>, <code>bin/gpu-record</code>).</li>
       <li>WASM bundle and in-browser REPL.</li>
       <li>GPU kernel DSL via wgpu (Metal / Vulkan / DX12 / WebGPU).</li>
-      <li>GPU benchmarks against numpy and pytorch.</li>
+      <li>GPU shader stdlib: palette, noise, SDF helpers.</li>
+      <li>GPU benchmarks against numpy and pytorch; live in-browser matmul bench vs numpy / JAX / PyTorch references.</li>
+      <li>Reader error reporting with source locations.</li>
+      <li>Rust-crate interop via opaque handles (rapier2d/3d for <a href="./physics.html">Physics</a>).</li>
     </ul>
 
     <h3>Next</h3>
     <ol>
       <li>
-        Clojure coverage: <code>defprotocol</code>, <code>deftype</code>, <code>defrecord</code>,
-        real namespaces with <code>:require</code> / <code>:as</code>, lazy-seqs,
-        transducers, auto-gensym, regex literals, ratios.
+        Remaining Clojure coverage: <code>deftype</code>, auto-gensym in
+        syntax-quote, regex literals, ratios, lazy-seq chunking.
       </li>
       <li>
-        More GPU demos: 3D raymarching with lighting, SPH fluid, N-body, softbody.
+        More GPU demos: SPH fluid, N-body, softbody.
       </li>
       <li>
         Motion-compensated TAA for zooming kernels.

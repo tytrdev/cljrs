@@ -46,8 +46,8 @@
 
     <h3>Status</h3>
     <ul>
-      <li>Tree walker, macros, persistent collections, destructuring, atoms, try/catch. See <a href="./coverage.html">Coverage</a>.</li>
-      <li>Native code path: 2.4x to 13x faster than Clojure on JVM on fib, loop_sum, cond_chain. See <a href="./benchmarks.html">Benchmarks</a>.</li>
+      <li>Tree walker, macros, persistent collections, destructuring, atoms, try/catch. <code>clojure.core</code> 405/662, plus 100% of <code>clojure.string</code>, <code>clojure.set</code>, <code>clojure.walk</code>, <code>clojure.edn</code>. See <a href="./coverage.html">Coverage</a>.</li>
+      <li>Native code path: 2.4x to 13x faster than Clojure on JVM on fib, loop_sum, cond_chain (as of 2026-04-16). See <a href="./benchmarks.html">Benchmarks</a>.</li>
       <li>GPU path: cljrs kernels run natively on Metal/Vulkan/DX12 and in the browser on <a href="./gpu-web.html">WebGPU</a>.</li>
       <li>Rust-crate interop via opaque handles — rapier2d/3d bindings ship as <a href="./physics.html">Physics</a>.</li>
       <li>21 CPU demos, 7 GPU demos, all live-coded. See <a href="./demos.html">Demos</a>.</li>

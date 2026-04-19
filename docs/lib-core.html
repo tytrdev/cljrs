@@ -11,12 +11,13 @@
     <h2>cljrs.core</h2>
     <p>
       The base namespace, mounted by <code>install_prelude</code> at
-      startup. Roughly 125 host builtins (Rust, see
-      <code>src/builtins.rs</code>) plus a small layer of cljrs-authored
+      startup. 300+ host builtins (Rust, see
+      <code>src/builtins.rs</code>) plus a layer of cljrs-authored
       macros and seq helpers (see <code>src/core.clj</code>). It is a
       faithful subset of <code>clojure.core</code> — same names, same
       argument order, same nil-punning. <code>str/*</code> is also
-      reachable as <code>clojure.string/*</code>.
+      reachable as <code>clojure.string/*</code>. See
+      <a href="./coverage.html">Coverage</a> for the full matrix.
     </p>
     <p>
       Design goal: anything you reach for to write small Clojure

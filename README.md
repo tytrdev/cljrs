@@ -28,7 +28,7 @@ One language, three compilers — same surface syntax across all of them.
 
 | Path | What it does |
 | --- | --- |
-| **Tree walker** | Full Clojure semantics. Reader, macros, persistent collections (HAMT via [imbl](https://docs.rs/imbl)), destructuring, multimethods, protocols, records, real namespaces with `:as` / `:refer`, lazy seqs, transducers, atoms, regex, ratios, `try`/`catch`. ~125 builtins + prelude macros. See the [coverage page](https://tytrdev.github.io/cljrs/coverage.html). |
+| **Tree walker** | Full Clojure semantics. Reader, macros, persistent collections (HAMT via [imbl](https://docs.rs/imbl)), destructuring, multimethods, protocols, records, real namespaces with `:as` / `:refer`, lazy seqs, transducers, atoms, regex, ratios, `try`/`catch`. 300+ host builtins + prelude macros. See the [coverage page](https://tytrdev.github.io/cljrs/coverage.html). |
 | **Native (MLIR + LLVM)** | `defn-native` JIT-compiles type-hinted (`^i64` / `^f64`) bodies to native code. Recursion, cross-fn calls, `loop`/`recur`, `if`, `let`, `do`, arithmetic, comparisons. Live-reloads on save. |
 | **GPU (WGSL)** | `defn-gpu` lowers kernels to WGSL via the same compiler frontend; runs on Metal / Vulkan / DX12 natively, and on WebGPU in the browser through a WASM build of the runtime. |
 
