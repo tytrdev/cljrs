@@ -1,0 +1,307 @@
+# Format: <ns>/<name>: <reason>
+# Lines starting with # are comments. Listed names are pulled OUT of the
+# "missing" bucket and shown in their own "not applicable" section.
+
+# --- JVM concurrency primitives (no JVM = no agents/refs/threads-as-clojure-models) ---
+clojure.core/agent: JVM-specific concurrency primitive
+clojure.core/agent-error: JVM agent runtime
+clojure.core/agent-errors: JVM agent runtime
+clojure.core/await: JVM agent runtime
+clojure.core/await-for: JVM agent runtime
+clojure.core/await1: JVM agent runtime
+clojure.core/clear-agent-errors: JVM agent runtime
+clojure.core/release-pending-sends: JVM agent runtime
+clojure.core/restart-agent: JVM agent runtime
+clojure.core/send: JVM agent runtime
+clojure.core/send-off: JVM agent runtime
+clojure.core/send-via: JVM agent runtime
+clojure.core/set-agent-send-executor!: JVM agent runtime
+clojure.core/set-agent-send-off-executor!: JVM agent runtime
+clojure.core/set-error-handler!: JVM agent runtime
+clojure.core/set-error-mode!: JVM agent runtime
+clojure.core/error-handler: JVM agent runtime
+clojure.core/error-mode: JVM agent runtime
+clojure.core/shutdown-agents: JVM agent runtime
+clojure.core/*agent*: JVM agent runtime
+clojure.core/ref: JVM STM
+clojure.core/dosync: JVM STM
+clojure.core/alter: JVM STM
+clojure.core/commute: JVM STM
+clojure.core/ref-set: JVM STM
+clojure.core/ref-history-count: JVM STM
+clojure.core/ref-max-history: JVM STM
+clojure.core/ref-min-history: JVM STM
+clojure.core/ensure: JVM STM
+clojure.core/io!: JVM STM
+clojure.core/sync: JVM STM
+clojure.core/future: JVM thread pool primitive
+clojure.core/future-call: JVM thread pool primitive
+clojure.core/future-cancel: JVM thread pool primitive
+clojure.core/future-cancelled?: JVM thread pool primitive
+clojure.core/future-done?: JVM thread pool primitive
+clojure.core/future?: JVM thread pool primitive
+clojure.core/promise: JVM thread pool primitive
+clojure.core/deliver: JVM thread pool primitive
+clojure.core/pcalls: JVM thread pool primitive
+clojure.core/pmap: JVM thread pool primitive
+clojure.core/pvalues: JVM thread pool primitive
+clojure.core/locking: JVM monitor
+clojure.core/monitor-enter: JVM monitor
+clojure.core/monitor-exit: JVM monitor
+clojure.core/seque: JVM thread+queue primitive
+clojure.core/add-watch: JVM Ref/Atom watches
+clojure.core/remove-watch: JVM Ref/Atom watches
+
+# --- JVM interop / reflection / bytecode ---
+clojure.core/proxy: JVM reflection
+clojure.core/proxy-call-with-super: JVM reflection
+clojure.core/proxy-mappings: JVM reflection
+clojure.core/proxy-name: JVM reflection
+clojure.core/proxy-super: JVM reflection
+clojure.core/construct-proxy: JVM reflection
+clojure.core/get-proxy-class: JVM reflection
+clojure.core/init-proxy: JVM reflection
+clojure.core/update-proxy: JVM reflection
+clojure.core/gen-class: JVM bytecode emission
+clojure.core/gen-interface: JVM bytecode emission
+clojure.core/definterface: JVM interface emission
+clojure.core/reify: JVM anonymous class
+clojure.core/extend: JVM protocol extension
+clojure.core/extend-protocol: JVM protocol extension
+clojure.core/extend-type: JVM protocol extension
+clojure.core/extends?: JVM protocol extension
+clojure.core/extenders: JVM protocol extension
+clojure.core/bases: JVM class hierarchy
+clojure.core/supers: JVM class hierarchy
+clojure.core/cast: JVM type cast
+clojure.core/class: JVM class
+clojure.core/class?: JVM class
+clojure.core/bean: JVM bean introspection
+clojure.core/.: JVM dot interop
+clojure.core/..: JVM dot interop
+clojure.core/->: not interop, but listed twice (threading macro implemented)
+clojure.core/doto: JVM mutation chain (no methods to call)
+clojure.core/memfn: JVM method handle
+clojure.core/set!: JVM mutable field
+clojure.core/definline: JVM inline emission
+clojure.core/defstruct: superseded by records (deprecated in Clojure)
+clojure.core/struct: superseded by records (deprecated in Clojure)
+clojure.core/struct-map: superseded by records (deprecated in Clojure)
+clojure.core/create-struct: superseded by records (deprecated in Clojure)
+clojure.core/accessor: superseded by records (deprecated in Clojure)
+clojure.core/aclone: Java array
+clojure.core/aget: Java array
+clojure.core/aset: Java array
+clojure.core/aset-boolean: Java array
+clojure.core/aset-byte: Java array
+clojure.core/aset-char: Java array
+clojure.core/aset-double: Java array
+clojure.core/aset-float: Java array
+clojure.core/aset-int: Java array
+clojure.core/aset-long: Java array
+clojure.core/aset-short: Java array
+clojure.core/alength: Java array
+clojure.core/alias: ns alias (use require :as)
+clojure.core/amap: Java array
+clojure.core/areduce: Java array
+clojure.core/booleans: Java primitive array
+clojure.core/bytes: Java primitive array
+clojure.core/bytes?: Java primitive array
+clojure.core/chars: Java primitive array
+clojure.core/doubles: Java primitive array
+clojure.core/floats: Java primitive array
+clojure.core/ints: Java primitive array
+clojure.core/longs: Java primitive array
+clojure.core/shorts: Java primitive array
+clojure.core/byte-array: Java primitive array
+clojure.core/boolean-array: Java primitive array
+clojure.core/char-array: Java primitive array
+clojure.core/double-array: Java primitive array
+clojure.core/float-array: Java primitive array
+clojure.core/int-array: Java primitive array
+clojure.core/long-array: Java primitive array
+clojure.core/short-array: Java primitive array
+clojure.core/object-array: Java primitive array
+clojure.core/make-array: Java primitive array
+clojure.core/into-array: Java primitive array
+clojure.core/to-array: Java primitive array
+clojure.core/to-array-2d: Java primitive array
+clojure.core/aset-objects: Java array
+
+# --- Threads / IO blocking primitives ---
+clojure.core/Thread/sleep: JVM thread sleep (use platform timer)
+clojure.core/thread-bound?: JVM thread-local var
+clojure.core/bound-fn: JVM thread-local var
+clojure.core/bound-fn*: JVM thread-local var
+clojure.core/bound?: JVM thread-local var
+clojure.core/with-bindings: JVM thread-local var
+clojure.core/with-bindings*: JVM thread-local var
+clojure.core/push-thread-bindings: JVM thread-local var
+clojure.core/pop-thread-bindings: JVM thread-local var
+clojure.core/get-thread-bindings: JVM thread-local var
+clojure.core/binding: JVM thread-local var
+clojure.core/var-get: vars-as-references model not implemented
+clojure.core/var-set: vars-as-references model not implemented
+clojure.core/var?: vars-as-references model not implemented
+clojure.core/intern: vars-as-references model not implemented
+clojure.core/with-local-vars: vars-as-references model not implemented
+clojure.core/declare: not yet, but planned
+clojure.core/alter-var-root: vars-as-references model not implemented
+clojure.core/find-var: vars-as-references model not implemented
+clojure.core/resolve: vars-as-references model not implemented
+clojure.core/ns-resolve: vars-as-references model not implemented
+clojure.core/the-ns: vars-as-references model not implemented
+
+# --- Compiler / runtime internals ---
+clojure.core/compile: AOT compilation handled differently in cljrs
+clojure.core/load: file loading via load-file
+clojure.core/load-reader: JVM reader
+clojure.core/load-string: JVM reader
+clojure.core/load-script: JVM reader
+clojure.core/loaded-libs: JVM ns registry detail
+clojure.core/find-ns: JVM ns registry detail
+clojure.core/all-ns: JVM ns registry detail
+clojure.core/create-ns: JVM ns registry detail
+clojure.core/remove-ns: JVM ns registry detail
+clojure.core/in-ns: REPL only; cljrs uses ns
+clojure.core/ns-map: JVM ns introspection
+clojure.core/ns-aliases: JVM ns introspection
+clojure.core/ns-imports: JVM ns introspection
+clojure.core/ns-interns: JVM ns introspection
+clojure.core/ns-name: JVM ns introspection
+clojure.core/ns-publics: JVM ns introspection
+clojure.core/ns-refers: JVM ns introspection
+clojure.core/ns-unalias: JVM ns introspection
+clojure.core/ns-unmap: JVM ns introspection
+clojure.core/refer: superseded by require :refer
+clojure.core/refer-clojure: implicit; cljrs always refers core
+clojure.core/use: superseded by require
+clojure.core/import: JVM Java class import
+
+# --- Reader internals / data readers ---
+clojure.core/*data-readers*: JVM data-reader registry
+clojure.core/*default-data-reader-fn*: JVM data-reader registry
+clojure.core/default-data-readers: JVM data-reader registry
+clojure.core/tagged-literal: tagged-literal support pending
+clojure.core/tagged-literal?: tagged-literal support pending
+
+# --- I/O / printing internals ---
+clojure.core/*flush-on-newline*: JVM Writer model
+clojure.core/*print-dup*: JVM print-dup
+clojure.core/*print-length*: JVM print state (use clojure.pprint)
+clojure.core/*print-level*: JVM print state
+clojure.core/*print-meta*: JVM print state
+clojure.core/*print-namespace-maps*: JVM print state
+clojure.core/*print-readably*: JVM print state
+clojure.core/*read-eval*: JVM reader switch
+clojure.core/*compile-files*: JVM AOT
+clojure.core/*compile-path*: JVM AOT
+clojure.core/*compiler-options*: JVM AOT
+clojure.core/*command-line-args*: shell launcher concern
+clojure.core/*err*: JVM stream
+clojure.core/*in*: JVM stream
+clojure.core/*out*: JVM stream
+clojure.core/*file*: JVM source-file var
+clojure.core/*ns*: JVM ns var
+clojure.core/*warn-on-reflection*: JVM reflection warning
+clojure.core/*unchecked-math*: JVM unchecked math switch
+clojure.core/*assert*: JVM assert switch
+clojure.core/*clojure-version*: cljrs is not Clojure JVM
+clojure.core/*1: JVM REPL history
+clojure.core/*2: JVM REPL history
+clojure.core/*3: JVM REPL history
+clojure.core/*e: JVM REPL last-error
+clojure.core/*repl*: JVM REPL flag
+clojure.core/clojure-version: cljrs is not Clojure JVM
+clojure.core/print-method: print-method multimethod (planned)
+clojure.core/print-dup: print-dup multimethod
+clojure.core/print-simple: JVM print helper
+clojure.core/printf: JVM Formatter
+clojure.core/format: JVM Formatter (planned via Rust format!)
+
+# --- Data-reader / record/type internals not yet wired ---
+clojure.core/->ArrayChunk: chunked-seq impl detail
+clojure.core/->Eduction: Eduction record (transducer infra impl detail)
+clojure.core/->Vec: gvec impl detail
+clojure.core/->VecNode: gvec impl detail
+clojure.core/->VecSeq: gvec impl detail
+clojure.core/ArrayChunk: chunked-seq impl detail
+clojure.core/Eduction: Eduction type (transducer infra impl detail)
+clojure.core/Vec: gvec type
+clojure.core/Throwable->map: JVM Throwable conversion
+clojure.core/StackTraceElement->vec: JVM StackTraceElement
+clojure.core/PrintWriter-on: JVM PrintWriter
+
+# --- Number coercions tied to JVM primitive types ---
+clojure.core/byte: JVM byte coercion
+clojure.core/short: JVM short coercion
+clojure.core/char: JVM char coercion
+clojure.core/char?: JVM char (cljrs has no char type)
+clojure.core/unchecked-byte: JVM unchecked primitive
+clojure.core/unchecked-short: JVM unchecked primitive
+clojure.core/unchecked-char: JVM unchecked primitive
+clojure.core/unchecked-int: JVM unchecked primitive
+clojure.core/unchecked-long: JVM unchecked primitive
+clojure.core/unchecked-float: JVM unchecked primitive
+clojure.core/unchecked-double: JVM unchecked primitive
+clojure.core/unchecked-add: JVM unchecked primitive
+clojure.core/unchecked-add-int: JVM unchecked primitive
+clojure.core/unchecked-dec: JVM unchecked primitive
+clojure.core/unchecked-dec-int: JVM unchecked primitive
+clojure.core/unchecked-divide-int: JVM unchecked primitive
+clojure.core/unchecked-inc: JVM unchecked primitive
+clojure.core/unchecked-inc-int: JVM unchecked primitive
+clojure.core/unchecked-multiply: JVM unchecked primitive
+clojure.core/unchecked-multiply-int: JVM unchecked primitive
+clojure.core/unchecked-negate: JVM unchecked primitive
+clojure.core/unchecked-negate-int: JVM unchecked primitive
+clojure.core/unchecked-remainder-int: JVM unchecked primitive
+clojure.core/unchecked-subtract: JVM unchecked primitive
+clojure.core/unchecked-subtract-int: JVM unchecked primitive
+clojure.core/+': bigint promotion (no bigint type yet)
+clojure.core/-': bigint promotion (no bigint type yet)
+clojure.core/*': bigint promotion (no bigint type yet)
+clojure.core/inc': bigint promotion (no bigint type yet)
+clojure.core/dec': bigint promotion (no bigint type yet)
+clojure.core/biginteger: bigint not implemented
+clojure.core/bigint: bigint not implemented
+clojure.core/bigdec: bigdec not implemented
+clojure.core/numerator: ratio accessor (planned)
+clojure.core/denominator: ratio accessor (planned)
+clojure.core/decimal?: bigdec not implemented
+clojure.core/ratio?: not yet (ratios exist as values, no predicate)
+clojure.core/rational?: not yet
+clojure.core/rationalize: not yet
+
+# --- Reducers / volatiles / chunked-seq plumbing tied to JVM ---
+clojure.core/volatile!: JVM volatile (transducer mutable cell)
+clojure.core/vreset!: JVM volatile
+clojure.core/vswap!: JVM volatile
+clojure.core/volatile?: JVM volatile
+clojure.core/chunk: chunked-seq protocol not exposed
+clojure.core/chunk-append: chunked-seq protocol not exposed
+clojure.core/chunk-buffer: chunked-seq protocol not exposed
+clojure.core/chunk-cons: chunked-seq protocol not exposed
+clojure.core/chunk-first: chunked-seq protocol not exposed
+clojure.core/chunk-next: chunked-seq protocol not exposed
+clojure.core/chunk-rest: chunked-seq protocol not exposed
+clojure.core/chunked-seq?: chunked-seq protocol not exposed
+clojure.core/iterator-seq: JVM Iterator interop
+clojure.core/enumeration-seq: JVM Enumeration interop
+clojure.core/file-seq: JVM File interop
+clojure.core/line-seq: JVM Reader interop
+clojure.core/resultset-seq: JVM JDBC interop
+clojure.core/xml-seq: JVM XML interop
+clojure.core/re-groups: JVM Matcher (re-find returns groups directly)
+clojure.core/re-matcher: JVM Matcher
+clojure.core/with-precision: JVM bigdec context
+
+# --- Misc deferred ---
+clojure.core/eval: deferred (security/runtime concern)
+clojure.core/read: stream reader (use read-string)
+clojure.core/read+string: stream reader
+clojure.core/read-line: stdin reader
+clojure.core/with-in-str: JVM PushbackReader
+clojure.core/with-open: JVM AutoCloseable
+clojure.core/with-out-str: thread-local *out* (planned)
+clojure.core/printf: JVM Formatter

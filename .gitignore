@@ -52,3 +52,4 @@ ehthumbs.db
 *.bak
 .nrepl-port
 out/
+__pycache__/

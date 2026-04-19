@@ -68,6 +68,7 @@ cargo run --release
 **Build the docs site locally:**
 ```bash
 ./docs/build.sh                       # rebuild WASM + WGSL artifacts
+./tools/coverage/build.sh             # regenerate docs/coverage.html (diff vs clojure.core)
 cd docs && python3 -m http.server 8080
 ```
 
