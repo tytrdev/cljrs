@@ -369,9 +369,9 @@
 ;; ============================================================
 (require '[cljrs.ml :as ml])
 
-(def HIDDEN 32)
+(def HIDDEN 24)
 (def LR     0.01)
-(def BATCH  32)
+(def BATCH  8)
 
 (defonce USE-GPU? (atom false))
 (defn matmul [a b] (if @USE-GPU? (ml/matmul-gpu a b) (ml/matmul a b)))
@@ -798,15 +798,28 @@
     let stepsThisSecond = 0;
     let lastTpsAt = performance.now();
     let lastTps = 0;
+    // Sticky runtime error (set by step()/drawMain when a defined fn
+    // throws). Survives subsequent applySource() calls so Monaco's
+    // debounced re-apply can't clobber the message before you read it.
+    // Cleared on user-initiated reset / Resume / tab switch.
+    let runtimeError = null;
 
     function setStatus(msg, cls) {
       status.className = cls ? `ml-status ${cls}` : "ml-status";
       status.textContent = msg;
     }
 
+    function reportRuntimeError(where, msg) {
+      runtimeError = `${where}: ${msg}`;
+      setStatus(runtimeError, "err");
+      console.error("[ml]", where, msg);
+      running = false;
+      runBtn.textContent = "Resume";
+    }
+
     function applySource(src) {
       if (!repl) return false;
-      setStatus("…");
+      if (!runtimeError) setStatus("…");
       const result = repl.eval(src);
       if (result.startsWith("read error") || result.startsWith("eval error")) {
         setStatus(result, "err");
@@ -816,7 +829,7 @@
       repl.eval(`(reset! USE-GPU? ${gpuEl.checked ? "true" : "false"})`);
       lossHistory = [];
       stepCount = 0;
-      setStatus("applied. weights persisted via defonce.", "ok");
+      if (!runtimeError) setStatus("applied. weights persisted via defonce.", "ok");
       return true;
     }
 
@@ -826,24 +839,28 @@
       applySource(editor.getValue());
     }
 
+    // Per-tab budget for synchronous step work. If a single train-step!
+    // exceeds this, we cut steps-per-tick to 1 so we don't starve the
+    // event loop. Tracked in a sticky way per tab.
+    const STEP_BUDGET_MS = 16;
+    let lastStepMs = 0;
+
     function step() {
-      if (!repl || !running) return;
+      if (!repl || !running) return false;
+      const t0 = performance.now();
       const out = repl.call_ints("train-step!", []);
+      lastStepMs = performance.now() - t0;
       if (out.length === 0) {
-        // train-step! threw or returned non-numeric. Surface the actual
-        // error and PAUSE — re-applying the source every frame turns
-        // the failure into a runaway reader-allocation loop.
-        const err = repl.eval("(try (train-step!) (catch _ e (str e)))");
-        setStatus(`train-step! failed: ${err}`, "err");
-        running = false;
-        runBtn.textContent = "Resume";
-        return;
+        const err = repl.eval("(train-step!)");
+        reportRuntimeError("train-step!", err);
+        return false;
       }
       lastLoss = out[0];
       lossHistory.push(lastLoss);
       if (lossHistory.length > 600) lossHistory.shift();
       stepCount++;
       stepsThisSecond++;
+      return true;
     }
 
     function drawMain() {
@@ -851,10 +868,10 @@
       let buf = null;
       if (repl) {
         buf = repl.eval_floats("(viz)");
-        if (buf.length === 0 && running) {
-          const err = repl.eval("(try (viz) (catch _ e (str e)))");
+        if (buf.length === 0 && !runtimeError) {
+          const err = repl.eval("(viz)");
           if (typeof err === "string" && !err.startsWith("[")) {
-            setStatus(`(viz) failed: ${err}`, "err");
+            reportRuntimeError("(viz)", err);
           }
         }
       }
@@ -888,17 +905,39 @@
       lossX.stroke();
     }
 
-    function frame() {
-      if (running) {
-        // adapt step count: heavier showcases get fewer steps per frame
-        const stepsPerFrame =
-          activeTab === "fit" ? 4 :
-          activeTab === "moons" ? 1 :
-          activeTab === "digits" ? 2 :
-          1;
-        for (let k = 0; k < stepsPerFrame; k++) step();
+    // Train ticks live on setTimeout so each step is a separate task,
+    // letting the browser run other work (input, paint, GC) between
+    // steps. Render lives on rAF and is independent — viz is throttled
+    // because each call allocates a fresh autograd graph.
+    let trainTimer = null;
+    let vizFrameCounter = 0;
+    const VIZ_THROTTLE = 4; // run (viz) every Nth rAF
+
+    function trainTick() {
+      trainTimer = null;
+      if (!running) return;
+      const t0 = performance.now();
+      // Run as many cheap steps as fit in budget, but at least one.
+      let did = step();
+      while (did && performance.now() - t0 < STEP_BUDGET_MS) {
+        did = step();
       }
-      drawMain();
+      // setTimeout(0) clamps to ~4ms but yields to the event loop —
+      // exactly what we want.
+      trainTimer = setTimeout(trainTick, 0);
+    }
+
+    function startTrain() {
+      if (trainTimer != null) return;
+      trainTimer = setTimeout(trainTick, 0);
+    }
+    function stopTrain() {
+      if (trainTimer != null) { clearTimeout(trainTimer); trainTimer = null; }
+    }
+
+    function frame() {
+      vizFrameCounter++;
+      if (vizFrameCounter % VIZ_THROTTLE === 0) drawMain();
       drawLoss();
       const now = performance.now();
       if (now - lastTpsAt > 500) {
@@ -907,7 +946,7 @@
         lastTpsAt = now;
       }
       meterEl.textContent =
-        `[${activeTab}] step ${stepCount}  loss ${isFinite(lastLoss) ? lastLoss.toFixed(4) : '--'}  ${lastTps}/s`;
+        `[${activeTab}] step ${stepCount}  loss ${isFinite(lastLoss) ? lastLoss.toFixed(4) : '--'}  ${lastTps}/s  step ${lastStepMs.toFixed(1)}ms`;
       overlay.textContent = running ? `training (${lastTps}/s)` : "paused";
       requestAnimationFrame(frame);
     }
@@ -916,8 +955,14 @@
     runBtn.addEventListener("click", () => {
       running = !running;
       runBtn.textContent = running ? "Pause" : "Resume";
+      if (running) { runtimeError = null; startTrain(); }
+      else { stopTrain(); }
     });
-    resetBtn.addEventListener("click", () => resetWeights());
+    resetBtn.addEventListener("click", () => {
+      runtimeError = null;
+      resetWeights();
+      if (running) startTrain();
+    });
     gpuEl.addEventListener("change", () => {
       if (!repl) return;
       repl.eval(`(reset! USE-GPU? ${gpuEl.checked ? "true" : "false"})`);
@@ -931,11 +976,14 @@
         b.classList.toggle("active", b.dataset.tab === name);
       }
       if (!repl || !editor) return;
-      // Wipe the env when switching showcases — defonce'd weights from
-      // a prior tab would clash on shape.
+      stopTrain();
+      runtimeError = null;
+      console.time(`[ml] reset+apply ${name}`);
       repl.reset();
       editor.setValue(SOURCES[name]);
       applySource(SOURCES[name]);
+      console.timeEnd(`[ml] reset+apply ${name}`);
+      if (running) startTrain();
     }
 
     document.querySelectorAll("#ml-tabs button").forEach(b => {
@@ -959,8 +1007,11 @@
       attachShareLink(editor);
       // mark first tab active
       document.querySelector('#ml-tabs button[data-tab="fit"]').classList.add("active");
+      console.time("[ml] initial apply");
       applySource(SOURCES.fit);
+      console.timeEnd("[ml] initial apply");
       requestAnimationFrame(frame);
+      startTrain();
     })();
   </script>
 </body>
