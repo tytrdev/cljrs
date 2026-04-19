@@ -12,3 +12,13 @@ path = "src/lib.rs"
 [dependencies]
 cljrs = { path = "../.." }
 imbl = "3"
+
+# GPU compute via wgpu — native only. wasm32 takes the CPU fallback so
+# we don't pull a WebGPU dependency chain into the docs-site bundle.
+# Mirrors how the cljrs-core gpu module gates these same deps; we copy
+# them here so cljrs-ml owns its own GPU surface without forcing the
+# core crate's `gpu` feature to be enabled.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+wgpu = "24"
+pollster = "0.4"
+bytemuck = { version = "1", features = ["derive"] }

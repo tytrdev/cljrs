@@ -23,18 +23,23 @@
       pointer-events: none;
       text-shadow: 0 0 2px #000;
     }
-    .ml-col {
-      flex: 1 1 400px;
-      min-width: 0;
-      display: flex; flex-direction: column; gap: 0.5rem;
-    }
-    .ml-toolbar {
-      display: flex; gap: 0.5rem; align-items: center;
-      font-size: 0.8rem; color: var(--fg-dim);
-      flex-wrap: wrap;
-    }
+    .ml-col { flex: 1 1 400px; min-width: 0;
+      display: flex; flex-direction: column; gap: 0.5rem; }
+    .ml-toolbar { display: flex; gap: 0.5rem; align-items: center;
+      font-size: 0.8rem; color: var(--fg-dim); flex-wrap: wrap; }
     .ml-toolbar button {
       font-family: inherit; font-size: 0.8rem; padding: 0.25rem 0.7rem;
+    }
+    .ml-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 4px; }
+    .ml-tabs button {
+      font-family: inherit; font-size: 0.8rem; padding: 4px 10px;
+      border: 1px solid var(--border, #333);
+      background: #1a1d26; color: var(--fg-dim);
+      cursor: pointer; border-radius: 4px;
+    }
+    .ml-tabs button.active {
+      background: #2a2e3a; color: #fff;
+      border-color: #4a8cff;
     }
     .ml-status {
       font-family: ui-monospace, monospace;
@@ -56,48 +61,58 @@
       font-size: 0.75rem;
       color: var(--fg-dim);
     }
+    .ml-gpu-toggle {
+      font-size: 0.75rem; color: var(--fg-dim);
+      display: inline-flex; align-items: center; gap: 4px;
+    }
   </style>
 </head>
 <body>
   <main>
-    <h2>ML — live coded autograd</h2>
+    <h2>ML — live coded autograd, four showcases</h2>
     <p class="ml-hint" style="margin-top:-0.4rem">
-      A tiny MLP fits a noisy <code>sin(x)</code> in your browser. The
-      model definition, hyperparameters, and one training step are all
-      authored in Clojure; only forward + backward + SGD live in Rust.
-    </p>
-    <p>
-      Edit <code>HIDDEN-SIZE</code>, <code>LEARNING-RATE</code>, the
-      activation, or the target function — pause for ~400 ms and the
-      page rebuilds the model with new weights. Hold <b>Alt</b>
-      (or <b>Ctrl</b>) and drag any number to scrub it live.
-      Weights live behind <code>defonce</code> so editing the source
-      while training continues only resets them when you change shape.
+      Pick a tab to swap models. Each showcase is a complete cljrs
+      program — model, dataset, loss, training loop, all editable. Hold
+      <b>Alt</b> (or <b>Ctrl</b>) and drag any number to scrub it live.
+      The GPU toggle re-routes <code>matmul</code> to a wgpu compute
+      shader on native; on the web it transparently falls back to CPU.
     </p>
     <p class="ml-hint">
-      <b>Phase 1: CPU autograd.</b> Reverse-mode over dense f32 buffers
-      in a new <code>cljrs-ml</code> crate, exposed to cljrs as
-      builtins (<code>ml/tensor</code>, <code>ml/matmul</code>,
-      <code>ml/relu</code>, <code>ml/mse</code>,
-      <code>ml/backward!</code>, <code>ml/sgd-step!</code>, …).
-      The cljrs GPU path is per-pixel right now — wrong shape for
-      matmuls — so a GPU mat-mul kernel is left as phase 2.
+      Stack: a tiny reverse-mode autograd over dense f32 tensors in
+      <code>cljrs-ml</code>, exposed as builtins
+      (<code>ml/matmul</code>, <code>ml/matmul-gpu</code>,
+      <code>ml/relu</code>, <code>ml/sigmoid</code>,
+      <code>ml/softmax</code>, <code>ml/conv1d-valid</code>,
+      <code>ml/cross-entropy</code>, <code>ml/adam-step!</code>,
+      <code>ml/argmax</code>, <code>ml/one-hot</code>, ...). Forward,
+      backward, and optimizer step are all in Rust; everything else
+      lives in the editor.
     </p>
+
+    <div class="ml-tabs" id="ml-tabs">
+      <button data-tab="fit">Function fit</button>
+      <button data-tab="moons">2D classifier</button>
+      <button data-tab="digits">MNIST-tiny</button>
+      <button data-tab="autoenc">Autoencoder</button>
+    </div>
 
     <div class="ml-wrap">
       <div class="ml-stage">
-        <canvas id="ml-fit"  width="420" height="260"></canvas>
+        <canvas id="ml-main" width="420" height="260"></canvas>
         <canvas id="ml-loss" width="420" height="120"></canvas>
         <div class="ml-overlay" id="ml-overlay">idle</div>
       </div>
       <div class="ml-col">
         <div class="ml-toolbar">
           <button id="ml-run">Pause</button>
-          <button id="ml-reset" title="Re-init weights">Reset weights</button>
+          <button id="ml-reset" title="Re-init weights">Reset</button>
+          <label class="ml-gpu-toggle" title="Use ml/matmul-gpu (WGSL compute) instead of CPU matmul. On web this is a no-op fallback.">
+            <input type="checkbox" id="ml-gpu"> GPU matmul
+          </label>
           <span id="ml-meter" class="ml-meter">—</span>
         </div>
         <div class="repl" id="ml-editor-wrap">
-          <div id="ml-editor" style="height:520px;width:100%"></div>
+          <div id="ml-editor" style="height:560px;width:100%"></div>
           <div class="repl-toolbar" style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
             <span id="ml-vim-status" style="font-family:ui-monospace,monospace;font-size:0.75rem;color:var(--fg-dim)"></span>
             <label style="font-size:0.75rem;color:var(--fg-dim)">
@@ -109,37 +124,55 @@
       </div>
     </div>
 
-    <h3>What's happening</h3>
+    <h3>How the showcases work</h3>
     <ul>
-      <li>The Clojure source defines <code>HIDDEN-SIZE</code>,
-        <code>LEARNING-RATE</code>, <code>BATCH</code>, the dataset, and
-        the model fns. It also calls <code>ml/randn</code> /
-        <code>ml/zeros</code> behind <code>defonce</code> so weights
-        survive an edit.</li>
-      <li>Each frame the page calls <code>(train-step!)</code> which
-        does a forward pass, a backward pass, and one SGD update.
-        It returns the current loss; JS plots it.</li>
-      <li><code>(predict-grid)</code> returns model outputs over a
-        fixed grid of <code>x</code> values; JS draws it as a curve
-        over the dataset.</li>
-      <li>If you change <code>HIDDEN-SIZE</code> the JS detects a
-        shape mismatch on the next frame and re-applies the source,
-        which re-initializes the weights.</li>
+      <li><b>Function fit</b> — a 1→H→1 MLP fits a noisy <code>sin(2x)</code>.
+        Loss is MSE, optimizer is plain SGD.</li>
+      <li><b>2D classifier</b> — a two-layer MLP carves a decision
+        boundary out of the two-moons dataset. Trained with
+        cross-entropy + Adam; canvas paints the model's confidence
+        underneath the points.</li>
+      <li><b>MNIST-tiny</b> — 8×8 hand-curated digits (200 train / 50
+        test, embedded in source) classified by a 64→32→10 MLP with
+        cross-entropy + Adam. Stage shows test predictions; correct
+        answers go green, mistakes go red.</li>
+      <li><b>Autoencoder</b> — a 64→16→64 net reconstructs the same
+        8×8 digits. Stage shows three side-by-side inputs and their
+        reconstructions over time.</li>
     </ul>
+    <p class="ml-hint">
+      Use the GPU checkbox above to switch the showcase's
+      <code>matmul</code> implementation between CPU and a wgpu
+      compute kernel. Every showcase is built on a thin
+      <code>(matmul a b)</code> macro that swaps based on a
+      <code>(USE-GPU?)</code> atom JS sets each time you toggle.
+    </p>
   </main>
   <script type="module">
     import { mountChrome, loadWasm, makeEditor, attachAltDragScrub, loadMonaco } from "./_layout.js";
     mountChrome();
 
-    const INITIAL_SOURCE = `;; ============================================================
-;; Live MLP regression — fit y ~ sin(2x) with a 1->H->1 net.
-;;   Alt+drag any number to scrub it live.
-;;   Edit, pause ~400 ms, the source re-applies and training resumes.
-;; ============================================================
+    // ============================================================
+    // Per-showcase Clojure programs.
+    // ============================================================
+    //
+    // Each program defines:
+    //   (USE-GPU?)        atom flipped by the JS GPU toggle
+    //   (matmul a b)      indirection routed via @USE-GPU?
+    //   (train-step!)     -> [loss]
+    //   (viz)             -> flat float vector consumed by JS renderer
+    //
+    // The JS layer only knows the showcase name and how to render its
+    // viz buffer. Models, datasets, optimizers all live in the editor.
 
+    const SOURCES = {
+
+    fit: `;; ============================================================
+;; Function fit — 1->H->1 MLP, fits a noisy sin(FREQ * x).
+;;   Alt+drag any number to scrub it live.
+;; ============================================================
 (require '[cljrs.ml :as ml])
 
-;; --- hyperparams ---
 (def HIDDEN-SIZE   24)
 (def LEARNING-RATE 0.05)
 (def BATCH         32)
@@ -147,19 +180,19 @@
 (def NOISE-AMP     0.10)
 (def X-MIN        -3.0)
 (def X-MAX         3.0)
-(def FREQ          2.0)        ; target = sin(FREQ * x)
+(def FREQ          2.0)
 
-;; --- a deterministic LCG (cljrs has no rand or bit-ops yet) ---
-;;   Numerical Recipes constants; mod 2^31 to keep an i64 well-behaved.
+;; --- GPU/CPU matmul switch (controlled from the page) ---
+(defonce USE-GPU? (atom false))
+(defn matmul [a b] (if @USE-GPU? (ml/matmul-gpu a b) (ml/matmul a b)))
+
+;; --- LCG (cljrs has no rand or bit-ops yet) ---
 (defonce RNG (atom 1234567))
 (defn rng-next! []
   (let [s (mod (+ (* @RNG 1103515245) 12345) 2147483648)]
-    (reset! RNG s)
-    s))
-(defn rng-float! []                    ; uniform 0..1
-  (/ (* 1.0 (rng-next!)) 2147483648.0))
-(defn rng-int! [n]
-  (mod (rng-next!) n))
+    (reset! RNG s) s))
+(defn rng-float! [] (/ (* 1.0 (rng-next!)) 2147483648.0))
+(defn rng-int! [n] (mod (rng-next!) n))
 
 ;; --- ground truth + dataset ---
 (defn target-fn [x] (sin (* FREQ x)))
@@ -168,17 +201,14 @@
   (let [xs (vec (for [i (range n)]
                   (+ X-MIN (* (- X-MAX X-MIN)
                               (/ (* 1.0 i) (max 1 (dec n)))))))
-        ys (mapv (fn [x]
-                   (+ (target-fn x)
-                      (* NOISE-AMP (- (rng-float!) 0.5))))
-                 xs)]
+        ys (mapv (fn [x] (+ (target-fn x)
+                            (* NOISE-AMP (- (rng-float!) 0.5)))) xs)]
     {:xs xs :ys ys}))
 
 (defonce DATA (atom (make-data N-DATA)))
 (when (not (= (count (:xs @DATA)) N-DATA))
   (reset! DATA (make-data N-DATA)))
 
-;; --- model. defonce so weights survive an edit. ---
 (defonce W1 (atom (ml/randn 1 HIDDEN-SIZE 0.8)))
 (defonce B1 (atom (ml/zeros 1 HIDDEN-SIZE)))
 (defonce W2 (atom (ml/randn HIDDEN-SIZE 1 (/ 1.0 (sqrt HIDDEN-SIZE)))))
@@ -192,27 +222,21 @@
     (reset! B2 (ml/zeros 1 1))))
 (fix-shapes!)
 
-;; per-step mini-batch buffers — sized once, refilled in place
 (defonce X-BUF (atom (ml/zeros BATCH 1)))
 (defonce Y-BUF (atom (ml/zeros BATCH 1)))
 (when (not (= (first (ml/shape @X-BUF)) BATCH))
   (reset! X-BUF (ml/zeros BATCH 1))
   (reset! Y-BUF (ml/zeros BATCH 1)))
 
-(defn forward [x-tensor]
-  (let [h (ml/tanh (ml/add-bias (ml/matmul x-tensor @W1) @B1))]
-    (ml/add-bias (ml/matmul h @W2) @B2)))
+(defn forward [x]
+  (let [h (ml/tanh (ml/add-bias (matmul x @W1) @B1))]
+    (ml/add-bias (matmul h @W2) @B2)))
 
 (defn sample-batch! []
-  (let [d  @DATA
-        xs (:xs d)
-        ys (:ys d)
-        n  (count xs)
-        idxs (vec (for [_ (range BATCH)] (rng-int! n)))
-        xb (mapv #(nth xs %) idxs)
-        yb (mapv #(nth ys %) idxs)]
-    (ml/set-data! @X-BUF xb)
-    (ml/set-data! @Y-BUF yb)))
+  (let [d @DATA  xs (:xs d)  ys (:ys d)  n (count xs)
+        idxs (vec (for [_ (range BATCH)] (rng-int! n)))]
+    (ml/set-data! @X-BUF (mapv #(nth xs %) idxs))
+    (ml/set-data! @Y-BUF (mapv #(nth ys %) idxs))))
 
 (defn train-step! []
   (sample-batch!)
@@ -222,38 +246,549 @@
     (ml/sgd-step! [@W1 @B1 @W2 @B2] LEARNING-RATE)
     [(ml/scalar loss)]))
 
-;; Predictions on a uniform grid, flat: [x0 y0 x1 y1 ...]
 (def GRID-N 80)
-(defn predict-grid []
-  (let [xs (vec (for [i (range GRID-N)]
+(defn viz []
+  (let [d  @DATA
+        xs (vec (for [i (range GRID-N)]
                   (+ X-MIN (* (- X-MAX X-MIN)
                               (/ (* 1.0 i) (max 1 (dec GRID-N)))))))
         xt (ml/tensor GRID-N 1 xs)
-        ys (ml/tolist (forward xt))]
-    (vec (interleave xs ys))))
+        gy (ml/tolist (forward xt))]
+    ;; Pack: [GRID-N, then x0 y0 ..., then N-DATA, then dx0 dy0 ...]
+    (vec (concat [GRID-N] (interleave xs gy)
+                 [(count (:xs d))] (interleave (:xs d) (:ys d))))))
+`,
 
-(defn data-points []
-  (let [d  @DATA]
-    (vec (interleave (:xs d) (:ys d)))))
-`;
+    moons: `;; ============================================================
+;; 2D classifier — two-moons. Net: 2 -> H -> H -> 2 (softmax).
+;;   Loss: cross-entropy.    Optimizer: Adam.
+;; ============================================================
+(require '[cljrs.ml :as ml])
+
+(def HIDDEN-SIZE 24)
+(def LR          0.02)
+(def N-PER-CLASS 80)
+(def NOISE       0.18)
+
+(defonce USE-GPU? (atom false))
+(defn matmul [a b] (if @USE-GPU? (ml/matmul-gpu a b) (ml/matmul a b)))
+
+(defonce RNG (atom 11))
+(defn rng! [] (let [s (mod (+ (* @RNG 1103515245) 12345) 2147483648)]
+                (reset! RNG s) s))
+(defn rf [] (/ (* 1.0 (rng!)) 2147483648.0))
+
+;; Two interleaved arcs (the standard sklearn moons layout).
+(defn make-moons []
+  (let [pts (vec (for [c [0 1]  i (range N-PER-CLASS)]
+                   (let [t (* PI (/ (* 1.0 i) (max 1 (dec N-PER-CLASS))))
+                         nx (+ (* NOISE (- (rf) 0.5)))
+                         ny (+ (* NOISE (- (rf) 0.5)))]
+                     (if (= c 0)
+                       [(+ (cos t) nx)        (+ (sin t) ny)        0]
+                       [(+ 1.0 (- (cos t)) nx)(+ -0.5 (- (sin t)) ny) 1]))))]
+    pts))
+
+(defonce DATA (atom (make-moons)))
+(when (not (= (count @DATA) (* 2 N-PER-CLASS)))
+  (reset! DATA (make-moons)))
+
+(defn fan2vec [pts]
+  ;; Returns {:x [..2N flat..] :y [..N int labels..]}
+  (let [xs (vec (mapcat (fn [p] [(nth p 0) (nth p 1)]) pts))
+        ys (vec (map (fn [p] (nth p 2)) pts))]
+    {:x xs :y ys}))
+
+(defonce W1 (atom (ml/kaiming 2 HIDDEN-SIZE)))
+(defonce B1 (atom (ml/zeros 1 HIDDEN-SIZE)))
+(defonce W2 (atom (ml/kaiming HIDDEN-SIZE HIDDEN-SIZE)))
+(defonce B2 (atom (ml/zeros 1 HIDDEN-SIZE)))
+(defonce W3 (atom (ml/xavier  HIDDEN-SIZE 2)))
+(defonce B3 (atom (ml/zeros 1 2)))
+
+(defn fix! []
+  (when (not (= (second (ml/shape @W1)) HIDDEN-SIZE))
+    (reset! W1 (ml/kaiming 2 HIDDEN-SIZE))
+    (reset! B1 (ml/zeros 1 HIDDEN-SIZE))
+    (reset! W2 (ml/kaiming HIDDEN-SIZE HIDDEN-SIZE))
+    (reset! B2 (ml/zeros 1 HIDDEN-SIZE))
+    (reset! W3 (ml/xavier HIDDEN-SIZE 2))
+    (reset! B3 (ml/zeros 1 2))
+    (ml/reset-optim!)))
+(fix!)
+
+(defn forward [x]
+  (let [h (ml/relu (ml/add-bias (matmul x @W1) @B1))
+        h (ml/relu (ml/add-bias (matmul h @W2) @B2))]
+    (ml/softmax (ml/add-bias (matmul h @W3) @B3))))
+
+(def N (* 2 N-PER-CLASS))
+(defonce X-BUF (atom (ml/zeros N 2)))
+(defonce Y-BUF (atom (ml/zeros N 2)))
+(defonce LOADED? (atom false))
+(when (not @LOADED?)
+  (let [{x :x y :y} (fan2vec @DATA)]
+    (ml/set-data! @X-BUF x)
+    (ml/set-data! @Y-BUF (ml/tolist (ml/one-hot y 2))))
+  (reset! LOADED? true))
+
+(defn train-step! []
+  (let [p    (forward @X-BUF)
+        loss (ml/cross-entropy p @Y-BUF)]
+    (ml/backward! loss)
+    (ml/adam-step! [@W1 @B1 @W2 @B2 @W3 @B3] LR)
+    [(ml/scalar loss)]))
+
+;; viz: pack a confidence grid + the points.
+(def GRID 32)
+(defn viz []
+  (let [pts @DATA
+        xs (vec (mapcat (fn [p] [(nth p 0) (nth p 1)]) pts))
+        ys (vec (map (fn [p] (nth p 2)) pts))
+        ;; build a (GRID*GRID, 2) input over [-1.5..2.5] x [-1.0..1.5]
+        inputs (vec (for [iy (range GRID)
+                          ix (range GRID)
+                          :let [x (+ -1.5 (* 4.0 (/ ix (max 1 (dec GRID)))))
+                                y (+ -1.0 (* 2.5 (/ iy (max 1 (dec GRID)))))]
+                          v [x y]] v))
+        xt (ml/tensor (* GRID GRID) 2 inputs)
+        probs (ml/tolist (forward xt))]
+    ;; Pack: [GRID, GRID*GRID*2 probs..., N, 3*N (x,y,label)...]
+    (vec (concat [GRID] probs
+                 [(count pts)]
+                 (mapcat (fn [p] [(nth p 0) (nth p 1) (nth p 2)]) pts)))))
+`,
+
+    digits: `;; ============================================================
+;; MNIST-tiny — 8x8 digit classification.
+;;   Net: 64 -> 32 -> 10 (softmax). Loss: cross-entropy. Adam.
+;;   Dataset: a procedurally-generated 8x8 digit set baked in source
+;;   (200 train / 50 test). Each digit is rendered from a tiny stroke
+;;   spec, then jittered. Good enough to learn from.
+;; ============================================================
+(require '[cljrs.ml :as ml])
+
+(def HIDDEN 32)
+(def LR     0.01)
+(def BATCH  32)
+
+(defonce USE-GPU? (atom false))
+(defn matmul [a b] (if @USE-GPU? (ml/matmul-gpu a b) (ml/matmul a b)))
+
+(defonce RNG (atom 42))
+(defn rng! [] (let [s (mod (+ (* @RNG 1103515245) 12345) 2147483648)]
+                (reset! RNG s) s))
+(defn rf [] (/ (* 1.0 (rng!)) 2147483648.0))
+(defn ri [n] (mod (rng!) n))
+
+;; Each digit = vector of stroke segments [[x0 y0 x1 y1] ...] in 8x8 box.
+(def STROKES
+  [[[2 1 5 1] [5 1 6 4] [6 4 5 6] [5 6 2 6] [2 6 1 4] [1 4 2 1]]
+   [[3 1 4 1] [4 1 4 6] [3 6 5 6]]
+   [[1 1 5 1] [5 1 6 3] [6 3 1 6] [1 6 6 6]]
+   [[1 1 5 1] [5 1 5 6] [5 6 1 6] [2 3 5 3]]
+   [[1 1 1 4] [1 4 5 4] [5 1 5 6]]
+   [[5 1 1 1] [1 1 1 4] [1 4 5 4] [5 4 5 6] [5 6 1 6]]
+   [[5 1 2 1] [2 1 1 4] [1 4 5 4] [5 4 5 6] [5 6 1 6]]
+   [[1 1 6 1] [6 1 3 6]]
+   [[2 1 5 1] [5 1 5 3] [5 3 2 3] [2 3 2 6] [2 6 5 6] [5 6 5 3]
+    [2 3 2 1]]
+   [[5 5 2 5] [2 5 1 3] [1 3 2 1] [2 1 5 1] [5 1 5 5] [5 5 5 6]]])
+
+(defn render-digit [d jitter]
+  (let [grid (vec (repeat 64 0.0))
+        plot (fn [g x y v]
+               (let [xi (max 0 (min 7 (int (+ x (* jitter (- (rf) 0.5))))))
+                     yi (max 0 (min 7 (int (+ y (* jitter (- (rf) 0.5))))))]
+                 (assoc g (+ xi (* 8 yi))
+                        (max (nth g (+ xi (* 8 yi))) v))))
+        line (fn [g x0 y0 x1 y1]
+               (let [steps 12]
+                 (reduce (fn [g i]
+                           (let [t (/ (* 1.0 i) steps)
+                                 x (+ x0 (* t (- x1 x0)))
+                                 y (+ y0 (* t (- y1 y0)))]
+                             (-> g (plot x y 1.0)
+                                   (plot (+ x 0.5) y 0.5)
+                                   (plot x (+ y 0.5) 0.5))))
+                         g (range (inc steps)))))]
+    (reduce (fn [g s] (line g (nth s 0) (nth s 1) (nth s 2) (nth s 3)))
+            grid (nth STROKES d))))
+
+(defn make-set [per-class jitter]
+  (let [items (vec (for [d (range 10)
+                         _ (range per-class)]
+                     [(render-digit d jitter) d]))]
+    {:x (vec (mapcat first items))
+     :y (vec (map second items))}))
+
+(defonce TRAIN (atom (make-set 20 0.6)))   ; 200 examples
+(defonce TEST  (atom (make-set 5  0.6)))   ; 50  examples
+
+(defn fix-data! []
+  (when (not (= (count (:y @TRAIN)) 200))
+    (reset! TRAIN (make-set 20 0.6))
+    (reset! TEST  (make-set 5  0.6))))
+(fix-data!)
+
+(defonce W1 (atom (ml/kaiming 64 HIDDEN)))
+(defonce B1 (atom (ml/zeros 1 HIDDEN)))
+(defonce W2 (atom (ml/xavier  HIDDEN 10)))
+(defonce B2 (atom (ml/zeros 1 10)))
+(defn fix! []
+  (when (not (= (second (ml/shape @W1)) HIDDEN))
+    (reset! W1 (ml/kaiming 64 HIDDEN))
+    (reset! B1 (ml/zeros 1 HIDDEN))
+    (reset! W2 (ml/xavier  HIDDEN 10))
+    (reset! B2 (ml/zeros 1 10))
+    (ml/reset-optim!)))
+(fix!)
+
+(defonce X-BUF (atom (ml/zeros BATCH 64)))
+(defonce Y-BUF (atom (ml/zeros BATCH 10)))
+(when (not (= (first (ml/shape @X-BUF)) BATCH))
+  (reset! X-BUF (ml/zeros BATCH 64))
+  (reset! Y-BUF (ml/zeros BATCH 10)))
+
+(defn forward [x]
+  (let [h (ml/relu (ml/add-bias (matmul x @W1) @B1))]
+    (ml/softmax (ml/add-bias (matmul h @W2) @B2))))
+
+(defn sample-batch! []
+  (let [d   @TRAIN
+        xs  (:x d)  ys (:y d)
+        n   (count ys)
+        idxs (vec (for [_ (range BATCH)] (ri n)))
+        xb  (vec (mapcat (fn [i] (subvec xs (* i 64) (* (inc i) 64))) idxs))
+        yb  (mapv (fn [i] (nth ys i)) idxs)]
+    (ml/set-data! @X-BUF xb)
+    (ml/set-data! @Y-BUF (ml/tolist (ml/one-hot yb 10)))))
+
+(defn train-step! []
+  (sample-batch!)
+  (let [p (forward @X-BUF)
+        l (ml/cross-entropy p @Y-BUF)]
+    (ml/backward! l)
+    (ml/adam-step! [@W1 @B1 @W2 @B2] LR)
+    [(ml/scalar l)]))
+
+(def SHOW-N 10)
+(defn viz []
+  (let [d   @TEST
+        xs  (:x d)  ys (:y d)
+        n   (min SHOW-N (count ys))
+        flat (vec (subvec xs 0 (* n 64)))
+        xt   (ml/tensor n 64 flat)
+        ps   (forward xt)
+        preds (ml/argmax ps)
+        targets (vec (subvec ys 0 n))
+        ok? (vec (map (fn [p t] (if (= p t) 1.0 0.0)) preds targets))]
+    ;; Pack: [n, then n*64 pixels, then n preds, then n labels, then n ok-flags]
+    (vec (concat [n] flat
+                 (mapv #(* 1.0 %) preds)
+                 (mapv #(* 1.0 %) targets)
+                 ok?))))
+`,
+
+    autoenc: `;; ============================================================
+;; Autoencoder — 64 -> 16 -> 64 over the same 8x8 digit set.
+;;   Loss: MSE.  Optimizer: Adam.
+;; ============================================================
+(require '[cljrs.ml :as ml])
+
+(def LATENT 16)
+(def LR     0.005)
+(def BATCH  16)
+
+(defonce USE-GPU? (atom false))
+(defn matmul [a b] (if @USE-GPU? (ml/matmul-gpu a b) (ml/matmul a b)))
+
+(defonce RNG (atom 99))
+(defn rng! [] (let [s (mod (+ (* @RNG 1103515245) 12345) 2147483648)]
+                (reset! RNG s) s))
+(defn rf [] (/ (* 1.0 (rng!)) 2147483648.0))
+(defn ri [n] (mod (rng!) n))
+
+(def STROKES
+  [[[2 1 5 1] [5 1 6 4] [6 4 5 6] [5 6 2 6] [2 6 1 4] [1 4 2 1]]
+   [[3 1 4 1] [4 1 4 6] [3 6 5 6]]
+   [[1 1 5 1] [5 1 6 3] [6 3 1 6] [1 6 6 6]]
+   [[1 1 5 1] [5 1 5 6] [5 6 1 6] [2 3 5 3]]
+   [[1 1 1 4] [1 4 5 4] [5 1 5 6]]
+   [[5 1 1 1] [1 1 1 4] [1 4 5 4] [5 4 5 6] [5 6 1 6]]
+   [[5 1 2 1] [2 1 1 4] [1 4 5 4] [5 4 5 6] [5 6 1 6]]
+   [[1 1 6 1] [6 1 3 6]]
+   [[2 1 5 1] [5 1 5 3] [5 3 2 3] [2 3 2 6] [2 6 5 6] [5 6 5 3]
+    [2 3 2 1]]
+   [[5 5 2 5] [2 5 1 3] [1 3 2 1] [2 1 5 1] [5 1 5 5] [5 5 5 6]]])
+
+(defn render [d jitter]
+  (let [grid (vec (repeat 64 0.0))
+        plot (fn [g x y v]
+               (let [xi (max 0 (min 7 (int (+ x (* jitter (- (rf) 0.5))))))
+                     yi (max 0 (min 7 (int (+ y (* jitter (- (rf) 0.5))))))]
+                 (assoc g (+ xi (* 8 yi))
+                        (max (nth g (+ xi (* 8 yi))) v))))
+        line (fn [g x0 y0 x1 y1]
+               (let [steps 12]
+                 (reduce (fn [g i]
+                           (let [t (/ (* 1.0 i) steps)
+                                 x (+ x0 (* t (- x1 x0)))
+                                 y (+ y0 (* t (- y1 y0)))]
+                             (plot g x y 1.0)))
+                         g (range (inc steps)))))]
+    (reduce (fn [g s] (line g (nth s 0) (nth s 1) (nth s 2) (nth s 3)))
+            grid (nth STROKES d))))
+
+(defn make-set [n]
+  (vec (for [_ (range n)] (render (ri 10) 0.4))))
+
+(defonce DATA (atom (make-set 120)))
+(when (not (= (count @DATA) 120))
+  (reset! DATA (make-set 120)))
+
+(defonce W1 (atom (ml/kaiming 64 LATENT)))
+(defonce B1 (atom (ml/zeros 1 LATENT)))
+(defonce W2 (atom (ml/xavier LATENT 64)))
+(defonce B2 (atom (ml/zeros 1 64)))
+(defn fix! []
+  (when (not (= (second (ml/shape @W1)) LATENT))
+    (reset! W1 (ml/kaiming 64 LATENT))
+    (reset! B1 (ml/zeros 1 LATENT))
+    (reset! W2 (ml/xavier LATENT 64))
+    (reset! B2 (ml/zeros 1 64))
+    (ml/reset-optim!)))
+(fix!)
+
+(defonce X-BUF (atom (ml/zeros BATCH 64)))
+(when (not (= (first (ml/shape @X-BUF)) BATCH))
+  (reset! X-BUF (ml/zeros BATCH 64)))
+
+(defn forward [x]
+  (let [h (ml/sigmoid (ml/add-bias (matmul x @W1) @B1))]
+    (ml/sigmoid (ml/add-bias (matmul h @W2) @B2))))
+
+(defn sample-batch! []
+  (let [d @DATA  n (count d)
+        idxs (vec (for [_ (range BATCH)] (ri n)))
+        xb (vec (mapcat (fn [i] (nth d i)) idxs))]
+    (ml/set-data! @X-BUF xb)))
+
+(defn train-step! []
+  (sample-batch!)
+  (let [p (forward @X-BUF)
+        l (ml/mse p @X-BUF)]
+    (ml/backward! l)
+    (ml/adam-step! [@W1 @B1 @W2 @B2] LR)
+    [(ml/scalar l)]))
+
+(def SHOW-N 4)
+(defn viz []
+  (let [d @DATA
+        n (min SHOW-N (count d))
+        flat (vec (mapcat (fn [i] (nth d i)) (range n)))
+        xt (ml/tensor n 64 flat)
+        recon (ml/tolist (forward xt))]
+    ;; Pack: [n, then n*64 inputs, then n*64 reconstructions]
+    (vec (concat [n] flat recon))))
+`
+    };
+
+    // ============================================================
+    // Renderers per showcase. Each consumes the flat float buffer
+    // returned by (viz). They draw to mainCanvas + lossCanvas is
+    // shared.
+    // ============================================================
+
+    const RENDERERS = {
+
+      fit(ctx, W, H, buf) {
+        ctx.fillStyle = "#0b0d14";
+        ctx.fillRect(0, 0, W, H);
+        if (!buf || buf.length < 1) return;
+        const gridN = buf[0] | 0;
+        const gridStart = 1;
+        const gridEnd = gridStart + gridN * 2;
+        const dataN = buf[gridEnd] | 0;
+        const dataStart = gridEnd + 1;
+
+        let xmin = -3, xmax = 3, ymin = -1.4, ymax = 1.4;
+        for (let i = dataStart; i < dataStart + dataN * 2; i += 2) {
+          const x = buf[i], y = buf[i+1];
+          if (x < xmin) xmin = x; if (x > xmax) xmax = x;
+          if (y < ymin) ymin = y; if (y > ymax) ymax = y;
+        }
+        const padY = 0.1 * (ymax - ymin || 1);
+        ymin -= padY; ymax += padY;
+        const xToPx = x => ((x - xmin) / (xmax - xmin)) * (W - 12) + 6;
+        const yToPx = y => H - 6 - ((y - ymin) / (ymax - ymin)) * (H - 12);
+        ctx.strokeStyle = "#1d2029"; ctx.lineWidth = 1;
+        for (let i = 1; i < 8; i++) {
+          const x = (W * i) / 8;
+          ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+        }
+        ctx.fillStyle = "#cc8aff";
+        for (let i = dataStart; i < dataStart + dataN * 2; i += 2) {
+          ctx.beginPath();
+          ctx.arc(xToPx(buf[i]), yToPx(buf[i+1]), 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.strokeStyle = "#7cd98a"; ctx.lineWidth = 2;
+        ctx.beginPath();
+        for (let i = 0; i < gridN; i++) {
+          const px = xToPx(buf[gridStart + i*2]);
+          const py = yToPx(buf[gridStart + i*2 + 1]);
+          if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        }
+        ctx.stroke();
+      },
+
+      moons(ctx, W, H, buf) {
+        ctx.fillStyle = "#0b0d14";
+        ctx.fillRect(0, 0, W, H);
+        if (!buf || buf.length < 1) return;
+        const G = buf[0] | 0;
+        const gridStart = 1;
+        const probsLen = G * G * 2;
+        const ptsCount = buf[gridStart + probsLen] | 0;
+        const ptsStart = gridStart + probsLen + 1;
+        // confidence map
+        const img = ctx.createImageData(W, H);
+        for (let py = 0; py < H; py++) {
+          const gy = Math.min(G - 1, Math.floor((py / H) * G));
+          for (let px = 0; px < W; px++) {
+            const gx = Math.min(G - 1, Math.floor((px / W) * G));
+            const idx = (gy * G + gx) * 2;
+            const p1 = buf[gridStart + idx + 1];   // class 1 prob
+            const r = Math.round(40 + 130 * p1);
+            const g = Math.round(60 + 100 * (1 - p1));
+            const b = Math.round(120);
+            const o = (py * W + px) * 4;
+            img.data[o]   = r;
+            img.data[o+1] = g;
+            img.data[o+2] = b;
+            img.data[o+3] = 255;
+          }
+        }
+        ctx.putImageData(img, 0, 0);
+        // points
+        const xmin = -1.5, xmax = 2.5, ymin = -1.0, ymax = 1.5;
+        const xPx = x => ((x - xmin) / (xmax - xmin)) * W;
+        const yPx = y => H - ((y - ymin) / (ymax - ymin)) * H;
+        let acc = 0;
+        for (let i = 0; i < ptsCount; i++) {
+          const x = buf[ptsStart + i * 3];
+          const y = buf[ptsStart + i * 3 + 1];
+          const c = buf[ptsStart + i * 3 + 2] | 0;
+          const idx = (Math.min(G - 1, Math.floor(((x - xmin) / (xmax - xmin)) * G)) +
+                       Math.min(G - 1, Math.floor(((y - ymin) / (ymax - ymin)) * G)) * G) * 2;
+          const pred = buf[gridStart + idx + 1] >= 0.5 ? 1 : 0;
+          if (pred === c) acc++;
+          ctx.fillStyle = c === 0 ? "#ffd966" : "#7cd98a";
+          ctx.beginPath();
+          ctx.arc(xPx(x), yPx(y), 2.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        // accuracy text
+        ctx.fillStyle = "#fff";
+        ctx.font = "11px ui-monospace, monospace";
+        ctx.fillText(`acc ${(acc / ptsCount * 100).toFixed(1)}%`, 8, H - 8);
+      },
+
+      digits(ctx, W, H, buf) {
+        ctx.fillStyle = "#0b0d14";
+        ctx.fillRect(0, 0, W, H);
+        if (!buf || buf.length < 1) return;
+        const n = buf[0] | 0;
+        const flatStart = 1;
+        const predStart = flatStart + n * 64;
+        const labelStart = predStart + n;
+        const okStart = labelStart + n;
+        const cell = 32;
+        const margin = 6;
+        const cols = Math.min(n, Math.floor(W / (cell + margin)));
+        let acc = 0;
+        for (let k = 0; k < n; k++) {
+          const r = Math.floor(k / cols), c = k % cols;
+          const ox = margin + c * (cell + margin);
+          const oy = margin + r * (cell + margin + 14);
+          for (let i = 0; i < 64; i++) {
+            const v = Math.max(0, Math.min(1, buf[flatStart + k * 64 + i]));
+            const px = i % 8, py = Math.floor(i / 8);
+            const g = Math.round(v * 220);
+            ctx.fillStyle = `rgb(${g},${g},${g})`;
+            ctx.fillRect(ox + px * 4, oy + py * 4, 4, 4);
+          }
+          const ok = buf[okStart + k] > 0.5;
+          if (ok) acc++;
+          ctx.fillStyle = ok ? "#7cd98a" : "#ff7a7a";
+          ctx.font = "10px ui-monospace, monospace";
+          ctx.fillText(`${buf[predStart + k] | 0}/${buf[labelStart + k] | 0}`,
+                       ox, oy + cell + 11);
+        }
+        ctx.fillStyle = "#fff";
+        ctx.font = "11px ui-monospace, monospace";
+        ctx.fillText(`test acc ${(acc / n * 100).toFixed(1)}%`, 8, H - 8);
+      },
+
+      autoenc(ctx, W, H, buf) {
+        ctx.fillStyle = "#0b0d14";
+        ctx.fillRect(0, 0, W, H);
+        if (!buf || buf.length < 1) return;
+        const n = buf[0] | 0;
+        const inStart = 1;
+        const reStart = inStart + n * 64;
+        const cell = 6;
+        const blockH = cell * 8;
+        const margin = 12;
+        const cols = Math.min(n, Math.floor(W / (cell * 8 + margin)));
+        for (let k = 0; k < n; k++) {
+          const c = k % cols;
+          const ox = margin + c * (cell * 8 + margin);
+          const oy = margin;
+          // input
+          for (let i = 0; i < 64; i++) {
+            const v = Math.max(0, Math.min(1, buf[inStart + k * 64 + i]));
+            const g = Math.round(v * 220);
+            ctx.fillStyle = `rgb(${g},${g},${g})`;
+            ctx.fillRect(ox + (i % 8) * cell, oy + Math.floor(i / 8) * cell, cell, cell);
+          }
+          // reconstruction underneath
+          for (let i = 0; i < 64; i++) {
+            const v = Math.max(0, Math.min(1, buf[reStart + k * 64 + i]));
+            const r = Math.round(v * 80);
+            const g = Math.round(v * 200);
+            const b = Math.round(v * 220);
+            ctx.fillStyle = `rgb(${r},${g},${b})`;
+            ctx.fillRect(ox + (i % 8) * cell,
+                         oy + blockH + 8 + Math.floor(i / 8) * cell,
+                         cell, cell);
+          }
+        }
+        ctx.fillStyle = "#9aa";
+        ctx.font = "10px ui-monospace, monospace";
+        ctx.fillText("input → reconstruction", 8, H - 8);
+      },
+    };
 
     // --- elements --------------------------------------------------------
-    const fitC  = document.getElementById("ml-fit");
+    const mainC = document.getElementById("ml-main");
     const lossC = document.getElementById("ml-loss");
-    const fitX  = fitC.getContext("2d");
+    const mainX = mainC.getContext("2d");
     const lossX = lossC.getContext("2d");
-    const status   = document.getElementById("ml-status");
-    const overlay  = document.getElementById("ml-overlay");
-    const runBtn   = document.getElementById("ml-run");
+    const status = document.getElementById("ml-status");
+    const overlay = document.getElementById("ml-overlay");
+    const runBtn = document.getElementById("ml-run");
     const resetBtn = document.getElementById("ml-reset");
-    const meterEl  = document.getElementById("ml-meter");
+    const meterEl = document.getElementById("ml-meter");
+    const gpuEl = document.getElementById("ml-gpu");
 
     let editor = null;
 
     // --- state -----------------------------------------------------------
     let repl = null;
     let running = true;
-    let dataPoints = [];      // flat [x0 y0 x1 y1 ...]
+    let activeTab = "fit";
     let lossHistory = [];
     let stepCount = 0;
     let lastLoss = NaN;
@@ -274,31 +809,24 @@
         setStatus(result, "err");
         return false;
       }
-      const dp = repl.eval_floats("(data-points)");
-      if (dp && dp.length > 0) dataPoints = Array.from(dp);
+      // Push the GPU toggle's current state into the program.
+      repl.eval(`(reset! USE-GPU? ${gpuEl.checked ? "true" : "false"})`);
       lossHistory = [];
       stepCount = 0;
-      setStatus("applied. weights persisted via defonce (reset shape to re-init).", "ok");
+      setStatus("applied. weights persisted via defonce.", "ok");
       return true;
     }
 
     function resetWeights() {
       if (!repl) return;
-      // Drop the def'd weights, then re-eval source so defonce reinstalls.
-      repl.eval("(do (ns-unmap 'user 'W1) (ns-unmap 'user 'B1) (ns-unmap 'user 'W2) (ns-unmap 'user 'B2))");
-      // Fall back path if ns-unmap is unsupported: full reset.
-      // (We catch via an error string above; if it errored, just reset.)
       repl.reset();
       applySource(editor.getValue());
     }
-
-    // --- training loop ---------------------------------------------------
 
     function step() {
       if (!repl || !running) return;
       const out = repl.call_ints("train-step!", []);
       if (out.length === 0) {
-        // Could be a shape mismatch after edit. Re-apply.
         applySource(editor.getValue());
         return;
       }
@@ -309,62 +837,11 @@
       stepsThisSecond++;
     }
 
-    // --- rendering -------------------------------------------------------
-
-    function dataBounds() {
-      let xmin = -3, xmax = 3, ymin = -1.4, ymax = 1.4;
-      for (let i = 0; i < dataPoints.length; i += 2) {
-        const x = dataPoints[i], y = dataPoints[i + 1];
-        if (x < xmin) xmin = x; if (x > xmax) xmax = x;
-        if (y < ymin) ymin = y; if (y > ymax) ymax = y;
-      }
-      const padY = 0.1 * (ymax - ymin || 1);
-      return { xmin, xmax, ymin: ymin - padY, ymax: ymax + padY };
-    }
-
-    function drawFit() {
-      const W = fitC.width, H = fitC.height;
-      fitX.fillStyle = "#0b0d14";
-      fitX.fillRect(0, 0, W, H);
-      // grid
-      fitX.strokeStyle = "#1d2029";
-      fitX.lineWidth = 1;
-      for (let i = 1; i < 8; i++) {
-        const x = (W * i) / 8;
-        fitX.beginPath(); fitX.moveTo(x, 0); fitX.lineTo(x, H); fitX.stroke();
-      }
-      for (let i = 1; i < 4; i++) {
-        const y = (H * i) / 4;
-        fitX.beginPath(); fitX.moveTo(0, y); fitX.lineTo(W, y); fitX.stroke();
-      }
-
-      const b = dataBounds();
-      const xToPx = (x) => ( (x - b.xmin) / (b.xmax - b.xmin) ) * (W - 12) + 6;
-      const yToPx = (y) => H - 6 - ((y - b.ymin) / (b.ymax - b.ymin)) * (H - 12);
-
-      // dataset scatter
-      fitX.fillStyle = "#cc8aff";
-      for (let i = 0; i < dataPoints.length; i += 2) {
-        const px = xToPx(dataPoints[i]);
-        const py = yToPx(dataPoints[i + 1]);
-        fitX.beginPath(); fitX.arc(px, py, 2, 0, Math.PI * 2); fitX.fill();
-      }
-
-      // model curve
-      if (repl) {
-        const grid = repl.eval_floats("(predict-grid)");
-        if (grid && grid.length >= 4) {
-          fitX.strokeStyle = "#7cd98a";
-          fitX.lineWidth = 2;
-          fitX.beginPath();
-          for (let i = 0; i < grid.length; i += 2) {
-            const px = xToPx(grid[i]);
-            const py = yToPx(grid[i + 1]);
-            if (i === 0) fitX.moveTo(px, py); else fitX.lineTo(px, py);
-          }
-          fitX.stroke();
-        }
-      }
+    function drawMain() {
+      const r = RENDERERS[activeTab];
+      let buf = null;
+      if (repl) buf = repl.eval_floats("(viz)");
+      r(mainX, mainC.width, mainC.height, buf);
     }
 
     function drawLoss() {
@@ -382,10 +859,8 @@
       for (const l of lossHistory) {
         if (l < lo) lo = l; if (l > hi) hi = l;
       }
-      // log-ish: clamp so a brief NaN doesn't blow scale
       if (!isFinite(lo) || !isFinite(hi) || hi <= lo) { lo = 0; hi = 1; }
-      lossX.strokeStyle = "#ffcc60";
-      lossX.lineWidth = 1.5;
+      lossX.strokeStyle = "#ffcc60"; lossX.lineWidth = 1.5;
       lossX.beginPath();
       const n = lossHistory.length;
       for (let i = 0; i < n; i++) {
@@ -397,13 +872,17 @@
     }
 
     function frame() {
-      // throttle: do a few steps per frame for smoother loss curves
       if (running) {
-        for (let k = 0; k < 4; k++) step();
+        // adapt step count: heavier showcases get fewer steps per frame
+        const stepsPerFrame =
+          activeTab === "fit" ? 4 :
+          activeTab === "moons" ? 1 :
+          activeTab === "digits" ? 2 :
+          1;
+        for (let k = 0; k < stepsPerFrame; k++) step();
       }
-      drawFit();
+      drawMain();
       drawLoss();
-
       const now = performance.now();
       if (now - lastTpsAt > 500) {
         lastTps = Math.round(stepsThisSecond * 1000 / (now - lastTpsAt));
@@ -411,24 +890,47 @@
         lastTpsAt = now;
       }
       meterEl.textContent =
-        `step ${stepCount}  loss ${isFinite(lastLoss) ? lastLoss.toFixed(4) : '--'}  ${lastTps}/s`;
+        `[${activeTab}] step ${stepCount}  loss ${isFinite(lastLoss) ? lastLoss.toFixed(4) : '--'}  ${lastTps}/s`;
       overlay.textContent = running ? `training (${lastTps}/s)` : "paused";
       requestAnimationFrame(frame);
     }
 
-    // --- buttons ---------------------------------------------------------
+    // --- buttons / tabs --------------------------------------------------
     runBtn.addEventListener("click", () => {
       running = !running;
       runBtn.textContent = running ? "Pause" : "Resume";
     });
     resetBtn.addEventListener("click", () => resetWeights());
+    gpuEl.addEventListener("change", () => {
+      if (!repl) return;
+      repl.eval(`(reset! USE-GPU? ${gpuEl.checked ? "true" : "false"})`);
+      // Forces train-step! to recompile the matmul indirection.
+      lossHistory = [];
+    });
+
+    function switchTab(name) {
+      activeTab = name;
+      for (const b of document.querySelectorAll("#ml-tabs button")) {
+        b.classList.toggle("active", b.dataset.tab === name);
+      }
+      if (!repl || !editor) return;
+      // Wipe the env when switching showcases — defonce'd weights from
+      // a prior tab would clash on shape.
+      repl.reset();
+      editor.setValue(SOURCES[name]);
+      applySource(SOURCES[name]);
+    }
+
+    document.querySelectorAll("#ml-tabs button").forEach(b => {
+      b.addEventListener("click", () => switchTab(b.dataset.tab));
+    });
 
     // --- boot ------------------------------------------------------------
     (async () => {
       const mod = await loadWasm();
       repl = new mod.Repl();
       editor = await makeEditor(document.getElementById("ml-editor"), {
-        value: INITIAL_SOURCE,
+        value: SOURCES.fit,
         onApply: applySource,
         debounceMs: 400,
         vimToggleEl: document.getElementById("ml-vim-toggle"),
@@ -437,7 +939,9 @@
       });
       const monaco = await loadMonaco();
       attachAltDragScrub(editor, monaco);
-      applySource(INITIAL_SOURCE);
+      // mark first tab active
+      document.querySelector('#ml-tabs button[data-tab="fit"]').classList.add("active");
+      applySource(SOURCES.fit);
       requestAnimationFrame(frame);
     })();
   </script>

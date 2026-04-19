@@ -131,3 +131,119 @@ fn page_source_loads_and_trains() {
         }
     }
 }
+
+// --- Smoke tests for the new showcases. They share interface
+// `(train-step!) -> [loss]` and `(viz) -> flat float vector`. We
+// don't reproduce the full HTML programs here — that would drag in
+// hundreds of lines of stroke specs etc. Instead each test exercises
+// a minimal stand-in that uses the *same builtins* the showcase
+// relies on (softmax, cross-entropy, adam, conv1d-valid, sigmoid),
+// catching any regression that breaks the per-tab program.
+
+const MOONS_MIN: &str = r#"
+(require '[cljrs.ml :as ml])
+(def H 8)
+(defonce W1 (atom (ml/kaiming 2 H)))
+(defonce B1 (atom (ml/zeros 1 H)))
+(defonce W2 (atom (ml/xavier H 2)))
+(defonce B2 (atom (ml/zeros 1 2)))
+(def X (ml/tensor [[0.0 0.0] [1.0 1.0] [0.5 -0.3] [-0.2 0.8]]))
+(def Y (ml/one-hot [0 1 0 1] 2))
+(defn forward [x]
+  (let [h (ml/relu (ml/add-bias (ml/matmul x @W1) @B1))]
+    (ml/softmax (ml/add-bias (ml/matmul h @W2) @B2))))
+(defn train-step! []
+  (let [p (forward X)
+        l (ml/cross-entropy p Y)]
+    (ml/backward! l)
+    (ml/adam-step! [@W1 @B1 @W2 @B2] 0.05)
+    [(ml/scalar l)]))
+(defn viz [] (ml/tolist (forward X)))
+"#;
+
+const AE_MIN: &str = r#"
+(require '[cljrs.ml :as ml])
+(def L 4)
+(defonce W1 (atom (ml/kaiming 8 L)))
+(defonce B1 (atom (ml/zeros 1 L)))
+(defonce W2 (atom (ml/xavier L 8)))
+(defonce B2 (atom (ml/zeros 1 8)))
+(def X (ml/tensor [[1 0 1 0 1 0 1 0]
+                   [0 1 0 1 0 1 0 1]]))
+(defn forward [x]
+  (let [h (ml/sigmoid (ml/add-bias (ml/matmul x @W1) @B1))]
+    (ml/sigmoid (ml/add-bias (ml/matmul h @W2) @B2))))
+(defn train-step! []
+  (let [p (forward X)
+        l (ml/mse p X)]
+    (ml/backward! l)
+    (ml/adam-step! [@W1 @B1 @W2 @B2] 0.02)
+    [(ml/scalar l)]))
+(defn viz [] (ml/tolist (forward X)))
+"#;
+
+fn fresh_env() -> Env {
+    let env = Env::new();
+    builtins::install(&env);
+    cljrs_ml::install(&env);
+    env
+}
+
+fn eval_all(env: &Env, src: &str) {
+    for f in reader::read_all(src).expect("read") {
+        eval::eval(&f, env).unwrap_or_else(|e| panic!("eval `{f}`: {e}"));
+    }
+}
+
+fn loss_after_n_steps(env: &Env, n: usize) -> (f64, f64) {
+    let initial = match eval::eval(
+        &reader::read_all("(first (train-step!))").unwrap()[0], env).unwrap() {
+        Value::Float(f) => f, v => panic!("{v:?}"),
+    };
+    let mut last = initial;
+    for _ in 0..n {
+        let v = eval::eval(
+            &reader::read_all("(first (train-step!))").unwrap()[0], env).unwrap();
+        if let Value::Float(f) = v { last = f; }
+    }
+    (initial, last)
+}
+
+#[test]
+fn moons_showcase_min_trains() {
+    let env = fresh_env();
+    eval_all(&env, MOONS_MIN);
+    let (i, f) = loss_after_n_steps(&env, 200);
+    assert!(f < i * 0.5, "moons-min loss didn't drop: {i} -> {f}");
+    let v = eval::eval(&reader::read_all("(viz)").unwrap()[0], &env).unwrap();
+    assert!(matches!(v, Value::Vector(_)));
+}
+
+#[test]
+fn autoencoder_min_trains() {
+    let env = fresh_env();
+    eval_all(&env, AE_MIN);
+    let (i, f) = loss_after_n_steps(&env, 300);
+    assert!(f < i * 0.6, "AE-min loss didn't drop: {i} -> {f}");
+    let v = eval::eval(&reader::read_all("(viz)").unwrap()[0], &env).unwrap();
+    assert!(matches!(v, Value::Vector(_)));
+}
+
+#[test]
+fn conv1d_in_repl() {
+    // conv1d-valid + autograd via cljrs.ml.
+    let env = fresh_env();
+    eval_all(&env, r#"
+        (require '[cljrs.ml :as ml])
+        (def x (ml/tensor [1 2 3 4 5]))
+        (def k (ml/param  [1 0 -1]))
+        (def y (ml/conv1d-valid x k))
+        (def t (ml/tensor [0 0 0]))
+        (def l (ml/mse y t))
+        (ml/backward! l)
+        (ml/adam-step! [k] 0.1)
+    "#);
+    // sanity: viz returns a vector
+    let v = eval::eval(&reader::read_all("(ml/tolist k)").unwrap()[0], &env).unwrap();
+    assert!(matches!(v, Value::Vector(_)));
+}

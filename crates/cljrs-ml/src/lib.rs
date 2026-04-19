@@ -6,6 +6,8 @@
 //! `(ml/scalar t)`. Mirror of `cljrs-physics` install pattern.
 
 pub mod autograd;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod gpu;
 
 use autograd::{Shape, Tensor};
 use cljrs::env::Env;
@@ -23,14 +25,29 @@ pub fn install(env: &Env) {
     bind(env, "randn", randn_fn);
     bind(env, "zeros", zeros_fn);
     bind(env, "matmul", matmul_fn);
+    bind(env, "matmul-gpu", matmul_gpu_fn);
     bind(env, "add", add_fn);
     bind(env, "add-bias", add_bias_fn);
     bind(env, "sub", sub_fn);
     bind(env, "relu", relu_fn);
     bind(env, "tanh", tanh_fn);
+    bind(env, "sigmoid", sigmoid_fn);
+    bind(env, "gelu", gelu_fn);
+    bind(env, "softmax", softmax_fn);
+    bind(env, "conv1d-valid", conv1d_valid_fn);
     bind(env, "mse", mse_fn);
+    bind(env, "mae", mae_fn);
+    bind(env, "cross-entropy", cross_entropy_fn);
     bind(env, "backward!", backward_fn);
     bind(env, "sgd-step!", sgd_step_fn);
+    bind(env, "adam-step!", adam_step_fn);
+    bind(env, "rmsprop-step!", rmsprop_step_fn);
+    bind(env, "reset-optim!", reset_optim_fn);
+    bind(env, "xavier", xavier_fn);
+    bind(env, "kaiming", kaiming_fn);
+    bind(env, "argmax", argmax_fn);
+    bind(env, "one-hot", one_hot_fn);
+    bind(env, "normalize", normalize_fn);
     bind(env, "scalar", scalar_fn);
     bind(env, "tolist", tolist_fn);
     bind(env, "shape", shape_fn);
@@ -260,6 +277,32 @@ fn tanh_fn(args: &[Value]) -> Result<Value> {
     Ok(opaque(autograd::tanh(&arg_tensor(args, 0, "tanh")?)))
 }
 
+fn sigmoid_fn(args: &[Value]) -> Result<Value> {
+    Ok(opaque(autograd::sigmoid(&arg_tensor(args, 0, "sigmoid")?)))
+}
+
+fn gelu_fn(args: &[Value]) -> Result<Value> {
+    Ok(opaque(autograd::gelu(&arg_tensor(args, 0, "gelu")?)))
+}
+
+fn softmax_fn(args: &[Value]) -> Result<Value> {
+    Ok(opaque(autograd::softmax(&arg_tensor(args, 0, "softmax")?)))
+}
+
+fn conv1d_valid_fn(args: &[Value]) -> Result<Value> {
+    let i = arg_tensor(args, 0, "conv1d-valid")?;
+    let k = arg_tensor(args, 1, "conv1d-valid")?;
+    if i.shape().rows != 1 || k.shape().rows != 1 {
+        return Err(Error::Eval(
+            "conv1d-valid: both input and kernel must be (1, N)".into()));
+    }
+    if i.shape().cols < k.shape().cols {
+        return Err(Error::Eval(
+            "conv1d-valid: input shorter than kernel".into()));
+    }
+    Ok(opaque(autograd::conv1d_valid(&i, &k)))
+}
+
 fn mse_fn(args: &[Value]) -> Result<Value> {
     let p = arg_tensor(args, 0, "mse")?;
     let t = arg_tensor(args, 1, "mse")?;
@@ -267,6 +310,24 @@ fn mse_fn(args: &[Value]) -> Result<Value> {
         return Err(Error::Eval("mse: shape mismatch".into()));
     }
     Ok(opaque(autograd::mse(&p, &t)))
+}
+
+fn mae_fn(args: &[Value]) -> Result<Value> {
+    let p = arg_tensor(args, 0, "mae")?;
+    let t = arg_tensor(args, 1, "mae")?;
+    if p.shape() != t.shape() {
+        return Err(Error::Eval("mae: shape mismatch".into()));
+    }
+    Ok(opaque(autograd::mae(&p, &t)))
+}
+
+fn cross_entropy_fn(args: &[Value]) -> Result<Value> {
+    let p = arg_tensor(args, 0, "cross-entropy")?;
+    let t = arg_tensor(args, 1, "cross-entropy")?;
+    if p.shape() != t.shape() {
+        return Err(Error::Eval("cross-entropy: shape mismatch".into()));
+    }
+    Ok(opaque(autograd::cross_entropy(&p, &t)))
 }
 
 fn backward_fn(args: &[Value]) -> Result<Value> {
@@ -338,4 +399,205 @@ fn set_data_fn(args: &[Value]) -> Result<Value> {
     let mut d = t.0.data.borrow_mut();
     d.copy_from_slice(&buf);
     Ok(Value::Nil)
+}
+
+// --- GPU matmul ----------------------------------------------------------
+//
+// On native, dispatches a wgpu compute kernel; on wasm32 falls back to
+// CPU (no WebGPU dep in the docs build) and emits a one-time warning.
+// The returned tensor is a fresh leaf — backward will NOT flow through
+// it. This is deliberate: we only need a "fast forward" knob for the
+// showcase. For training, callers stick with `matmul`.
+
+#[cfg(not(target_arch = "wasm32"))]
+fn matmul_gpu_impl(a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Vec<f32> {
+    match gpu::global() {
+        Ok(g) => g.matmul(a, b, m, k, n),
+        Err(e) => {
+            eprintln!("cljrs.ml/matmul-gpu: GPU unavailable ({e}); CPU fallback");
+            cpu_matmul(a, b, m, k, n)
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn matmul_gpu_impl(a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Vec<f32> {
+    use std::sync::Once;
+    static WARNED: Once = Once::new();
+    WARNED.call_once(|| {
+        // Routed through stderr; the wasm panic-hook + console_error
+        // intercepts surface this to the browser console.
+        eprintln!("cljrs.ml/matmul-gpu: GPU not available in wasm; CPU fallback");
+    });
+    cpu_matmul(a, b, m, k, n)
+}
+
+fn cpu_matmul(a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Vec<f32> {
+    let mut out = vec![0.0f32; m * n];
+    for i in 0..m {
+        for kk in 0..k {
+            let aik = a[i * k + kk];
+            if aik == 0.0 { continue; }
+            for j in 0..n {
+                out[i * n + j] += aik * b[kk * n + j];
+            }
+        }
+    }
+    out
+}
+
+fn matmul_gpu_fn(args: &[Value]) -> Result<Value> {
+    let a = arg_tensor(args, 0, "matmul-gpu")?;
+    let b = arg_tensor(args, 1, "matmul-gpu")?;
+    if a.shape().cols != b.shape().rows {
+        return Err(Error::Eval(format!(
+            "matmul-gpu: ({}x{}) · ({}x{}) — inner dims must match",
+            a.shape().rows, a.shape().cols, b.shape().rows, b.shape().cols
+        )));
+    }
+    let (m, k) = (a.shape().rows, a.shape().cols);
+    let n = b.shape().cols;
+    let av = a.data().clone();
+    let bv = b.data().clone();
+    let out = matmul_gpu_impl(&av, &bv, m, k, n);
+    Ok(opaque(Tensor::leaf(Shape::new(m, n), out, false)))
+}
+
+// --- optimizers ----------------------------------------------------------
+
+fn unwrap_params(v: &Value, name: &str) -> Result<Vec<Tensor>> {
+    let xs = match v {
+        Value::Vector(xs) => xs,
+        other => return Err(Error::Type(format!(
+            "{name}: params must be vector of tensors, got {}", other.type_name()))),
+    };
+    let mut out = Vec::with_capacity(xs.len());
+    for x in xs.iter() {
+        match x {
+            Value::Opaque { tag, inner } if tag.as_ref() == TAG => {
+                let t = Arc::clone(inner).downcast::<Tensor>()
+                    .map_err(|_| Error::Type(format!("{name}: bad tensor")))?;
+                out.push((*t).clone());
+            }
+            other => return Err(Error::Type(format!(
+                "{name}: each param must be tensor, got {}", other.type_name()))),
+        }
+    }
+    Ok(out)
+}
+
+fn adam_step_fn(args: &[Value]) -> Result<Value> {
+    let params = unwrap_params(args.get(0).ok_or_else(||
+        Error::Eval("adam-step!: missing params".into()))?, "adam-step!")?;
+    let lr    = arg_f32(args, 1, "adam-step!")?;
+    let beta1 = if args.len() > 2 { arg_f32(args, 2, "adam-step!")? } else { 0.9 };
+    let beta2 = if args.len() > 3 { arg_f32(args, 3, "adam-step!")? } else { 0.999 };
+    let eps   = if args.len() > 4 { arg_f32(args, 4, "adam-step!")? } else { 1e-8 };
+    autograd::adam_step(&params, lr, beta1, beta2, eps);
+    Ok(Value::Nil)
+}
+
+fn rmsprop_step_fn(args: &[Value]) -> Result<Value> {
+    let params = unwrap_params(args.get(0).ok_or_else(||
+        Error::Eval("rmsprop-step!: missing params".into()))?, "rmsprop-step!")?;
+    let lr    = arg_f32(args, 1, "rmsprop-step!")?;
+    let decay = if args.len() > 2 { arg_f32(args, 2, "rmsprop-step!")? } else { 0.9 };
+    let eps   = if args.len() > 3 { arg_f32(args, 3, "rmsprop-step!")? } else { 1e-8 };
+    autograd::rmsprop_step(&params, lr, decay, eps);
+    Ok(Value::Nil)
+}
+
+fn reset_optim_fn(_args: &[Value]) -> Result<Value> {
+    autograd::reset_optimizer_state();
+    Ok(Value::Nil)
+}
+
+// --- init helpers --------------------------------------------------------
+
+/// Xavier / Glorot init: stddev = sqrt(2 / (fan_in + fan_out)).
+fn xavier_fn(args: &[Value]) -> Result<Value> {
+    let r = arg_usize(args, 0, "xavier")?;
+    let c = arg_usize(args, 1, "xavier")?;
+    let std = (2.0_f32 / (r as f32 + c as f32)).sqrt();
+    randn_fn(&[Value::Int(r as i64), Value::Int(c as i64), Value::Float(std as f64)])
+}
+
+/// Kaiming / He init: stddev = sqrt(2 / fan_in). For a (in, out) weight
+/// fan_in is `r`.
+fn kaiming_fn(args: &[Value]) -> Result<Value> {
+    let r = arg_usize(args, 0, "kaiming")?;
+    let c = arg_usize(args, 1, "kaiming")?;
+    let std = (2.0_f32 / r as f32).sqrt();
+    randn_fn(&[Value::Int(r as i64), Value::Int(c as i64), Value::Float(std as f64)])
+}
+
+// --- utilities -----------------------------------------------------------
+
+/// (ml/argmax tensor) — returns Int for a single-row tensor, else a
+/// vector of row-wise argmaxes.
+fn argmax_fn(args: &[Value]) -> Result<Value> {
+    let t = arg_tensor(args, 0, "argmax")?;
+    let (m, n) = (t.shape().rows, t.shape().cols);
+    let d = t.data();
+    let row_argmax = |i: usize| -> i64 {
+        let row = &d[i * n..(i + 1) * n];
+        let mut best = 0usize;
+        let mut bv = f32::NEG_INFINITY;
+        for (j, x) in row.iter().enumerate() {
+            if *x > bv { bv = *x; best = j; }
+        }
+        best as i64
+    };
+    if m == 1 { return Ok(Value::Int(row_argmax(0))); }
+    let v: imbl::Vector<Value> =
+        (0..m).map(|i| Value::Int(row_argmax(i))).collect();
+    Ok(Value::Vector(v))
+}
+
+/// (ml/one-hot k n) — single-row one-hot.
+/// (ml/one-hot [k0 k1 …] n) — m-row one-hot.
+fn one_hot_fn(args: &[Value]) -> Result<Value> {
+    let n = arg_usize(args, 1, "one-hot")?;
+    match args.get(0) {
+        Some(Value::Int(k)) => {
+            let mut data = vec![0.0f32; n];
+            let idx = (*k as usize).min(n.saturating_sub(1));
+            data[idx] = 1.0;
+            Ok(opaque(Tensor::leaf(Shape::new(1, n), data, false)))
+        }
+        Some(Value::Vector(xs)) => {
+            let m = xs.len();
+            let mut data = vec![0.0f32; m * n];
+            for (i, v) in xs.iter().enumerate() {
+                let k = match v {
+                    Value::Int(k) => *k as usize,
+                    Value::Float(f) => *f as usize,
+                    other => return Err(Error::Type(format!(
+                        "one-hot: index must be int, got {}", other.type_name()))),
+                };
+                let k = k.min(n.saturating_sub(1));
+                data[i * n + k] = 1.0;
+            }
+            Ok(opaque(Tensor::leaf(Shape::new(m, n), data, false)))
+        }
+        Some(v) => Err(Error::Type(format!(
+            "one-hot: index must be Int or Vector, got {}", v.type_name()))),
+        None => Err(Error::Eval("one-hot: missing index".into())),
+    }
+}
+
+/// (ml/normalize tensor) — subtract mean, divide by std (ε-clamped).
+/// Returns a fresh leaf tensor (autograd does not flow through it).
+fn normalize_fn(args: &[Value]) -> Result<Value> {
+    let t = arg_tensor(args, 0, "normalize")?;
+    let d = t.data();
+    let n = d.len() as f32;
+    if n == 0.0 {
+        return Ok(opaque(Tensor::leaf(t.shape(), Vec::new(), false)));
+    }
+    let mean = d.iter().sum::<f32>() / n;
+    let var  = d.iter().map(|x| (*x - mean).powi(2)).sum::<f32>() / n;
+    let std  = var.sqrt().max(1e-7);
+    let out: Vec<f32> = d.iter().map(|x| (*x - mean) / std).collect();
+    Ok(opaque(Tensor::leaf(t.shape(), out, false)))
 }
