@@ -49,15 +49,41 @@
     <p>
       Edit and re-mount live. Same source runs at build time
       (<code>(prerender)</code>) and at boot (<code>(boot)</code>).
+      Auto-applies 300ms after you stop typing; <kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Enter</kbd> forces apply.
     </p>
     <div class="repl">
-      <textarea id="ui-src" spellcheck="false" style="height:24rem;width:100%;font-family:ui-monospace,monospace"></textarea>
-      <div class="repl-toolbar"><button id="ui-apply">Apply</button></div>
+      <div id="ui-editor" style="height:30rem;width:100%"></div>
+      <div class="repl-toolbar" style="display:flex;justify-content:space-between;align-items:center">
+        <span id="ui-vim-status" style="font-family:ui-monospace,monospace;font-size:0.75rem;color:var(--fg-dim)"></span>
+        <span>
+          <label style="font-size:0.75rem;color:var(--fg-dim);margin-right:0.5rem">
+            <input type="checkbox" id="ui-vim-toggle"> vim mode
+          </label>
+          <button id="ui-apply">Force apply</button>
+        </span>
+      </div>
     </div>
   </main>
 
+  <!-- Monaco loader (AMD). Sets up window.require for the editor. -->
+  <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script>
+  <script>
+    require.config({
+      paths: {
+        vs: "https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs",
+        "monaco-vim": "https://unpkg.com/monaco-vim@0.4.1/dist/monaco-vim",
+      },
+    });
+    window.MonacoReady = new Promise((resolve) =>
+      require(["vs/editor/editor.main"], () => resolve(window.monaco))
+    );
+    window.MonacoVimReady = new Promise((resolve) =>
+      require(["monaco-vim"], (vim) => resolve(vim))
+    );
+  </script>
+
   <script type="module">
-    import { mountChrome, loadWasm, attachHighlightOverlay } from "./_layout.js";
+    import { mountChrome, loadWasm } from "./_layout.js";
     import "./_ui.js";
 
     mountChrome("./ui-demo.html");
@@ -70,13 +96,22 @@
     };
 
     const SRC_URL = "./ui-demo.cljrs";
-    const ta = document.getElementById("ui-src");
-
-    // Fetch the page's cljrs source. Used both for the initial REPL
-    // boot and to populate the live editor.
     const src = await (await fetch(SRC_URL)).text();
-    ta.value = src;
-    await attachHighlightOverlay(ta.parentNode, ta);
+
+    setStatus("loading editor…");
+    const monaco = await window.MonacoReady;
+    const editor = monaco.editor.create(document.getElementById("ui-editor"), {
+      value: src,
+      language: "clojure",
+      theme: "vs-dark",
+      fontSize: 13,
+      minimap: { enabled: false },
+      scrollBeyondLastLine: false,
+      automaticLayout: true,
+      tabSize: 2,
+      lineNumbers: "on",
+      renderWhitespace: "selection",
+    });
 
     setStatus("loading wasm…");
     const mod = await loadWasm();
@@ -84,29 +119,65 @@
 
     const apply = (source) => {
       try {
+        repl.reset(); // fresh env so def/defonce don't accumulate
         const r = repl.eval(source);
         if (typeof r === "string" && r.startsWith("eval error")) {
           setStatus(r, "err");
-        } else {
-          // After (re-)evaluation, run boot to (re-)mount.
-          const r2 = repl.eval("(boot)");
-          if (typeof r2 === "string" && r2.startsWith("eval error")) {
-            setStatus(r2, "err");
-          } else {
-            setStatus("mounted ✓", "ok");
-          }
+          return;
         }
+        const r2 = repl.eval("(boot)");
+        if (typeof r2 === "string" && r2.startsWith("eval error")) {
+          setStatus(r2, "err");
+          return;
+        }
+        setStatus("mounted ✓", "ok");
       } catch (e) {
         setStatus(String(e), "err");
       }
     };
 
-    apply(ta.value);
-    document.getElementById("ui-apply").addEventListener("click", () => {
-      // Reset so def/defonce mutations don't accumulate.
-      repl.reset();
-      apply(ta.value);
+    // Initial apply.
+    apply(editor.getValue());
+
+    // Debounced auto-apply on edit.
+    let timer = null;
+    editor.onDidChangeModelContent(() => {
+      clearTimeout(timer);
+      timer = setTimeout(() => apply(editor.getValue()), 300);
     });
+
+    // Force-apply via Cmd/Ctrl+Enter.
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
+      clearTimeout(timer);
+      apply(editor.getValue());
+    });
+    document.getElementById("ui-apply").addEventListener("click", () => {
+      clearTimeout(timer);
+      apply(editor.getValue());
+    });
+
+    // --- vim mode (monaco-vim) -----------------------------------------
+    const vimStatusEl = document.getElementById("ui-vim-status");
+    const vimToggle = document.getElementById("ui-vim-toggle");
+    const VIM_KEY = "cljrs.ui-demo.vim";
+    let vimMode = null;
+    const vimLib = await window.MonacoVimReady;
+
+    function setVim(on) {
+      if (on && !vimMode) {
+        vimMode = vimLib.initVimMode(editor, vimStatusEl);
+        vimStatusEl.style.minWidth = "12rem";
+      } else if (!on && vimMode) {
+        vimMode.dispose();
+        vimMode = null;
+        vimStatusEl.textContent = "";
+        vimStatusEl.style.minWidth = "0";
+      }
+      localStorage.setItem(VIM_KEY, on ? "1" : "0");
+      vimToggle.checked = on;
+    }
+    vimToggle.addEventListener("change", () => setVim(vimToggle.checked));
+    if (localStorage.getItem(VIM_KEY) === "1") setVim(true);
   </script>
 </body>
 </html>
