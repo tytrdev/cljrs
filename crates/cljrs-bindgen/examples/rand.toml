@@ -1,0 +1,57 @@
+# Example manifest: bind a slice of the `rand` crate into cljrs.
+#
+# Run:
+#   cargo run -p cljrs-bindgen -- crates/cljrs-bindgen/examples/rand.toml \
+#       --out out/cljrs-rand
+# then add it to the workspace and call `cljrs_rand::install(&env)`.
+
+[crate]
+name = "rand"
+version = "0.8"
+ns = "cljrs.rand"
+# Don't auto-prefix — we write each fn's call path explicitly. This
+# lets us mix free functions (`rand::random::<f64>`) with associated
+# functions on imported types (`Rng::seed_from_u64`).
+fn-prefix = ""
+# `random()` and `thread_rng()` live at the crate root; we call them as
+# `rand::random()` / `rand::thread_rng()`. Pull `ThreadRng` into scope
+# under the short name `Rng` so `opaque:Rng` resolves cleanly.
+imports = [
+  # We use `StdRng` (Send+Sync, deterministic seedable) rather than
+  # `ThreadRng` so the handle can live behind cljrs's `Value::Opaque`
+  # (which requires Send+Sync).
+  "rand::rngs::StdRng as Rng",
+  "rand::SeedableRng as _SeedableRng",
+  # The `Rng` trait must be in scope so methods like `gen_range` resolve
+  # on the handle. Renamed to avoid clashing with the `Rng` type alias
+  # we just imported.
+  "rand::Rng as _RngTrait",
+]
+
+# (rand/random) -> f64 in [0, 1)
+[[fn]]
+name = "rand::random::<f64>"
+clj-name = "random"
+args = []
+returns = "f64"
+
+# (rand/seeded-rng seed) -> opaque Rng (Send+Sync, deterministic).
+# Cast i64 -> u64 happens in the call template since SeedableRng wants
+# unsigned input.
+[[fn]]
+name = "Rng::seed_from_u64"
+clj-name = "seeded-rng"
+args = ["i64"]
+returns = "opaque:Rng"
+call = "seed_from_u64({0} as u64)"
+
+# (rand/gen-range rng lo hi) -> i64 in [lo, hi)
+# rand 0.8's `gen_range` takes a `Range`, so we use the `call` template
+# to splice the two ints into a `lo..hi` range expression.
+[[method]]
+on = "Rng"
+name = "gen_range"
+clj-name = "gen-range"
+args = ["i64", "i64"]
+returns = "i64"
+call = "gen_range({0}..{1})"

@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Bindgen</title>
+  <link rel="stylesheet" href="./style.css">
+  <style>
+    .bg-prose { max-width: 820px; }
+    .bg-prose h3 { margin-top: 1.6rem; }
+    .bg-prose code { font-size: 0.85em; }
+    .bg-prose .pillrow { display: flex; gap: 0.4rem; flex-wrap: wrap; margin: 0.4rem 0 0.6rem; }
+    .bg-prose .pill {
+      background: #1d2029; border: 1px solid #333; padding: 0.15rem 0.55rem;
+      font-family: ui-monospace, monospace; font-size: 0.78rem;
+      border-radius: 999px; color: #c8d0e0;
+    }
+    .bg-prose table { font-size: 0.85rem; }
+    .bg-prose .note {
+      background: #14171f; border-left: 3px solid #555; padding: 0.5rem 0.7rem;
+      margin: 0.6rem 0; font-size: 0.85rem; color: var(--fg-dim);
+    }
+  </style>
+</head>
+<body>
+  <main class="bg-prose">
+    <h2>cljrs-bindgen — manifest-driven Rust interop</h2>
+    <p>
+      Phase 1 of cljrs's Rust interop is hand-written: each foreign crate
+      gets its own shim crate (<code>cljrs-physics</code>,
+      <code>cljrs-ml</code>, <code>cljrs-music</code>) that exposes a
+      <code>pub fn install(env: &amp;Env)</code> registering builtins.
+      Phase 2 is <code>cljrs-bindgen</code>: a small CLI that reads a
+      TOML manifest and emits the same shape of crate automatically, so
+      adding a new library is "describe the surface area, run the
+      generator, drop it in the workspace."
+    </p>
+
+    <h3>Type whitelist (v1)</h3>
+    <div class="pillrow">
+      <span class="pill">i64</span>
+      <span class="pill">f64</span>
+      <span class="pill">bool</span>
+      <span class="pill">string</span>
+      <span class="pill">vec&lt;i64&gt;</span>
+      <span class="pill">vec&lt;f64&gt;</span>
+      <span class="pill">opaque:Tag</span>
+    </div>
+    <p>
+      Anything else (maps, custom structs, references, generics) needs
+      a hand-written shim. The bindgen exits non-zero with a clear error
+      if a manifest references a type outside the whitelist.
+    </p>
+    <p>
+      <code>opaque:Tag</code> wraps any <code>Send + Sync + 'static</code>
+      Rust value behind a <code>Value::Opaque</code>. The same tag is used
+      both for the cljrs-side type identity and (by default) the in-scope
+      Rust type name — bring the concrete type into scope under that name
+      via the manifest's <code>imports</code> field.
+    </p>
+
+    <h3>Manifest format</h3>
+    <pre><code class="lang-toml">[crate]
+name    = "rand"
+version = "0.8"
+ns      = "cljrs.rand"
+# Optional `use` lines emitted at the top of the generated lib.
+imports = [
+  "rand::rngs::StdRng as Rng",
+  "rand::SeedableRng as _SeedableRng",
+  "rand::Rng as _RngTrait",
+]
+# Optional. Default = crate name. Set to "" to write each fn's call path
+# explicitly (handy when mixing free fns with associated fns).
+fn-prefix = ""
+
+# Free functions.
+[[fn]]
+name     = "rand::random::&lt;f64&gt;"
+clj-name = "random"
+args     = []
+returns  = "f64"
+
+# Associated function returning an opaque handle.
+[[fn]]
+name     = "Rng::seed_from_u64"
+clj-name = "seeded-rng"
+args     = ["i64"]
+returns  = "opaque:Rng"
+# `call` overrides the default `name(arg0, arg1, ...)`. Substitutions
+# `{0}` `{1}` ... refer to the marshalled args. Useful for casts or
+# wrapper shapes (Range, Option) the foreign API requires.
+call     = "seed_from_u64({0} as u64)"
+
+# Methods on an opaque handle. Receiver is always arg 0 from cljrs's POV.
+[[method]]
+on       = "Rng"
+name     = "gen_range"
+clj-name = "gen-range"
+args     = ["i64", "i64"]
+returns  = "i64"
+call     = "gen_range({0}..{1})"   # rand 0.8 expects a Range</code></pre>
+
+    <h3>Running the bindgen</h3>
+    <pre><code class="lang-bash">cargo run -p cljrs-bindgen -- \
+    crates/cljrs-bindgen/examples/rand.toml \
+    --out crates/cljrs-rand/</code></pre>
+    <p>
+      Generates <code>crates/cljrs-rand/Cargo.toml</code> and
+      <code>crates/cljrs-rand/src/lib.rs</code>. The
+      <code>CLJRS_PATH</code> env var controls the relative path to the
+      cljrs crate written into the generated <code>Cargo.toml</code>
+      (defaults to <code>../..</code>, which is correct when emitting
+      under <code>crates/</code>).
+    </p>
+
+    <h3>Wiring it up</h3>
+    <ol>
+      <li>Add the new crate to the workspace's <code>members</code>:
+        <pre><code class="lang-toml">[workspace]
+members = [".", ..., "crates/cljrs-rand"]</code></pre>
+      </li>
+      <li>Add a path-dep on the new crate from whichever binary owns the
+        REPL / runtime (e.g. <code>cljrs-rand = { path = "crates/cljrs-rand" }</code>).
+      </li>
+      <li>Call <code>cljrs_rand::install(&amp;env)</code> after constructing
+        the <code>Env</code>, before user code runs.
+      </li>
+      <li>From cljrs:
+        <pre><code class="lang-clj">(def rng (rand/seeded-rng 42))
+(rand/gen-range rng 0 100)  ;=&gt; 17</code></pre>
+      </li>
+    </ol>
+
+    <h3>What the codegen emits</h3>
+    <p>
+      One Rust shim fn per cljrs builtin, sharing a small set of inline
+      helpers (<code>arg_i64</code>, <code>arg_opaque</code>,
+      <code>opaque</code>, ...). Example for the <code>gen-range</code>
+      method above:
+    </p>
+    <pre><code class="lang-rust">fn method_gen_range(args: &amp;[Value]) -&gt; Result&lt;Value&gt; {
+    let recv = arg_opaque::&lt;Rng&gt;(args, 0, "Rng", "gen-range")?;
+    let a1 = arg_i64(args, 1, "gen-range")?;
+    let a2 = arg_i64(args, 2, "gen-range")?;
+    let r = { let mut __recv = (&amp;*recv).clone(); __recv.gen_range(a1..a2) };
+    Ok(Value::Int((r) as i64))
+}</code></pre>
+
+    <div class="note">
+      Methods clone the handle out of the <code>Arc</code> before
+      dispatch — fine for cheap-to-clone handles like <code>StdRng</code>,
+      but a workaround for cljrs-bindgen's lack of unique ownership
+      tracking. Phase 3 will introduce <code>Mutex</code>-wrapped
+      handles for foreign types whose <code>&amp;mut self</code> APIs
+      don't tolerate cloning.
+    </div>
+
+    <h3>End-to-end walkthrough: binding a new crate</h3>
+    <ol>
+      <li>Pick the surface. For each function/method you want exposed,
+        check that every arg + return is in the whitelist. If not,
+        either: (a) wrap it in a thin Rust newtype that exposes a
+        whitelist-friendly API, or (b) hand-write that one builtin and
+        let bindgen handle the rest.</li>
+      <li>Write the manifest. Start with <code>fn-prefix = ""</code> if
+        the crate's API spans modules; that lets each fn name be a fully
+        qualified path.</li>
+      <li>For opaque handles: bring the concrete Rust type into scope via
+        <code>imports</code> (e.g.
+        <code>"rand::rngs::StdRng as Rng"</code>). The opaque tag
+        (<code>Rng</code>) is what every <code>opaque:Rng</code> mention
+        in the manifest lines up with.</li>
+      <li>For traits providing methods on the handle (rand's <code>Rng</code>
+        trait, serde's <code>Serializer</code>, etc.), import them under
+        a non-clashing name (<code>"rand::Rng as _RngTrait"</code>) so
+        their methods resolve.</li>
+      <li>Run <code>cargo run -p cljrs-bindgen -- &lt;manifest&gt; --out
+        crates/cljrs-&lt;name&gt;</code>.</li>
+      <li>Add to workspace members; <code>cargo build -p
+        cljrs-&lt;name&gt;</code>; iterate on the manifest until clean.</li>
+      <li>Call <code>cljrs_&lt;name&gt;::install(&amp;env)</code> from
+        the host.</li>
+    </ol>
+
+    <h3>Limits &amp; deferred work</h3>
+    <ul>
+      <li>No map / struct marshalling yet — the runtime supports it
+        (<code>cljrs-physics</code> uses keyword-keyed maps for body
+        config), but the manifest can't express the field schema.
+        Phase 3.</li>
+      <li>No <code>Result</code> unwrapping — foreign fns returning
+        <code>Result&lt;T, E&gt;</code> must be wrapped by hand.</li>
+      <li>No version-pinning across foreign-crate releases. Bumping the
+        bound crate's version in the manifest doesn't catch source
+        breakage; you find out at <code>cargo build</code>.</li>
+      <li>Opaque handles are <code>Arc&lt;T&gt;</code>; methods needing
+        unique <code>&amp;mut self</code> work only if <code>T: Clone</code>.</li>
+    </ul>
+  </main>
+  <script type="module">
+    import { mountChrome } from "./_layout.js";
+    mountChrome();
+  </script>
+</body>
+</html>

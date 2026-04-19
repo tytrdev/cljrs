@@ -1,0 +1,18 @@
+[package]
+name = "cljrs-bindgen"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license = "MIT"
+description = "Manifest-driven Rust-crate-to-cljrs interop bindgen."
+
+[[bin]]
+name = "cljrs-bindgen"
+path = "src/main.rs"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+toml = "0.8"
+serde = { version = "1", features = ["derive"] }
