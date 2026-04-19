@@ -1,38 +1,82 @@
 // Shared header/footer injection + REPL wiring. Loaded as a module from
 // every docs page so content files stay small.
 
-// Top-level nav: kept deliberately short. Hub pages (demos.html,
-// library.html, benchmarks.html) fan out to the long tail.
+// Top-level nav with grouped dropdowns. The hub pages (demos.html,
+// library.html, benchmarks.html) are the group's own landing page;
+// the children show up in the dropdown so every page is reachable
+// from every page without drowning the header.
 const NAV = [
-  { href: "./index.html",      label: "Overview" },
-  { href: "./demos.html",      label: "Demos" },
-  { href: "./library.html",    label: "Library" },
-  { href: "./benchmarks.html", label: "Benchmarks" },
-  { href: "./repl.html",       label: "REPL" },
-  { href: "./roadmap.html",    label: "Roadmap" },
+  { href: "./index.html", label: "Overview" },
+  {
+    href: "./demos.html",
+    label: "Demos",
+    children: [
+      { href: "./platformer.html", label: "Platformer" },
+      { href: "./life.html",       label: "Life" },
+      { href: "./synth.html",      label: "Synth" },
+      { href: "./sequencer.html",  label: "Sequencer" },
+      { href: "./ml.html",         label: "ML" },
+      { href: "./ui-demo.html",    label: "UI demo" },
+      { href: "./js-interop.html", label: "JS interop" },
+      { href: "./physics.html",    label: "Physics" },
+      { href: "./gpu-web.html",    label: "GPU" },
+    ],
+  },
+  {
+    href: "./library.html",
+    label: "Library",
+    children: [
+      { href: "./lib-core.html",   label: "Core" },
+      { href: "./lib-ui.html",     label: "UI" },
+      { href: "./lib-shader.html", label: "Shader" },
+      { href: "./lib-ml.html",     label: "ML" },
+      { href: "./lib-music.html",  label: "Music" },
+      { href: "./lib-js.html",     label: "JS" },
+      { href: "./lib-rust.html",   label: "Rust interop" },
+    ],
+  },
+  {
+    href: "./benchmarks.html",
+    label: "Benchmarks",
+    children: [
+      { href: "./benchmarks.html", label: "CPU benchmarks" },
+      { href: "./bench.html",      label: "Matmul bench" },
+    ],
+  },
+  {
+    href: "./index.html",
+    label: "Reference",
+    children: [
+      { href: "./syntax.html",   label: "Syntax" },
+      { href: "./coverage.html", label: "Coverage" },
+      { href: "./roadmap.html",  label: "Roadmap" },
+    ],
+  },
+  { href: "./repl.html", label: "REPL" },
 ];
-// Subpages — used only to highlight the parent nav item when you're
-// deep in the site (e.g., lib-core.html highlights "Library").
+
+// Subpage -> parent hub, for nav highlighting.
 const NAV_PARENT = {
-  "syntax.html":      "index.html",
-  "coverage.html":    "index.html",
-  "gpu-web.html":     "demos.html",
-  "physics.html":     "demos.html",
-  "platformer.html":  "demos.html",
-  "life.html":        "demos.html",
-  "synth.html":       "demos.html",
-  "sequencer.html":   "demos.html",
-  "ml.html":          "demos.html",
-  "js-interop.html":  "demos.html",
-  "ui-demo.html":     "demos.html",
-  "lib-core.html":    "library.html",
-  "lib-ui.html":      "library.html",
-  "lib-shader.html":  "library.html",
-  "lib-ml.html":      "library.html",
-  "lib-music.html":   "library.html",
-  "lib-js.html":      "library.html",
-  "lib-rust.html":    "library.html",
-  "bench.html":       "benchmarks.html",
+  "syntax.html":     "Reference",
+  "coverage.html":   "Reference",
+  "roadmap.html":    "Reference",
+  "gpu-web.html":    "./demos.html",
+  "physics.html":    "./demos.html",
+  "platformer.html": "./demos.html",
+  "life.html":       "./demos.html",
+  "synth.html":      "./demos.html",
+  "sequencer.html":  "./demos.html",
+  "ml.html":         "./demos.html",
+  "js-interop.html": "./demos.html",
+  "ui-demo.html":    "./demos.html",
+  "lib-core.html":   "./library.html",
+  "lib-ui.html":     "./library.html",
+  "lib-shader.html": "./library.html",
+  "lib-ml.html":     "./library.html",
+  "lib-music.html":  "./library.html",
+  "lib-js.html":     "./library.html",
+  "lib-rust.html":   "./library.html",
+  "bench.html":      "./benchmarks.html",
 };
 
 function basename(href) {
@@ -93,17 +137,36 @@ export async function highlightAll(root = document) {
 export function mountChrome(activePath) {
   const header = document.createElement("header");
   const active = basename(activePath || location.pathname);
-  // Highlight the parent nav item when on a subpage.
-  const activeForNav = NAV_PARENT[active] || active;
+  // Highlight the parent nav item (href or synthetic label) when on a
+  // subpage so grouped items still feel like a current section.
+  const parent = NAV_PARENT[active];
+  const isActive = (item) => {
+    if (basename(item.href) === active) return true;
+    if (parent === item.href) return true;
+    if (parent === item.label) return true;
+    return false;
+  };
+  const renderItem = (n) => {
+    if (!n.children) {
+      return `<a href="${n.href}" class="${isActive(n) ? "active" : ""}">${n.label}</a>`;
+    }
+    const parentActive = isActive(n) || n.children.some((c) => basename(c.href) === active);
+    const childLinks = n.children
+      .map((c) =>
+        `<a href="${c.href}" class="${basename(c.href) === active ? "active" : ""}">${c.label}</a>`
+      )
+      .join("");
+    return `
+      <span class="nav-group ${parentActive ? "active" : ""}">
+        <a href="${n.href}" class="nav-group-trigger">${n.label}<span class="nav-caret">▾</span></a>
+        <span class="nav-dropdown">${childLinks}</span>
+      </span>
+    `;
+  };
   header.innerHTML = `
     <h1><a href="./index.html">cljrs</a></h1>
     <nav>
-      ${NAV.map(
-        (n) =>
-          `<a href="${n.href}" class="${
-            basename(n.href) === activeForNav ? "active" : ""
-          }">${n.label}</a>`
-      ).join("")}
+      ${NAV.map(renderItem).join("")}
       <a class="nav-gh" href="https://github.com/tytrdev/cljrs"
          target="_blank" rel="noopener">GitHub</a>
     </nav>

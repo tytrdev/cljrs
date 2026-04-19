@@ -52,6 +52,48 @@ header nav a.nav-gh {
 }
 header nav { flex: 1; align-items: center; }
 
+/* Grouped dropdown items — hover/focus opens a panel listing the
+   group's children. Clicking the trigger label itself navigates to
+   the group's landing page. */
+.nav-group { position: relative; display: inline-block; }
+.nav-group .nav-group-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+.nav-group.active > .nav-group-trigger { color: var(--accent); }
+.nav-group .nav-caret {
+  font-size: 0.7em;
+  opacity: 0.5;
+}
+.nav-group .nav-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  min-width: 170px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.35rem 0;
+  margin-top: 0.4rem;
+  display: none;
+  flex-direction: column;
+  z-index: 100;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+.nav-group:hover .nav-dropdown,
+.nav-group:focus-within .nav-dropdown { display: flex; }
+.nav-group .nav-dropdown a {
+  display: block;
+  padding: 0.3rem 0.9rem;
+  font-size: 0.88rem;
+  color: var(--fg-dim);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.nav-group .nav-dropdown a:hover { color: var(--fg); background: rgba(255, 255, 255, 0.04); }
+.nav-group .nav-dropdown a.active { color: var(--accent); }
+
 main {
   max-width: 900px;
   margin: 0 auto;
