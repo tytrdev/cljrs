@@ -738,12 +738,23 @@
   [& body]
   `(hash-map :__delay true :state (atom [:pending (fn [] ~@body)])))
 
+;; Override the builtin `realized?` so it consults a delay's state when
+;; given a delay map. For LazySeqs and other inputs we delegate to the
+;; original built-in semantics (only LazySeq is "unrealized" there).
+(let [builtin-realized? realized?]
+  (defn realized? [x]
+    (cond
+      (delay? x) (delay-realized? x)
+      :else (builtin-realized? x))))
+
 ;; ---------- sequence accessors ------------------------------------------
 
-(defn ffirst [coll] (first (first coll)))
-(defn fnext  [coll] (first (rest coll)))
-(defn nfirst [coll] (rest (first coll)))
-(defn nnext  [coll] (rest (rest coll)))
+;; seq-coerce each level so nil and atoms pun through without crashing
+;; ((ffirst nil) → nil rather than "first on non-sequence: nil").
+(defn ffirst [coll] (first (seq (first (seq coll)))))
+(defn fnext  [coll] (first (seq (rest  (seq coll)))))
+(defn nfirst [coll] (rest  (seq (first (seq coll)))))
+(defn nnext  [coll] (rest  (seq (rest  (seq coll)))))
 
 ;; ---------- not-any? / not-every? ---------------------------------------
 
@@ -809,7 +820,7 @@
 
 (defn ==
   ([_x] true)
-  ([x y] (and (number? x) (number? y) (= 0 (- x y))))
+  ([x y] (and (number? x) (number? y) (zero? (- x y))))
   ([x y & more]
    (if (== x y)
      (loop [a y bs more]

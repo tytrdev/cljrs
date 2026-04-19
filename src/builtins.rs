@@ -685,16 +685,34 @@ fn mapcat_fn(args: &[Value]) -> Result<Value> {
 
 /// (flatten coll): one-level deep recursive concat.
 fn flatten_fn(args: &[Value]) -> Result<Value> {
+    // Clojure: (flatten x) returns () for any non-sequential x. Only
+    // sequential children get descended into; scalars accumulate.
+    fn sequential(v: &Value) -> bool {
+        matches!(
+            v,
+            Value::List(_) | Value::Vector(_) | Value::Cons(_, _) | Value::LazySeq(_)
+        )
+    }
+    let root = &args[0];
+    if !sequential(root) {
+        return Ok(Value::List(Arc::new(Vec::new())));
+    }
     let mut out = Vec::new();
     fn walk(v: &Value, out: &mut Vec<Value>) {
         match v {
             Value::List(xs) => { for x in xs.iter() { walk(x, out); } }
             Value::Vector(xs) => { for x in xs.iter() { walk(x, out); } }
             Value::Cons(h, t) => { walk(h, out); walk(t, out); }
+            other if sequential(other) => {
+                // LazySeq path: realize and recurse.
+                if let Ok(items) = seq_items(other) {
+                    for x in items { walk(&x, out); }
+                }
+            }
             other => out.push(other.clone()),
         }
     }
-    walk(&args[0], &mut out);
+    walk(root, &mut out);
     Ok(Value::List(Arc::new(out)))
 }
 
@@ -1279,16 +1297,36 @@ fn select_keys_fn(args: &[Value]) -> Result<Value> {
 }
 
 fn keyword_fn(args: &[Value]) -> Result<Value> {
-    if args.len() != 1 {
-        return Err(Error::Arity { expected: "1".into(), got: args.len() });
+    match args.len() {
+        1 => {
+            let s: Arc<str> = match &args[0] {
+                Value::Str(s) => Arc::clone(s),
+                Value::Keyword(s) => Arc::clone(s),
+                Value::Symbol(s) => Arc::clone(s),
+                _ => return Err(Error::Type("keyword: expected string/keyword/symbol".into())),
+            };
+            Ok(Value::Keyword(s))
+        }
+        2 => {
+            // (keyword ns name) — build a namespaced keyword "ns/name".
+            // Clojure allows nil ns which yields a bare keyword.
+            let ns = match &args[0] {
+                Value::Nil => None,
+                Value::Str(s) => Some(s.as_ref().to_string()),
+                _ => return Err(Error::Type("keyword: ns must be string or nil".into())),
+            };
+            let name = match &args[1] {
+                Value::Str(s) => s.as_ref().to_string(),
+                _ => return Err(Error::Type("keyword: name must be string".into())),
+            };
+            let joined = match ns {
+                Some(n) => format!("{n}/{name}"),
+                None => name,
+            };
+            Ok(Value::Keyword(Arc::from(joined.as_str())))
+        }
+        k => Err(Error::Arity { expected: "1 or 2".into(), got: k }),
     }
-    let s: Arc<str> = match &args[0] {
-        Value::Str(s) => Arc::clone(s),
-        Value::Keyword(s) => Arc::clone(s),
-        Value::Symbol(s) => Arc::clone(s),
-        _ => return Err(Error::Type("keyword: expected string/keyword/symbol".into())),
-    };
-    Ok(Value::Keyword(s))
 }
 
 fn symbol_fn(args: &[Value]) -> Result<Value> {
@@ -1308,10 +1346,19 @@ fn name_fn(args: &[Value]) -> Result<Value> {
     if args.len() != 1 {
         return Err(Error::Arity { expected: "1".into(), got: args.len() });
     }
+    // Keywords/symbols may be namespaced ("ns/foo"); `name` returns the
+    // bare name component (everything after the last "/"). Strings pass
+    // through unchanged.
+    fn after_slash(s: &str) -> &str {
+        match s.rfind('/') {
+            Some(i) if i + 1 < s.len() => &s[i + 1..],
+            _ => s,
+        }
+    }
     match &args[0] {
         Value::Str(s) => Ok(Value::Str(Arc::clone(s))),
-        Value::Keyword(s) => Ok(Value::Str(Arc::clone(s))),
-        Value::Symbol(s) => Ok(Value::Str(Arc::clone(s))),
+        Value::Keyword(s) => Ok(Value::Str(Arc::from(after_slash(s.as_ref())))),
+        Value::Symbol(s) => Ok(Value::Str(Arc::from(after_slash(s.as_ref())))),
         _ => Err(Error::Type("name: expected string/keyword/symbol".into())),
     }
 }
@@ -1396,16 +1443,58 @@ fn reverse_fn(args: &[Value]) -> Result<Value> {
 }
 
 fn sort_fn(args: &[Value]) -> Result<Value> {
-    if args.len() != 1 {
-        return Err(Error::Arity { expected: "1".into(), got: args.len() });
+    match args.len() {
+        1 => {
+            let mut items = seq_items(&args[0])?;
+            items.sort_by(|a, b| {
+                let av = as_f64(a).unwrap_or(f64::NAN);
+                let bv = as_f64(b).unwrap_or(f64::NAN);
+                av.partial_cmp(&bv).unwrap_or(std::cmp::Ordering::Equal)
+            });
+            Ok(Value::List(Arc::new(items)))
+        }
+        2 => {
+            // (sort comparator coll). comparator is either a 2-arg
+            // predicate (like `<` or `>`) or a Clojure-style comparator
+            // returning an integer. We coerce any truthy/falsy or
+            // numeric result into an Ordering.
+            let cmp = args[0].clone();
+            let mut items = seq_items(&args[1])?;
+            let mut err: Option<Error> = None;
+            items.sort_by(|a, b| {
+                if err.is_some() {
+                    return std::cmp::Ordering::Equal;
+                }
+                match eval::apply(&cmp, &[a.clone(), b.clone()]) {
+                    Ok(Value::Bool(true)) => std::cmp::Ordering::Less,
+                    Ok(Value::Bool(false)) => {
+                        // Check the symmetric call to decide greater vs equal.
+                        match eval::apply(&cmp, &[b.clone(), a.clone()]) {
+                            Ok(Value::Bool(true)) => std::cmp::Ordering::Greater,
+                            Ok(_) => std::cmp::Ordering::Equal,
+                            Err(e) => {
+                                err = Some(e);
+                                std::cmp::Ordering::Equal
+                            }
+                        }
+                    }
+                    Ok(Value::Int(i)) => i.cmp(&0),
+                    Ok(Value::Float(f)) => f.partial_cmp(&0.0)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                    Ok(_) => std::cmp::Ordering::Equal,
+                    Err(e) => {
+                        err = Some(e);
+                        std::cmp::Ordering::Equal
+                    }
+                }
+            });
+            if let Some(e) = err {
+                return Err(e);
+            }
+            Ok(Value::List(Arc::new(items)))
+        }
+        k => Err(Error::Arity { expected: "1 or 2".into(), got: k }),
     }
-    let mut items = seq_items(&args[0])?;
-    items.sort_by(|a, b| {
-        let av = as_f64(a).unwrap_or(f64::NAN);
-        let bv = as_f64(b).unwrap_or(f64::NAN);
-        av.partial_cmp(&bv).unwrap_or(std::cmp::Ordering::Equal)
-    });
-    Ok(Value::List(Arc::new(items)))
 }
 
 fn second_fn(args: &[Value]) -> Result<Value> {
@@ -1451,12 +1540,24 @@ fn subs_fn(args: &[Value]) -> Result<Value> {
         return Err(Error::Arity { expected: "2 or 3".into(), got: args.len() });
     }
     let s = as_str(&args[0])?;
-    let start = to_i64(&args[1])?.max(0) as usize;
+    let start_i = to_i64(&args[1])?;
+    if start_i < 0 {
+        return Err(Error::Eval(format!(
+            "subs: start index must be non-negative, got {start_i}"
+        )));
+    }
     let chars: Vec<char> = s.chars().collect();
-    let end = match args.get(2) {
-        Some(v) => to_i64(v)?.max(0) as usize,
-        None => chars.len(),
+    let end_i = match args.get(2) {
+        Some(v) => to_i64(v)?,
+        None => chars.len() as i64,
     };
+    if end_i < 0 {
+        return Err(Error::Eval(format!(
+            "subs: end index must be non-negative, got {end_i}"
+        )));
+    }
+    let start = start_i as usize;
+    let end = end_i as usize;
     if start > chars.len() || end > chars.len() || start > end {
         return Err(Error::Eval(format!(
             "subs: range {start}..{end} out of bounds for length {}",
@@ -1468,22 +1569,54 @@ fn subs_fn(args: &[Value]) -> Result<Value> {
 }
 
 fn str_split_fn(args: &[Value]) -> Result<Value> {
-    if args.len() != 2 {
-        return Err(Error::Arity { expected: "2".into(), got: args.len() });
+    if args.len() != 2 && args.len() != 3 {
+        return Err(Error::Arity { expected: "2 or 3".into(), got: args.len() });
     }
     let s = as_str(&args[0])?;
     // Accept either a string separator or a compiled Regex literal —
     // Clojure's clojure.string/split takes a regex; cljrs has been
     // string-only until now.
-    let parts: Vec<Value> = match &args[1] {
-        Value::Regex(re) => re
-            .split(s)
-            .map(|p| Value::Str(Arc::from(p)))
-            .collect(),
-        _ => s
-            .split(as_str(&args[1])?)
-            .map(|p| Value::Str(Arc::from(p)))
-            .collect(),
+    // 3-arity takes a `limit`: limit>0 caps the number of pieces (the
+    // final piece keeps the unsplit tail). limit==0 → drop trailing
+    // empties (matches Clojure/Java). limit<0 → unbounded, keep empties.
+    let parts: Vec<Value> = match args.get(2) {
+        Some(lim_v) => {
+            let limit = to_i64(lim_v)?;
+            let pieces: Vec<String> = match &args[1] {
+                Value::Regex(re) => {
+                    if limit > 0 {
+                        re.splitn(s, limit as usize).map(String::from).collect()
+                    } else {
+                        re.split(s).map(String::from).collect()
+                    }
+                }
+                _ => {
+                    let sep = as_str(&args[1])?;
+                    if limit > 0 {
+                        s.splitn(limit as usize, sep).map(String::from).collect()
+                    } else {
+                        s.split(sep).map(String::from).collect()
+                    }
+                }
+            };
+            let mut pieces = pieces;
+            if limit == 0 {
+                while pieces.last().map(|p| p.is_empty()).unwrap_or(false) {
+                    pieces.pop();
+                }
+            }
+            pieces.into_iter().map(|p| Value::Str(Arc::from(p.as_str()))).collect()
+        }
+        None => match &args[1] {
+            Value::Regex(re) => re
+                .split(s)
+                .map(|p| Value::Str(Arc::from(p)))
+                .collect(),
+            _ => s
+                .split(as_str(&args[1])?)
+                .map(|p| Value::Str(Arc::from(p)))
+                .collect(),
+        },
     };
     Ok(Value::Vector(parts.into_iter().collect()))
 }
@@ -1495,7 +1628,14 @@ fn str_join_fn(args: &[Value]) -> Result<Value> {
         n => return Err(Error::Arity { expected: "1 or 2".into(), got: n }),
     };
     let items = seq_items(coll)?;
-    let parts: Vec<String> = items.iter().map(Value::to_display_string).collect();
+    // Clojure: nil prints as the empty string in (str/join ...).
+    let parts: Vec<String> = items
+        .iter()
+        .map(|v| match v {
+            Value::Nil => String::new(),
+            _ => v.to_display_string(),
+        })
+        .collect();
     Ok(Value::Str(Arc::from(parts.join(sep).as_str())))
 }
 
@@ -1517,9 +1657,16 @@ fn str_replace_fn(args: &[Value]) -> Result<Value> {
         return Err(Error::Arity { expected: "3".into(), got: args.len() });
     }
     let s = as_str(&args[0])?;
-    let from = as_str(&args[1])?;
     let to = as_str(&args[2])?;
-    Ok(Value::Str(Arc::from(s.replace(from, to).as_str())))
+    // Match-arg may be a literal string or a compiled regex.
+    let out = match &args[1] {
+        Value::Regex(re) => re.replace_all(s, to).into_owned(),
+        _ => {
+            let from = as_str(&args[1])?;
+            s.replace(from, to)
+        }
+    };
+    Ok(Value::Str(Arc::from(out.as_str())))
 }
 
 fn str_starts_with_fn(args: &[Value]) -> Result<Value> {
@@ -1570,7 +1717,10 @@ fn str_last_index_of_fn(args: &[Value]) -> Result<Value> {
 
 fn string_q(args: &[Value]) -> Result<Value> { Ok(Value::Bool(matches!(&args[0], Value::Str(_)))) }
 fn number_q(args: &[Value]) -> Result<Value> {
-    Ok(Value::Bool(matches!(&args[0], Value::Int(_) | Value::Float(_))))
+    Ok(Value::Bool(matches!(
+        &args[0],
+        Value::Int(_) | Value::Float(_) | Value::Ratio(..)
+    )))
 }
 fn integer_q(args: &[Value]) -> Result<Value> { Ok(Value::Bool(matches!(&args[0], Value::Int(_)))) }
 fn float_q(args: &[Value]) -> Result<Value> { Ok(Value::Bool(matches!(&args[0], Value::Float(_)))) }
@@ -1579,9 +1729,12 @@ fn vector_q(args: &[Value]) -> Result<Value> { Ok(Value::Bool(matches!(&args[0],
 fn set_q(args: &[Value]) -> Result<Value> { Ok(Value::Bool(matches!(&args[0], Value::Set(_)))) }
 fn list_q(args: &[Value]) -> Result<Value> { Ok(Value::Bool(matches!(&args[0], Value::List(_)))) }
 fn seq_q(args: &[Value]) -> Result<Value> {
+    // Clojure: seq? is true ONLY for things that implement ISeq —
+    // lists, cons cells, lazy seqs. Vectors / sets / maps are NOT seqs
+    // (they're collections; (seq coll) returns a seq view).
     Ok(Value::Bool(matches!(
         &args[0],
-        Value::List(_) | Value::Vector(_) | Value::Set(_) | Value::Map(_)
+        Value::List(_) | Value::Cons(_, _) | Value::LazySeq(_)
     )))
 }
 fn coll_q(args: &[Value]) -> Result<Value> {
@@ -1736,11 +1889,15 @@ fn double_fn(args: &[Value]) -> Result<Value> {
 // ---- Seq utilities -----------------------------------------------------
 
 fn repeat_fn(args: &[Value]) -> Result<Value> {
-    if args.len() != 2 {
-        return Err(Error::Arity { expected: "2".into(), got: args.len() });
-    }
-    let n = to_i64(&args[0])?.max(0) as usize;
-    let out: Vec<Value> = std::iter::repeat(args[1].clone()).take(n).collect();
+    let (n, v) = match args.len() {
+        // 1-arity: bounded stand-in for Clojure's infinite (repeat x).
+        // Cap at 10_000 since cljrs is eager — pair with `take` for
+        // finite use.
+        1 => (10_000usize, args[0].clone()),
+        2 => (to_i64(&args[0])?.max(0) as usize, args[1].clone()),
+        k => return Err(Error::Arity { expected: "1 or 2".into(), got: k }),
+    };
+    let out: Vec<Value> = std::iter::repeat(v).take(n).collect();
     Ok(Value::List(Arc::new(out)))
 }
 
@@ -1775,16 +1932,44 @@ fn drop_while_fn(args: &[Value]) -> Result<Value> {
 }
 
 fn partition_fn(args: &[Value]) -> Result<Value> {
-    if args.len() != 2 {
-        return Err(Error::Arity { expected: "2".into(), got: args.len() });
-    }
-    let n = to_i64(&args[0])?.max(1) as usize;
-    let coll = seq_items(&args[1])?;
-    let mut out = Vec::new();
-    for chunk in coll.chunks(n) {
-        if chunk.len() == n {
-            out.push(Value::List(Arc::new(chunk.to_vec())));
+    // (partition n coll)
+    // (partition n step coll)
+    // (partition n step pad coll)
+    let (n, step, pad, coll) = match args.len() {
+        2 => {
+            let n = to_i64(&args[0])?.max(1) as usize;
+            (n, n, None, seq_items(&args[1])?)
         }
+        3 => {
+            let n = to_i64(&args[0])?.max(1) as usize;
+            let step = to_i64(&args[1])?.max(1) as usize;
+            (n, step, None, seq_items(&args[2])?)
+        }
+        4 => {
+            let n = to_i64(&args[0])?.max(1) as usize;
+            let step = to_i64(&args[1])?.max(1) as usize;
+            let pad = seq_items(&args[2])?;
+            (n, step, Some(pad), seq_items(&args[3])?)
+        }
+        k => return Err(Error::Arity { expected: "2, 3, or 4".into(), got: k }),
+    };
+    let mut out = Vec::new();
+    let len = coll.len();
+    let mut i = 0usize;
+    while i < len {
+        let end = (i + n).min(len);
+        let mut chunk: Vec<Value> = coll[i..end].to_vec();
+        if chunk.len() == n {
+            out.push(Value::List(Arc::new(chunk)));
+        } else if let Some(pad_items) = &pad {
+            // pad up to n; any short remainder is kept (Clojure: partial
+            // trailing partition is returned even if pad runs out).
+            let need = n - chunk.len();
+            let take = need.min(pad_items.len());
+            chunk.extend(pad_items[..take].iter().cloned());
+            out.push(Value::List(Arc::new(chunk)));
+        }
+        i += step;
     }
     Ok(Value::List(Arc::new(out)))
 }
@@ -2161,11 +2346,44 @@ fn eq(args: &[Value]) -> Result<Value> {
     }
     let first = &args[0];
     for a in &args[1..] {
-        if a != first {
+        if !strict_eq(first, a) {
             return Ok(Value::Bool(false));
         }
     }
     Ok(Value::Bool(true))
+}
+
+/// Clojure-strict equality: numeric types of different categories
+/// (Int / Float / Ratio) are NEVER equal under `=`. Use `==` for
+/// numeric coercion. Otherwise delegates to `Value`'s structural
+/// PartialEq, with one wrinkle: containers must compare element-wise
+/// strictly (so `(= [1] [1.0])` → false).
+fn strict_eq(a: &Value, b: &Value) -> bool {
+    use Value::*;
+    match (a, b) {
+        (Int(_), Float(_)) | (Float(_), Int(_)) => false,
+        (Int(_), Ratio(..)) | (Ratio(..), Int(_)) => false,
+        (Float(_), Ratio(..)) | (Ratio(..), Float(_)) => false,
+        // Containers: re-check element-wise strictly.
+        (List(x), List(y)) => x.len() == y.len() && x.iter().zip(y.iter()).all(|(p, q)| strict_eq(p, q)),
+        (Vector(x), Vector(y)) => x.len() == y.len() && x.iter().zip(y.iter()).all(|(p, q)| strict_eq(p, q)),
+        (List(x), Vector(y)) | (Vector(y), List(x)) => {
+            x.len() == y.len() && x.iter().zip(y.iter()).all(|(p, q)| strict_eq(p, q))
+        }
+        (Set(x), Set(y)) => {
+            // Strict element comparison: every element in x must have a
+            // strictly-equal counterpart in y. Sets in Clojure use =
+            // semantics already, so PartialEq fallback is wrong only if
+            // numeric types of different categories appear.
+            x.len() == y.len() && x.iter().all(|e| y.iter().any(|e2| strict_eq(e, e2)))
+        }
+        (Map(x), Map(y)) => {
+            x.len() == y.len()
+                && x.iter().all(|(k, v)| y.get(k).map(|v2| strict_eq(v, v2)).unwrap_or(false))
+        }
+        (Cons(ah, at), Cons(bh, bt)) => strict_eq(ah, bh) && strict_eq(at, bt),
+        _ => a == b,
+    }
 }
 
 fn cmp<F>(args: &[Value], f: F) -> Result<Value>
@@ -2328,10 +2546,21 @@ fn first_fn(args: &[Value]) -> Result<Value> {
         Value::Vector(v) => Ok(v.front().cloned().unwrap_or(Value::Nil)),
         Value::Set(s) => Ok(s.iter().next().cloned().unwrap_or(Value::Nil)),
         Value::Cons(h, _) => Ok((**h).clone()),
-        _ => Err(Error::Type(format!(
-            "first on non-sequence: {}",
-            v.type_name()
-        ))),
+        // Maps seq into [k v] entries; first map entry is the head pair.
+        Value::Map(m) => Ok(m
+            .iter()
+            .next()
+            .map(|(k, v)| Value::Vector(PVec::from_iter([k.clone(), v.clone()])))
+            .unwrap_or(Value::Nil)),
+        // Strings seq into chars.
+        Value::Str(s) => Ok(s
+            .chars()
+            .next()
+            .map(|c| Value::Str(Arc::from(c.to_string().as_str())))
+            .unwrap_or(Value::Nil)),
+        // Non-collection scalars nil-pun (matches Clojure's fnext-on-pair
+        // behavior; we lean permissive over a hard error).
+        _ => Ok(Value::Nil),
     }
 }
 
@@ -2661,12 +2890,15 @@ fn reduce_fn(args: &[Value]) -> Result<Value> {
 
 fn range_fn(args: &[Value]) -> Result<Value> {
     let (start, end, step) = match args.len() {
+        // 0-arity: bounded stand-in for Clojure's infinite (range).
+        // cljrs is eager, so cap at 10_000 — pair with `take` for finite use.
+        0 => (0i64, 10_000i64, 1i64),
         1 => (0i64, to_i64(&args[0])?, 1i64),
         2 => (to_i64(&args[0])?, to_i64(&args[1])?, 1i64),
         3 => (to_i64(&args[0])?, to_i64(&args[1])?, to_i64(&args[2])?),
         n => {
             return Err(Error::Arity {
-                expected: "1, 2, or 3".into(),
+                expected: "0, 1, 2, or 3".into(),
                 got: n,
             });
         }
@@ -3421,11 +3653,34 @@ fn butlast_fn(args: &[Value]) -> Result<Value> {
 }
 fn tree_seq_fn(args: &[Value]) -> Result<Value> {
     if args.len() != 3 { return Err(Error::Arity { expected: "3".into(), got: args.len() }); }
+    // Pull `(first node)` for collection nodes — used to detect when
+    // children-fn skipped the head (e.g. `rest` on a vector) so we can
+    // still surface that head as a leaf in the visit stream.
+    fn node_first(v: &Value) -> Option<Value> {
+        match v {
+            Value::Vector(xs) => xs.front().cloned(),
+            Value::List(xs) => xs.first().cloned(),
+            Value::Cons(h, _) => Some((**h).clone()),
+            _ => None,
+        }
+    }
     fn walk(branch_q: &Value, children: &Value, node: Value, out: &mut Vec<Value>) -> Result<()> {
         out.push(node.clone());
         if eval::apply(branch_q, std::slice::from_ref(&node))?.truthy() {
             let kids = eval::apply(children, std::slice::from_ref(&node))?;
-            for k in seq_items(&kids)? { walk(branch_q, children, k, out)?; }
+            let kids_items = seq_items(&kids)?;
+            // If children-fn skipped the head (e.g. `rest`), still visit
+            // the head as a leaf so all original elements are seen.
+            if let Some(head) = node_first(&node) {
+                let kids_head_matches = kids_items
+                    .first()
+                    .map(|h| h == &head)
+                    .unwrap_or(false);
+                if !kids_head_matches {
+                    walk(branch_q, children, head, out)?;
+                }
+            }
+            for k in kids_items { walk(branch_q, children, k, out)?; }
         }
         Ok(())
     }

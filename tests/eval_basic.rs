@@ -133,7 +133,10 @@ fn equality() {
     assert_eq!(run(r#"(= "hi" "hi")"#), Value::Bool(true));
     assert_eq!(run("(= :foo :foo)"), Value::Bool(true));
     assert_eq!(run("(= :foo :bar)"), Value::Bool(false));
-    assert_eq!(run("(= 1 1.0)"), Value::Bool(true));
+    // Clojure-strict: (= 1 1.0) is false (different numeric types).
+    // Use (== 1 1.0) for numeric coercion.
+    assert_eq!(run("(= 1 1.0)"), Value::Bool(false));
+    assert_eq!(run("(== 1 1.0)"), Value::Bool(true));
 }
 
 #[test]

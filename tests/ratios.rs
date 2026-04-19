@@ -46,7 +46,11 @@ fn ratio_demotes_to_float_with_float() {
 #[test]
 fn ratio_comparisons() {
     assert_eq!(run("(< 1/3 1/2)"), Value::Bool(true));
-    assert_eq!(run("(= 1/2 0.5)"), Value::Bool(true));
+    // Clojure-strict: ratios and floats are distinct types under =.
+    // Use == for numeric coercion across types.
+    assert_eq!(run("(= 1/2 0.5)"), Value::Bool(false));
+    assert_eq!(run("(== 1/2 0.5)"), Value::Bool(true));
+    // 4/2 simplifies to the integer 2, so this stays equal under =.
     assert_eq!(run("(= 4/2 2)"), Value::Bool(true));
 }
 
