@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Shader stdlib · Library</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main>
+    <h2>Shader stdlib</h2>
+    <p>
+      A userland "standard library" for cljrs <code>defn-gpu-pixel</code>
+      kernels, written entirely as <code>defmacro</code>s
+      (<a href="https://github.com/">demo_gpu/stdlib.clj</a>). Zero
+      compiler changes: each helper expands inline via syntax-quote so
+      the GPU emitter sees a single flat scalar expression tree, exactly
+      as if you had written it by hand. The DSL is scalar-only at the
+      user level — helpers that "want" to return <code>vec3</code>
+      either expose a <code>channel</code> selector or expand to a let
+      block you destructure.
+    </p>
+    <p>
+      Use it by loading the file at the top of a kernel source:
+      <code>(load-file "demo_gpu/stdlib.clj")</code>. The
+      <code>gpu-compile</code> binary evaluates non-kernel forms before
+      extracting the kernel body, so the macros are registered in time
+      for <code>macroexpand-all</code>.
+    </p>
+    <p>
+      GPU compilation needs a real GPU pipeline (WGSL emitter, native
+      driver or WebGPU). The runnable cljrs-wasm Repl can macro-expand
+      these helpers but cannot execute the resulting kernel. The
+      examples below show the macro source and a comment-form
+      sketching what the expanded code looks like; for live kernels,
+      see <a href="./gpu-web.html">GPU</a>.
+    </p>
+
+    <h3>Color packing</h3>
+    <ul>
+      <li><code>(pack-rgb r g b)</code> — clamp three f32 channels into <code>[0,1]</code>, scale to 8-bit, return one packed <code>u32</code> in <code>0x00RRGGBB</code> form.</li>
+      <li>Every kernel ends with this; factoring it out saves four lines at the bottom.</li>
+    </ul>
+
+    <h3>Noise</h3>
+    <ul>
+      <li><code>(hash2 ix iy)</code> — xxHash-flavored integer hash to f32 in <code>[0,1)</code>. Expects integer cell coords.</li>
+      <li><code>(noise2 xf yf)</code> — 2D value noise with smoothstep weights. f32 coords; period 1.</li>
+      <li><code>(fbm2 xf yf)</code> — five-octave fractional-Brownian-motion sum, normalized to ~<code>[0,1]</code>.</li>
+      <li>Gotcha: every literal fits in i32 so the emitter's integer path is happy. Don't replace them with f32 constants.</li>
+    </ul>
+
+    <h3>SDF primitives</h3>
+    <ul>
+      <li><code>(sd-sphere px py pz cx cy cz r)</code> — signed distance to a sphere of radius <code>r</code> centered at <code>(cx cy cz)</code>.</li>
+      <li><code>(sd-box px py pz cx cy cz hx hy hz)</code> — axis-aligned box, half-extents <code>(hx hy hz)</code>.</li>
+      <li><code>(sd-plane px py pz y0)</code> — infinite Y=<code>y0</code> plane. Negative below, positive above.</li>
+      <li><code>(sd-torus px py pz cx cy cz R r)</code> — Y-axis torus, major <code>R</code>, minor <code>r</code>.</li>
+      <li>All primitives return one f32 (signed distance), so they compose freely with the combinators below.</li>
+    </ul>
+
+    <h3>SDF combinators</h3>
+    <ul>
+      <li><code>(sd-union a b)</code> — <code>min</code>.</li>
+      <li><code>(sd-intersect a b)</code> — <code>max</code>.</li>
+      <li><code>(sd-subtract a b)</code> — carve <code>b</code> out of <code>a</code>: <code>(max a (- b))</code>.</li>
+      <li><code>(sd-smooth-union a b k)</code> — IQ polynomial smooth-min with blend radius <code>k</code>; <code>k → 0</code> recovers <code>sd-union</code>.</li>
+    </ul>
+
+    <h3>Tonemapping</h3>
+    <ul>
+      <li><code>(tone-reinhard v)</code> — single-channel <code>v / (1 + v)</code>. Keeps highlights from clipping when summing several light contributions.</li>
+    </ul>
+
+    <h3>Examples</h3>
+    <p>
+      The Repl below evaluates ordinary cljrs. The shader macros aren't
+      loaded into the wasm prelude, but you can macroexpand mock
+      versions to see how the helpers compose. The right-hand comment
+      shows what the GPU emitter sees after expansion.
+    </p>
+
+    <h4>Macroexpand a simple combinator</h4>
+    <p>
+      For demonstration we redefine <code>sd-union</code> /
+      <code>sd-subtract</code> here so the in-page Repl can
+      macroexpand. The originals live in
+      <code>demo_gpu/stdlib.clj</code>; identical bodies.
+    </p>
+    <div class="run-example" data-stateful="1">
+      <textarea spellcheck="false" style="min-height:200px">(defmacro sd-union    [a b] `(min ~a ~b))
+(defmacro sd-subtract [a b] `(max ~a (- ~b)))
+
+;; Macroexpand one level so you can see the flat scalar tree the
+;; GPU emitter will lower to WGSL. Use macroexpand for the outer
+;; call; nested macros are stepped through one level at a time.
+(macroexpand
+  '(sd-subtract
+     (sd-union sphere-a sphere-b)
+     hole-sphere))</textarea>
+      <div class="repl-toolbar">
+        <span style="font-size:0.8rem;color:var(--fg-dim)">expansion = what the WGSL backend sees</span>
+        <button>Run</button>
+      </div>
+      <div class="repl-out">click Run</div>
+    </div>
+
+    <h4>Pack-rgb in isolation</h4>
+    <p>
+      The expansion below would be evaluated on the GPU per-pixel.
+      Here we mock <code>u32</code>/<code>i32</code>/<code>bit-or</code>
+      with their CPU equivalents to confirm the math:
+    </p>
+    <div class="run-example" data-stateful="1">
+      <textarea spellcheck="false" style="min-height:220px">(defn clamp [x lo hi] (max lo (min hi x)))
+
+(defn pack-rgb [r g b]
+  (let [ri (long (clamp (long (* 255.0 r)) 0 255))
+        gi (long (clamp (long (* 255.0 g)) 0 255))
+        bi (long (clamp (long (* 255.0 b)) 0 255))]
+    (+ (* ri 65536) (* gi 256) bi)))
+
+;; pure red, mid green, full blue
+[(pack-rgb 1.0 0.0 0.0)
+ (pack-rgb 0.0 0.5 0.0)
+ (pack-rgb 0.0 0.0 1.0)]
+;; → [0xFF0000 0x008000 0x0000FF] = [16711680 32768 255]
+</textarea>
+      <div class="repl-toolbar">
+        <span style="font-size:0.8rem;color:var(--fg-dim)">CPU mirror of pack-rgb</span>
+        <button>Run</button>
+      </div>
+      <div class="repl-out">click Run</div>
+    </div>
+
+    <h4>FBM, sketched</h4>
+    <p>
+      The five-octave sum below shows the structure
+      <code>fbm2</code> expands to. On the GPU, each
+      <code>noise2</code> is itself the smoothstep-weighted bilerp
+      built from <code>hash2</code>.
+    </p>
+    <pre><code>(defmacro fbm2 [xf yf]
+  `(let [n1# (noise2 ~xf ~yf)
+         n2# (noise2 (* ~xf 2.07) (* ~yf 2.07))
+         n3# (noise2 (* ~xf 4.13) (* ~yf 4.13))
+         n4# (noise2 (* ~xf 8.19) (* ~yf 8.19))
+         n5# (noise2 (* ~xf 16.3) (* ~yf 16.3))
+         s#  (+ (+ (* n1# 0.5) (* n2# 0.25))
+                (+ (* n3# 0.125) (+ (* n4# 0.0625) (* n5# 0.03125))))]
+     (/ s# 0.96875)))</code></pre>
+    <p>
+      Each octave doubles the frequency (with a slight irrational
+      offset to break grid alignment) and halves the amplitude. The
+      final divide by <code>0.96875</code> renormalizes the geometric
+      sum.
+    </p>
+  </main>
+  <script type="module">
+    import { mountChrome } from "./_layout.js";
+    import { wireAll } from "./_runnable.js";
+    mountChrome("./lib-shader.html");
+    wireAll();
+  </script>
+</body>
+</html>

@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Rust interop · Library</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main>
+    <h2>Rust interop</h2>
+    <p>
+      cljrs is just a Rust crate (<code>cljrs</code>) and an
+      <code>Env</code> you populate with <code>Builtin</code>s. Any
+      Rust crate can be exposed as a cljrs namespace by writing a thin
+      shim — a <code>pub fn install(env: &amp;Env)</code> that registers
+      a few function pointers under string names. Three shipped crates
+      use this pattern: <code>cljrs-physics</code>,
+      <code>cljrs-ml</code>, and the wasm-side
+      <code>js_bridge</code>/<code>ui_bridge</code> in
+      <code>cljrs-wasm</code>. The
+      <code>cljrs-bindgen</code> tool can generate one of these shims
+      for you from a TOML manifest.
+    </p>
+
+    <h3>Core building blocks</h3>
+    <ul>
+      <li><code>cljrs::value::Value</code> — the dynamic value enum: <code>Nil</code>, <code>Bool</code>, <code>Int</code>, <code>Float</code>, <code>Str</code>, <code>Vector</code>, <code>List</code>, <code>Map</code>, <code>Set</code>, <code>Builtin</code>, <code>Fn</code>, <code>Opaque</code>, etc.</li>
+      <li><code>cljrs::value::Builtin::new_static(name, fn(&amp;[Value]) -&gt; Result&lt;Value&gt;)</code> — wrap a <code>fn</code> pointer as a callable cljrs value.</li>
+      <li><code>cljrs::env::Env</code> — namespace registry. <code>env.set_current_ns("cljrs.foo")</code>, then <code>env.define_global("bar", value)</code> binds <code>cljrs.foo/bar</code>.</li>
+      <li><code>cljrs::error::{Error, Result}</code> — fallible Rust returns surface to cljrs as evaluator errors.</li>
+    </ul>
+
+    <h3>Opaque handles</h3>
+    <p>
+      Native Rust values that cljrs shouldn't introspect (a
+      <code>Tensor</code>, a <code>RigidBody</code>, a
+      <code>JsValue</code>) round-trip through <code>Value::Opaque</code>:
+    </p>
+    <pre><code>Value::Opaque {
+    tag:   Arc&lt;str&gt;,                              // "ml/tensor"
+    inner: Arc&lt;dyn Any + Send + Sync&gt;,             // your handle
+}</code></pre>
+    <p>
+      Conventions in the standard crates:
+    </p>
+    <ul>
+      <li>Tag is <code>"&lt;ns&gt;/&lt;type&gt;"</code> — e.g. <code>"ml/tensor"</code>, <code>"physics.d2/world"</code>.</li>
+      <li>Inner is wrapped in <code>Arc</code> so cljrs can clone the value cheaply.</li>
+      <li>Mutability lives <em>inside</em> the inner type (a <code>RefCell</code> or <code>Mutex</code>) — cljrs sees an immutable handle and mutators are <code>!</code>-suffixed builtins.</li>
+      <li>Handles that don't impl <code>Send + Sync</code> (e.g. <code>JsValue</code>) get a newtype with an <code>unsafe impl Send + Sync</code>; soundness rests on the target being single-threaded.</li>
+    </ul>
+
+    <h3>The install pattern, by example</h3>
+    <p>
+      <code>cljrs-physics</code> is the model — read
+      <code>crates/cljrs-physics/src/lib.rs</code> for the full text.
+      Skeleton:
+    </p>
+    <pre><code>pub fn install(env: &amp;Env) {
+    let prev = env.current_ns();
+    env.set_current_ns("cljrs.physics.d2");
+    bind(env, "world",          world_fn);
+    bind(env, "add-body!",      add_body_fn);
+    bind(env, "step!",          step_fn);
+    bind(env, "translation",    translation_fn);
+    // ...
+    env.set_current_ns(prev.as_ref());
+}
+
+fn bind(env: &amp;Env, name: &amp;'static str, f: fn(&amp;[Value]) -&gt; Result&lt;Value&gt;) {
+    env.define_global(name, Value::Builtin(Builtin::new_static(name, f)));
+}
+
+fn world_fn(args: &amp;[Value]) -&gt; Result&lt;Value&gt; {
+    let opts = arg_map(args, 0, "world")?;
+    // ...build a Rapier World...
+    Ok(Value::Opaque {
+        tag:   Arc::from("physics.d2/world"),
+        inner: Arc::new(Mutex::new(world)),
+    })
+}</code></pre>
+    <p>
+      Three things to copy into a new crate: the <code>install</code>
+      shape (save+restore current_ns), the <code>bind</code> helper,
+      and a small set of <code>arg_*</code> coercion helpers (see
+      <code>cljrs-ml/src/lib.rs</code> for <code>arg_tensor</code>,
+      <code>arg_f32</code>, <code>arg_usize</code>).
+    </p>
+
+    <h3>Adding a new crate to the workspace</h3>
+    <ol>
+      <li>
+        <code>cargo new --lib crates/cljrs-mything</code>. Edit
+        <code>Cargo.toml</code> to add <code>cljrs = { path = "../.." }</code>
+        and whatever upstream crate you're wrapping. Re-export under
+        <code>[lib] crate-type = ["lib"]</code>.
+      </li>
+      <li>
+        Write <code>pub fn install(env: &amp;Env)</code> following the
+        physics template. Put each <code>fn *_fn(args)</code> next to its
+        <code>bind</code> line; arg coercion helpers at the bottom.
+      </li>
+      <li>
+        Wire it into the wasm bundle if browser users should see it:
+        in <code>crates/cljrs-wasm/src/lib.rs</code>, add
+        <code>cljrs_mything::install(&amp;env);</code> next to the existing
+        installs (there are three call sites — <code>eval_source</code>,
+        the <code>Repl::new</code>, and the <code>reset</code> path).
+      </li>
+      <li>
+        Also wire it into native binaries that should see it
+        (<code>src/bin/demo.rs</code>, etc.).
+      </li>
+      <li>
+        Document the surface area: add a <code>lib-mything.html</code>
+        following the existing template, and announce its functions in
+        <a href="./coverage.html">Coverage</a>.
+      </li>
+    </ol>
+
+    <h3>cljrs-bindgen — manifest-driven shim generator</h3>
+    <p>
+      <code>crates/cljrs-bindgen</code> generates an entire
+      <code>install</code> file from a TOML manifest. Useful when the
+      Rust crate is mostly stateless free functions — you describe the
+      surface area in TOML, the bindgen emits the Rust shim, you
+      compile.
+    </p>
+    <pre><code>[crate]
+name    = "rand"
+version = "0.8"
+ns      = "cljrs.rand"
+imports = ["rand::Rng", "rand::rngs::ThreadRng as Rng"]
+
+[[fn]]
+name     = "random"
+clj-name = "rand"
+args     = []
+returns  = "f64"
+
+[[fn]]
+name     = "shuffle"
+clj-name = "shuffle"
+args     = ["vec&lt;i64&gt;"]
+returns  = "vec&lt;i64&gt;"</code></pre>
+    <p>
+      Type whitelist (v1): <code>i64</code>, <code>f64</code>,
+      <code>bool</code>, <code>string</code>, <code>opaque:Tag</code>,
+      <code>vec&lt;i64&gt;</code>, <code>vec&lt;f64&gt;</code>. Anything
+      else is rejected at manifest-load time. Methods on opaques use
+      <code>[[method]]</code> with an <code>on = "Tag"</code>
+      discriminator. See <code>crates/cljrs-bindgen/src/manifest.rs</code>
+      for the full schema.
+    </p>
+    <p>
+      For complex APIs (callbacks, async, mutable state mid-flight,
+      anything outside the whitelist) write the shim by hand against
+      the physics template. The bindgen aims to remove boilerplate for
+      the easy 80%, not to be a substitute for understanding the
+      pattern.
+    </p>
+
+    <h3>Errors & conventions</h3>
+    <ul>
+      <li>Return <code>Err(Error::Type(..))</code> for argument-type mismatch, <code>Error::Eval(..)</code> for runtime failure, <code>Error::Arity{expected,got}</code> for wrong arg count.</li>
+      <li>Mutator builtins end in <code>!</code> (Clojure convention). Predicates end in <code>?</code>.</li>
+      <li>Constructors take a single map of options when they have more than two args — gives every call a self-documenting site.</li>
+      <li>Use <code>imbl::Vector</code> / <code>imbl::HashMap</code> directly when building return values; cljrs's persistent collections are <code>imbl</code> under the hood.</li>
+    </ul>
+
+    <h3>Examples in the wild</h3>
+    <ul>
+      <li><a href="./physics.html">Physics</a> — Rapier 2D/3D bound as <code>cljrs.physics.d2</code> / <code>.d3</code>.</li>
+      <li><a href="./lib-ml.html">ML</a> — autograd tensors as <code>cljrs.ml</code>.</li>
+      <li><a href="./lib-js.html">JS</a> — wasm-only DOM/event/fetch/storage as <code>cljrs.js</code>.</li>
+      <li><a href="./lib-ui.html">UI</a> — Preact-backed mount/hydrate as <code>cljrs.ui</code>.</li>
+    </ul>
+
+    <h3>Sanity-check the dispatcher</h3>
+    <p>
+      The browser Repl below has all of the above already loaded. The
+      example confirms three crates resolve and their tags round-trip
+      cleanly:
+    </p>
+    <div class="run-example" data-stateful="1">
+      <textarea spellcheck="false" style="min-height:160px">(let [t (ml/tensor [[1.0 2.0]])
+      w (cljrs.physics.d2/world {:gravity [0.0 -9.8]})]
+  {:tensor-shape (ml/shape t)
+   :world-bodies (cljrs.physics.d2/body-count w)
+   :now-ms       (js/now)})</textarea>
+      <div class="repl-toolbar">
+        <span style="font-size:0.8rem;color:var(--fg-dim)">three crates, one Repl</span>
+        <button>Run</button>
+      </div>
+      <div class="repl-out">click Run</div>
+    </div>
+
+    <h4>Inspect an opaque</h4>
+    <div class="run-example" data-stateful="1">
+      <textarea spellcheck="false" style="min-height:120px">(let [t (ml/tensor [[1.0 2.0 3.0]])]
+  ;; Opaque tags are visible via type — the value itself is opaque.
+  (str t))</textarea>
+      <div class="repl-toolbar">
+        <span style="font-size:0.8rem;color:var(--fg-dim)">opaques print as #&lt;tag&gt;</span>
+        <button>Run</button>
+      </div>
+      <div class="repl-out">click Run</div>
+    </div>
+  </main>
+  <script type="module">
+    import { mountChrome } from "./_layout.js";
+    import { wireAll } from "./_runnable.js";
+    mountChrome("./lib-rust.html");
+    wireAll();
+  </script>
+</body>
+</html>

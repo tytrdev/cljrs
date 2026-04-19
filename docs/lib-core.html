@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>cljrs.core · Library</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main>
+    <h2>cljrs.core</h2>
+    <p>
+      The base namespace, mounted by <code>install_prelude</code> at
+      startup. Roughly 125 host builtins (Rust, see
+      <code>src/builtins.rs</code>) plus a small layer of cljrs-authored
+      macros and seq helpers (see <code>src/core.clj</code>). It is a
+      faithful subset of <code>clojure.core</code> — same names, same
+      argument order, same nil-punning. <code>str/*</code> is also
+      reachable as <code>clojure.string/*</code>.
+    </p>
+    <p>
+      Design goal: anything you reach for to write small Clojure
+      should already exist. Anything that needs a JVM (reflection,
+      <code>proxy</code>, <code>agent</code>) does not.
+    </p>
+
+    <h3>Arithmetic & predicates</h3>
+    <ul>
+      <li><code>(+ &amp; xs)</code> · <code>(- &amp; xs)</code> · <code>(* &amp; xs)</code> · <code>(/ &amp; xs)</code> — variadic; promote to float on division or float arg.</li>
+      <li><code>(= a b ...)</code> · <code>(&lt; a b ...)</code> · <code>(&lt;= ...)</code> · <code>(&gt; ...)</code> · <code>(&gt;= ...)</code></li>
+      <li><code>(inc x)</code> · <code>(dec x)</code> · <code>(mod a b)</code> · <code>(rem a b)</code> · <code>(quot a b)</code></li>
+      <li><code>(min &amp; xs)</code> · <code>(max &amp; xs)</code> · <code>(abs x)</code></li>
+      <li><code>(zero? x)</code> · <code>(pos? x)</code> · <code>(neg? x)</code> · <code>(even? x)</code> · <code>(odd? x)</code></li>
+      <li>Type predicates: <code>nil? string? number? integer? float? map? vector? set? list? seq? coll? keyword? symbol? fn? boolean? true? false? some?</code></li>
+    </ul>
+
+    <h3>Collections</h3>
+    <ul>
+      <li><code>(count c)</code> · <code>(empty? c)</code> · <code>(not-empty c)</code></li>
+      <li><code>(first c)</code> · <code>(rest c)</code> · <code>(second c)</code> · <code>(last c)</code> · <code>(nth c i)</code></li>
+      <li><code>(cons x c)</code> · <code>(conj c &amp; xs)</code> · <code>(concat &amp; cs)</code></li>
+      <li><code>(list &amp; xs)</code> · <code>(vector &amp; xs)</code> · <code>(vec c)</code> · <code>(set c)</code> · <code>(hash-map &amp; kvs)</code> · <code>(hash-set &amp; xs)</code></li>
+      <li><code>(get m k)</code> · <code>(get-in m ks)</code> · <code>(contains? m k)</code> · <code>(find m k)</code></li>
+      <li><code>(assoc m k v)</code> · <code>(assoc-in m ks v)</code> · <code>(dissoc m &amp; ks)</code> · <code>(update m k f)</code> · <code>(update-in m ks f)</code></li>
+      <li><code>(keys m)</code> · <code>(vals m)</code> · <code>(merge &amp; ms)</code> · <code>(select-keys m ks)</code> · <code>(zipmap ks vs)</code> · <code>(update-keys m f)</code> · <code>(update-vals m f)</code></li>
+      <li><code>(reverse c)</code> · <code>(sort c)</code> · <code>(distinct c)</code> · <code>(frequencies c)</code> · <code>(group-by f c)</code></li>
+      <li>Note: collections are persistent (<code>imbl</code>); mutation returns a new value, no <code>transient</code> yet.</li>
+    </ul>
+
+    <h3>Sequence ops (lazy + strict)</h3>
+    <ul>
+      <li><code>(map f c)</code> · <code>(filter pred c)</code> · <code>(remove pred c)</code> · <code>(reduce f c)</code> · <code>(reduce f init c)</code> · <code>(reduce-kv f init m)</code></li>
+      <li><code>(mapv f c)</code> · <code>(filterv pred c)</code> — eager + return vector.</li>
+      <li><code>(mapcat f c)</code> · <code>(map-indexed f c)</code> · <code>(keep f c)</code> · <code>(keep-indexed f c)</code></li>
+      <li><code>(take n c)</code> · <code>(drop n c)</code> · <code>(take-while pred c)</code> · <code>(drop-while pred c)</code> · <code>(take-nth n c)</code></li>
+      <li><code>(partition n c)</code> · <code>(partition-all n c)</code> · <code>(interleave &amp; cs)</code> · <code>(interpose sep c)</code> · <code>(dedupe c)</code></li>
+      <li><code>(range)</code> · <code>(range n)</code> · <code>(range a b)</code> · <code>(range a b step)</code> · <code>(repeat x)</code> · <code>(repeat n x)</code> · <code>(iterate f x)</code> · <code>(cycle c)</code></li>
+      <li><code>(seq c)</code> · <code>(flatten c)</code> · <code>(into to from)</code> · <code>(transduce xf f init c)</code></li>
+      <li>Gotcha: infinite seqs (<code>iterate</code>, <code>cycle</code>, <code>repeatedly</code>) require a bounded consumer like <code>take</code> — printing one will hang.</li>
+    </ul>
+
+    <h3>Functional helpers</h3>
+    <ul>
+      <li><code>(comp &amp; fs)</code> · <code>(partial f &amp; args)</code> · <code>(complement pred)</code> · <code>(juxt &amp; fs)</code> · <code>(constantly x)</code> · <code>(identity x)</code></li>
+      <li><code>(apply f &amp; args last-coll)</code></li>
+      <li><code>(some pred c)</code> · <code>(every? pred c)</code> · <code>(max-key f &amp; xs)</code> · <code>(min-key f &amp; xs)</code></li>
+      <li><code>(reduced x)</code> · <code>(reduced? x)</code> · <code>(unreduced x)</code> — early-exit signal for <code>reduce</code>.</li>
+    </ul>
+
+    <h3>Strings & keywords</h3>
+    <ul>
+      <li><code>(str &amp; xs)</code> · <code>(subs s a b?)</code> · <code>(name k)</code> · <code>(keyword s)</code> · <code>(symbol s)</code></li>
+      <li><code>str/split</code> · <code>str/join</code> · <code>str/upper-case</code> · <code>str/lower-case</code> · <code>str/replace</code> · <code>str/trim</code></li>
+      <li><code>str/starts-with?</code> · <code>str/ends-with?</code> · <code>str/includes?</code> · <code>str/blank?</code> · <code>str/index-of</code> · <code>str/last-index-of</code></li>
+      <li>All <code>str/*</code> are also bound at <code>clojure.string/*</code>.</li>
+    </ul>
+
+    <h3>Math</h3>
+    <ul>
+      <li><code>(sqrt x)</code> · <code>(pow b e)</code> · <code>(exp x)</code> · <code>(log x)</code></li>
+      <li><code>(sin x)</code> · <code>(cos x)</code> · <code>(tan x)</code></li>
+      <li><code>(floor x)</code> · <code>(ceil x)</code> · <code>(round x)</code></li>
+      <li><code>(int x)</code> · <code>(long x)</code> · <code>(double x)</code> · <code>(float x)</code> · <code>Math/PI</code></li>
+    </ul>
+
+    <h3>Atoms & state</h3>
+    <ul>
+      <li><code>(atom x)</code> · <code>(deref a)</code> / <code>@a</code> · <code>(reset! a x)</code> · <code>(swap! a f &amp; args)</code> · <code>(compare-and-set! a old new)</code> · <code>(atom? x)</code></li>
+      <li>Note: no <code>add-watch</code>; the UI layer uses a thunk-based re-render pattern instead.</li>
+    </ul>
+
+    <h3>Errors & I/O</h3>
+    <ul>
+      <li><code>(throw x)</code> · <code>(ex-info msg data)</code> · <code>(ex-message e)</code> · <code>(ex-data e)</code> · standard <code>try</code>/<code>catch</code>/<code>finally</code>.</li>
+      <li><code>(println &amp; xs)</code> · <code>(print &amp; xs)</code> · <code>(pr-str &amp; xs)</code> · <code>(println-str &amp; xs)</code> · <code>(print-str &amp; xs)</code></li>
+      <li><code>(slurp path)</code> · <code>(spit path s)</code> — native only; in wasm they raise.</li>
+      <li><code>(read-string s)</code> — invoke the reader from data.</li>
+    </ul>
+
+    <h3>Regex</h3>
+    <ul>
+      <li><code>(re-pattern s)</code> · <code>(re-find re s)</code> · <code>(re-matches re s)</code> · <code>(re-seq re s)</code></li>
+      <li>Backed by Rust <code>regex</code>; PCRE-style features that aren't in <code>regex</code> (lookahead, backrefs) are not supported.</li>
+    </ul>
+
+    <h3>Macros & control flow</h3>
+    <ul>
+      <li>Threading: <code>-&gt;</code> · <code>-&gt;&gt;</code> · <code>some-&gt;</code> · <code>some-&gt;&gt;</code> · <code>cond-&gt;</code> · <code>cond-&gt;&gt;</code> · <code>as-&gt;</code></li>
+      <li>Conditionals: <code>when</code> · <code>when-not</code> · <code>cond</code> · <code>if-let</code> · <code>when-let</code> · <code>and</code> · <code>or</code></li>
+      <li>Iteration: <code>dotimes</code> · <code>doseq</code> · <code>for</code> (with <code>:when</code> / <code>:while</code> / <code>:let</code>)</li>
+      <li>Records & protocols: <code>defrecord</code> · <code>defprotocol</code> — interpreted, no JVM-style polymorphism dispatch table.</li>
+      <li>Lazy seqs: <code>lazy-seq</code> · <code>lazy-cat</code> · <code>realized?</code> · <code>force-seq</code></li>
+      <li>Misc: <code>defn-</code> (private fn) · <code>gensym</code></li>
+    </ul>
+
+    <h3>Examples</h3>
+    <p>Each block is editable; results print below. State persists within a single block.</p>
+
+    <h4>Pipelines</h4>
+    <div class="run-example" data-stateful="1">
+      <textarea spellcheck="false" style="min-height:140px">(->> (range 1 21)
+     (map (fn [n] {:n n :sq (* n n)}))
+     (filter (fn [m] (odd? (:n m))))
+     (map :sq)
+     (reduce +))</textarea>
+      <div class="repl-toolbar">
+        <span style="font-size:0.8rem;color:var(--fg-dim)">&#8984;&#8629; to run</span>
+        <button>Run</button>
+      </div>
+      <div class="repl-out">click Run</div>
+    </div>
+
+    <h4>Atoms + swap!</h4>
+    <div class="run-example" data-stateful="1">
+      <textarea spellcheck="false" style="min-height:160px">(def !log (atom []))
+(defn log! [x] (swap! !log conj x) x)
+(log! :hello)
+(log! :world)
+@!log</textarea>
+      <div class="repl-toolbar">
+        <span style="font-size:0.8rem;color:var(--fg-dim)">re-Run to append more</span>
+        <button>Run</button>
+      </div>
+      <div class="repl-out">click Run</div>
+    </div>
+
+    <h4>Lazy iterate + take</h4>
+    <div class="run-example" data-stateful="1">
+      <textarea spellcheck="false" style="min-height:140px">(defn fibs []
+  (map first
+       (iterate (fn [[a b]] [b (+ a b)]) [0 1])))
+(take 12 (fibs))</textarea>
+      <div class="repl-toolbar">
+        <span style="font-size:0.8rem;color:var(--fg-dim)">infinite seq, bounded by take</span>
+        <button>Run</button>
+      </div>
+      <div class="repl-out">click Run</div>
+    </div>
+
+    <h4>String + regex</h4>
+    <div class="run-example" data-stateful="1">
+      <textarea spellcheck="false" style="min-height:140px">(let [s "the rain in spain falls mainly on the plain"]
+  {:words   (count (str/split s " "))
+   :ains    (re-seq (re-pattern "\\w+ain") s)
+   :shouted (str/upper-case s)})</textarea>
+      <div class="repl-toolbar">
+        <span style="font-size:0.8rem;color:var(--fg-dim)">cljrs str + regex</span>
+        <button>Run</button>
+      </div>
+      <div class="repl-out">click Run</div>
+    </div>
+  </main>
+  <script type="module">
+    import { mountChrome } from "./_layout.js";
+    import { wireAll } from "./_runnable.js";
+    mountChrome("./lib-core.html");
+    wireAll();
+  </script>
+</body>
+</html>

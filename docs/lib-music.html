@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>cljrs.music · Library</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main>
+    <h2>cljrs.music</h2>
+    <p>
+      A small music-theory toolkit, authored entirely in cljrs and
+      bundled into the prelude (see <code>src/cljrs_music.clj</code>).
+      All functions are pure data → data — no audio, no scheduling.
+      The <a href="./sequencer.html">Sequencer</a> page reads the
+      vectors out of these helpers and plays them through Web Audio.
+    </p>
+
+    <h3>MIDI &amp; tuning</h3>
+    <ul>
+      <li><code>(cljrs.music/midi-&gt;hz n)</code> — MIDI int → Hz, A4 = 69 = 440.</li>
+      <li><code>(cljrs.music/hz-&gt;midi f)</code> — inverse; returns f64 (no rounding).</li>
+    </ul>
+
+    <h3>Note keywords</h3>
+    <ul>
+      <li><code>(cljrs.music/note kw)</code> — parse a keyword like <code>:c4</code>, <code>:a#3</code>, <code>:eb5</code> into a MIDI int.</li>
+      <li>Form: letter, optional <code>#</code> or <code>b</code>, then octave digits. Bare <code>:c</code> defaults to octave 4.</li>
+      <li>Throws <code>ex-info</code> on unknown pitch class.</li>
+    </ul>
+
+    <h3>Scales</h3>
+    <ul>
+      <li><code>(cljrs.music/scale root mode)</code> — return a vector of MIDI ints. <code>root</code> is a MIDI int; <code>mode</code> is a keyword.</li>
+      <li>Modes: <code>:major :minor :aeolian :dorian :phrygian :lydian :mixolydian :locrian :pentatonic :blues</code>.</li>
+      <li>Includes the octave (8 notes for 7-note scales) so loops can wrap cleanly.</li>
+    </ul>
+
+    <h3>Chords</h3>
+    <ul>
+      <li><code>(cljrs.music/chord root quality)</code> — root + interval table → MIDI vector.</li>
+      <li>Qualities: <code>:maj :min :dim :aug :sus2 :sus4 :7 :maj7 :min7 :dim7</code>.</li>
+    </ul>
+
+    <h3>Progressions</h3>
+    <ul>
+      <li><code>(cljrs.music/progression key qualities)</code> — diatonic-major degree resolution. <code>qualities</code> is a vector of <code>[degree quality]</code> pairs; degrees are 1–7.</li>
+      <li>Returns a vector of chords (each itself a vector of MIDI ints).</li>
+    </ul>
+
+    <h3>Manipulation</h3>
+    <ul>
+      <li><code>(cljrs.music/transpose notes semitones)</code> — add an offset to every note.</li>
+      <li><code>(cljrs.music/arpeggiate chord-notes pattern)</code> — reorder a chord into a melodic pattern. Patterns: <code>:up :down :updown :random</code>. <code>:random</code> is deterministic (cljrs has no <code>rand</code> yet) — it cycles a fixed permutation.</li>
+    </ul>
+
+    <h3>Examples</h3>
+
+    <h4>From note keywords to Hz</h4>
+    <div class="run-example" data-stateful="1">
+      <textarea spellcheck="false" style="min-height:140px">(let [notes [:c4 :e4 :g4 :c5]
+      midis (mapv cljrs.music/note notes)
+      hzs   (mapv cljrs.music/midi->hz midis)]
+  {:midi midis :hz hzs})</textarea>
+      <div class="repl-toolbar">
+        <span style="font-size:0.8rem;color:var(--fg-dim)">C major triad + octave</span>
+        <button>Run</button>
+      </div>
+      <div class="repl-out">click Run</div>
+    </div>
+
+    <h4>Scale + arpeggio</h4>
+    <div class="run-example" data-stateful="1">
+      <textarea spellcheck="false" style="min-height:200px">(let [root  (cljrs.music/note :a3)
+      a-min (cljrs.music/scale root :minor)
+      a-7   (cljrs.music/chord root :min7)]
+  {:scale       a-min
+   :chord       a-7
+   :arp-up      (cljrs.music/arpeggiate a-7 :up)
+   :arp-updown  (cljrs.music/arpeggiate a-7 :updown)
+   :transposed  (cljrs.music/transpose a-7 12)})</textarea>
+      <div class="repl-toolbar">
+        <span style="font-size:0.8rem;color:var(--fg-dim)">data only — no audio</span>
+        <button>Run</button>
+      </div>
+      <div class="repl-out">click Run</div>
+    </div>
+
+    <h4>I-vi-IV-V in C</h4>
+    <div class="run-example" data-stateful="1">
+      <textarea spellcheck="false" style="min-height:140px">(cljrs.music/progression
+  (cljrs.music/note :c4)
+  [[1 :maj] [6 :min] [4 :maj] [5 :7]])</textarea>
+      <div class="repl-toolbar">
+        <span style="font-size:0.8rem;color:var(--fg-dim)">classic doo-wop</span>
+        <button>Run</button>
+      </div>
+      <div class="repl-out">click Run</div>
+    </div>
+
+    <h3>Audio</h3>
+    <p>
+      Synthesis lives in the demo pages (<a href="./synth.html">Synth</a>,
+      <a href="./sequencer.html">Sequencer</a>) — the Web Audio glue is
+      JS, not cljrs. The cljrs side just produces frequency vectors
+      and step patterns; the JS side schedules
+      <code>OscillatorNode</code>s on an <code>AudioContext</code>. If
+      you'd like a richer audio API exposed under a
+      <code>cljrs.audio</code> namespace, the right pattern is the
+      <a href="./lib-js.html">cljrs.js bridge</a> — wrap
+      <code>AudioContext</code> as an opaque, expose a few mutators.
+    </p>
+  </main>
+  <script type="module">
+    import { mountChrome } from "./_layout.js";
+    import { wireAll } from "./_runnable.js";
+    mountChrome("./lib-music.html");
+    wireAll();
+  </script>
+</body>
+</html>

@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>cljrs.ml · Library</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main>
+    <h2>cljrs.ml</h2>
+    <p>
+      A small, deliberate CPU autograd built on dense f32 matrices,
+      exposed to cljrs through opaque tensor handles
+      (<code>Value::Opaque{tag = "ml/tensor"}</code>). The crate lives
+      at <code>crates/cljrs-ml</code>; it's the canonical example of
+      "build a numeric library in Rust, expose it as cljrs builtins."
+    </p>
+    <p>
+      Design goals: enough surface area to train a small MLP from a
+      Repl, no runtime dependencies (no BLAS, no CUDA), deterministic
+      seeds so a session reruns identically. Tensors are 2D row-major;
+      use shape <code>(1 n)</code> for vectors. Backward is reverse-mode
+      autodiff over the Tensor graph; <code>(ml/sgd-step! params lr)</code>
+      mutates each <code>(ml/param ...)</code> in place.
+    </p>
+
+    <h3>Construction</h3>
+    <ul>
+      <li><code>(ml/tensor data)</code> — wrap a 1-D or 2-D vector of numbers; shape inferred.</li>
+      <li><code>(ml/tensor rows cols data)</code> — explicit shape; <code>data</code> is a flat or nested vector totalling <code>rows*cols</code> numbers.</li>
+      <li><code>(ml/param data)</code> · <code>(ml/param rows cols data)</code> — same as <code>tensor</code> but flagged as a learnable parameter. Only params get updated by <code>sgd-step!</code>.</li>
+      <li><code>(ml/randn rows cols)</code> · <code>(ml/randn rows cols stddev)</code> — Box-Muller Gaussian init from a deterministic xorshift RNG. Always returns a param.</li>
+      <li><code>(ml/zeros rows cols)</code> — zero-initialized param.</li>
+    </ul>
+
+    <h3>Ops (build the graph)</h3>
+    <ul>
+      <li><code>(ml/matmul a b)</code> — matrix multiply; inner dims must match.</li>
+      <li><code>(ml/add a b)</code> — element-wise; shapes must match.</li>
+      <li><code>(ml/sub a b)</code> — element-wise.</li>
+      <li><code>(ml/add-bias a b)</code> — add a <code>(1 cols)</code> bias to every row of <code>a</code>.</li>
+      <li><code>(ml/relu x)</code> · <code>(ml/tanh x)</code> — element-wise nonlinearities.</li>
+      <li><code>(ml/mse pred target)</code> — mean squared error; reduces to a <code>(1 1)</code> tensor.</li>
+    </ul>
+
+    <h3>Train</h3>
+    <ul>
+      <li><code>(ml/backward! loss)</code> — reverse-mode autodiff over the graph rooted at <code>loss</code>. Accumulates grads on every reachable param.</li>
+      <li><code>(ml/sgd-step! params lr)</code> — for each param: <code>w &lt;- w - lr*grad</code>, then zero the grad.</li>
+      <li><code>(ml/set-data! tensor data)</code> — overwrite a tensor's buffer in place. Use to stream new minibatch inputs without rebuilding the graph wrapper.</li>
+    </ul>
+
+    <h3>Inspect</h3>
+    <ul>
+      <li><code>(ml/scalar t)</code> — first element as a number; convenient for losses.</li>
+      <li><code>(ml/tolist t)</code> — flat vector of f32s (boxed as cljrs floats).</li>
+      <li><code>(ml/shape t)</code> — <code>[rows cols]</code>.</li>
+    </ul>
+
+    <h3>Examples</h3>
+
+    <h4>Single matmul + relu</h4>
+    <div class="run-example" data-stateful="1">
+      <textarea spellcheck="false" style="min-height:160px">(def x (ml/tensor [[1.0 2.0 3.0]
+                   [4.0 5.0 6.0]]))
+(def w (ml/tensor [[ 0.5 -0.5]
+                   [ 1.0  0.0]
+                   [-1.0  1.0]]))
+(def y (ml/relu (ml/matmul x w)))
+{:shape (ml/shape y)
+ :flat  (ml/tolist y)}</textarea>
+      <div class="repl-toolbar">
+        <span style="font-size:0.8rem;color:var(--fg-dim)">forward pass only</span>
+        <button>Run</button>
+      </div>
+      <div class="repl-out">click Run</div>
+    </div>
+
+    <h4>One step of regression</h4>
+    <p>
+      Fit a tiny linear model
+      <code>y = 2x + 1</code>. Each Run takes one SGD step; re-Run a
+      few times and watch the loss fall.
+    </p>
+    <div class="run-example" data-stateful="1">
+      <textarea spellcheck="false" style="min-height:240px">(defonce w (ml/param [[0.0]]))
+(defonce b (ml/param [[0.0]]))
+(defonce x (ml/tensor [[1.0] [2.0] [3.0] [4.0]]))
+(defonce t (ml/tensor [[3.0] [5.0] [7.0] [9.0]]))
+
+(let [pred (ml/add-bias (ml/matmul x w) b)
+      loss (ml/mse pred t)]
+  (ml/backward! loss)
+  (ml/sgd-step! [w b] 0.05)
+  {:loss (ml/scalar loss)
+   :w    (ml/tolist w)
+   :b    (ml/tolist b)})</textarea>
+      <div class="repl-toolbar">
+        <span style="font-size:0.8rem;color:var(--fg-dim)">re-Run for more SGD steps</span>
+        <button>Run</button>
+      </div>
+      <div class="repl-out">click Run</div>
+    </div>
+
+    <h4>Two-layer MLP forward</h4>
+    <div class="run-example" data-stateful="1">
+      <textarea spellcheck="false" style="min-height:200px">(def x  (ml/tensor [[0.5 -1.0 2.0]]))
+(def w1 (ml/randn 3 4 0.3))
+(def b1 (ml/zeros 1 4))
+(def w2 (ml/randn 4 1 0.3))
+(def b2 (ml/zeros 1 1))
+
+(defn forward [x]
+  (-> x
+      (ml/matmul w1) (ml/add-bias b1) ml/tanh
+      (ml/matmul w2) (ml/add-bias b2)))
+
+(ml/tolist (forward x))</textarea>
+      <div class="repl-toolbar">
+        <span style="font-size:0.8rem;color:var(--fg-dim)">deterministic randn — same numbers each session</span>
+        <button>Run</button>
+      </div>
+      <div class="repl-out">click Run</div>
+    </div>
+  </main>
+  <script type="module">
+    import { mountChrome } from "./_layout.js";
+    import { wireAll } from "./_runnable.js";
+    mountChrome("./lib-ml.html");
+    wireAll();
+  </script>
+</body>
+</html>

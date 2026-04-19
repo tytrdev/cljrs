@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Library · cljrs</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main>
+    <h2>Library reference</h2>
+    <p>
+      Grouped reference for everything that ships with cljrs — the core
+      Clojure stdlib, the GPU shader stdlib, the ML autograd toolkit,
+      browser-side interop, the hiccup UI layer, the music-theory toolkit,
+      and the Rust-interop story. Each page mixes signature-level
+      documentation with editable, runnable examples that execute in
+      the same wasm Repl that powers <a href="./repl.html">REPL</a>.
+    </p>
+    <p>
+      For a flat coverage matrix (everything implemented, vs. Clojure
+      JVM), see <a href="./coverage.html">Coverage</a>. This section is
+      meant for browsing and learning by example, more like rustdoc
+      than a feature checklist.
+    </p>
+
+    <h3>Modules</h3>
+    <table>
+      <thead>
+        <tr><th>Page</th><th>Namespace</th><th>What it covers</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><a href="./lib-core.html">core</a></td>
+          <td><code>cljrs.core</code></td>
+          <td>Arithmetic, collections, sequences, control flow, atoms, regex, math.</td>
+        </tr>
+        <tr>
+          <td><a href="./lib-shader.html">shader</a></td>
+          <td><code>demo_gpu/stdlib.clj</code></td>
+          <td>Macro stdlib for <code>defn-gpu-pixel</code> kernels: noise, SDFs, color packing.</td>
+        </tr>
+        <tr>
+          <td><a href="./lib-ml.html">ml</a></td>
+          <td><code>cljrs.ml</code></td>
+          <td>Tensor autograd: matmul, relu, mse, backward, sgd-step.</td>
+        </tr>
+        <tr>
+          <td><a href="./lib-js.html">js</a></td>
+          <td><code>cljrs.js</code></td>
+          <td>Browser DOM, events, localStorage, fetch. wasm-only.</td>
+        </tr>
+        <tr>
+          <td><a href="./lib-ui.html">ui</a></td>
+          <td><code>cljrs.ui</code></td>
+          <td>Hiccup → HTML, mount/hydrate, prerender story.</td>
+        </tr>
+        <tr>
+          <td><a href="./lib-music.html">music</a></td>
+          <td><code>cljrs.music</code></td>
+          <td>Note parsing, scales, chords, progressions, arpeggios.</td>
+        </tr>
+        <tr>
+          <td><a href="./lib-rust.html">rust interop</a></td>
+          <td>(any)</td>
+          <td>Opaque handles, install pattern, bindgen, adding a new crate.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>Try it</h3>
+    <p>
+      Every <code>lib-*</code> page has at least two editable examples
+      that run in your browser. Hit <kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Enter</kbd>
+      or click <em>Run</em>. State persists within one example block.
+    </p>
+
+    <div class="run-example">
+      <textarea spellcheck="false" style="min-height:120px">(->> (range 10)
+     (map (fn [x] (* x x)))
+     (filter odd?)
+     (reduce +))</textarea>
+      <div class="repl-toolbar">
+        <span style="font-size:0.8rem;color:var(--fg-dim)">first run loads ~1.5MB wasm</span>
+        <button>Run</button>
+      </div>
+      <div class="repl-out">click Run</div>
+    </div>
+  </main>
+  <script type="module">
+    import { mountChrome } from "./_layout.js";
+    import { wireAll } from "./_runnable.js";
+    mountChrome("./library.html");
+    wireAll();
+  </script>
+</body>
+</html>

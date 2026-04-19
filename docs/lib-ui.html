@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>cljrs.ui · Library</title>
+  <link rel="stylesheet" href="./style.css">
+  <style>
+    #lib-ui-root {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.75rem 1rem;
+      background: #0b0d14;
+      margin: 0.6rem 0;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h2>cljrs.ui</h2>
+    <p>
+      A tiny hiccup-style UI library, authored in cljrs and bundled
+      into the prelude. Two halves:
+    </p>
+    <ol>
+      <li>
+        A pure <code>render-html</code> that converts hiccup vectors to
+        an HTML string. Used at build time by <code>src/bin/prerender.rs</code>
+        so docs pages ship SEO-visible HTML before any JS runs.
+      </li>
+      <li>
+        <code>mount!</code> / <code>hydrate!</code> / <code>reactive!</code>
+        — wasm-only helpers that dispatch to host builtins
+        (<code>__ui-mount</code>, <code>__ui-hydrate</code>) installed by
+        <code>crates/cljrs-wasm/src/ui_bridge.rs</code>. Backed by a
+        small Preact runtime; the cljrs side just produces hiccup.
+      </li>
+    </ol>
+
+    <h3>Hiccup shape</h3>
+    <pre><code>[:div {:class "x"}
+  [:button {:on-click f} "go"]
+  [:span "hi"]]</code></pre>
+    <ul>
+      <li>First element is a keyword tag.</li>
+      <li>Optional second element is a props map — including <code>:on-click</code>, <code>:on-input</code>, etc., which take cljrs fns.</li>
+      <li>Remaining elements are children. Strings/numbers are stringified+escaped; <code>nil</code> children are skipped; nested vectors recurse.</li>
+    </ul>
+
+    <h3>Pure render</h3>
+    <ul>
+      <li><code>(cljrs.ui/h tag props &amp; children)</code> — convenience constructor; identical to writing the literal vector.</li>
+      <li><code>(cljrs.ui/render-html hv)</code> — hiccup → HTML string. Pure, build-time-safe, no DOM access. Escapes attrs and text. Skips event handlers (they only matter at hydrate time).</li>
+    </ul>
+
+    <h3>Mount & hydrate (wasm only)</h3>
+    <ul>
+      <li><code>(cljrs.ui/mount! root-id hiccup)</code> — diff-replace the contents of <code>#root-id</code> with the rendered hiccup. Wires event handlers.</li>
+      <li><code>(cljrs.ui/hydrate! root-id hiccup)</code> — attach event handlers to existing pre-rendered DOM without replacing nodes. Pair with <code>render-html</code> at build time for zero-flash first paint.</li>
+      <li><code>(cljrs.ui/reactive! root-id state-atom view-fn)</code> — initial paint + return a 0-arg re-render thunk you call after each state mutation. cljrs has no <code>add-watch</code>, so the thunk pattern keeps this layer leaf-shaped.</li>
+    </ul>
+
+    <h3>Examples</h3>
+
+    <h4>Pure render to a string</h4>
+    <div class="run-example" data-stateful="1">
+      <textarea spellcheck="false" style="min-height:160px">(cljrs.ui/render-html
+  [:section {:class "card"}
+   [:h3 "Hello"]
+   [:p "Items:"]
+   [:ul (mapv (fn [x] [:li (str x)]) [:a :b :c])]])</textarea>
+      <div class="repl-toolbar">
+        <span style="font-size:0.8rem;color:var(--fg-dim)">pure data → string</span>
+        <button>Run</button>
+      </div>
+      <div class="repl-out">click Run</div>
+    </div>
+
+    <h4>Live counter</h4>
+    <p>
+      Mount a counter into <code>#lib-ui-root</code> below. Each click
+      mutates an atom and re-mounts. State persists across Run clicks
+      within this block (the atom is <code>defonce</code>'d).
+    </p>
+    <div id="lib-ui-root"><em>not mounted yet — click Run</em></div>
+    <div class="run-example" data-stateful="1">
+      <textarea spellcheck="false" style="min-height:280px">(defonce !s (atom {:n 0}))
+
+(defn view [s]
+  [:div
+   [:p "Count: " [:strong (str (get s :n))]]
+   [:button
+    {:on-click (fn []
+                 (cljrs.ui/mount! "lib-ui-root"
+                                  (view (swap! !s update :n inc))))}
+    "+"]
+   " "
+   [:button
+    {:on-click (fn []
+                 (cljrs.ui/mount! "lib-ui-root"
+                                  (view (swap! !s update :n dec))))}
+    "−"]
+   " "
+   [:button
+    {:on-click (fn []
+                 (cljrs.ui/mount! "lib-ui-root"
+                                  (view (reset! !s {:n 0}))))}
+    "reset"]])
+
+(cljrs.ui/mount! "lib-ui-root" (view @!s))
+:mounted</textarea>
+      <div class="repl-toolbar">
+        <span style="font-size:0.8rem;color:var(--fg-dim)">click the buttons after Run</span>
+        <button>Run</button>
+      </div>
+      <div class="repl-out">click Run</div>
+    </div>
+
+    <h4>reactive! thunk</h4>
+    <div class="run-example" data-stateful="1">
+      <textarea spellcheck="false" style="min-height:240px">(defonce !todos (atom ["learn cljrs" "ship docs"]))
+
+(defn todo-view [items]
+  [:div
+   [:h4 "Todos"]
+   [:ul (mapv (fn [t] [:li t]) items)]
+   [:button
+    {:on-click (fn []
+                 (swap! !todos conj (str "item " (count @!todos)))
+                 (rerender))}
+    "add"]])
+
+(def rerender
+  (cljrs.ui/reactive! "lib-ui-root" !todos todo-view))
+:wired</textarea>
+      <div class="repl-toolbar">
+        <span style="font-size:0.8rem;color:var(--fg-dim)">overrides the counter mount above</span>
+        <button>Run</button>
+      </div>
+      <div class="repl-out">click Run</div>
+    </div>
+
+    <h3>Build-time prerender</h3>
+    <p>
+      <code>src/bin/prerender.rs</code> evaluates a <code>.cljrs</code>
+      file in a native cljrs and calls its <code>(prerender)</code>
+      function, which must return hiccup. The binary stringifies the
+      result through <code>render-html</code> and
+      <code>docs/build-ui.sh</code> injects it into the page between
+      <code>&lt;!--ssr--&gt;</code> markers. At page load, the same
+      module's <code>(boot)</code> runs <code>hydrate!</code> on the
+      already-painted DOM. <a href="./ui-demo.html">See ui-demo</a> for
+      the canonical end-to-end example.
+    </p>
+  </main>
+  <script type="module">
+    import { mountChrome } from "./_layout.js";
+    import { wireAll } from "./_runnable.js";
+    mountChrome("./lib-ui.html");
+    wireAll();
+  </script>
+</body>
+</html>

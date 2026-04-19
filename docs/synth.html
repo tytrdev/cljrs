@@ -53,6 +53,50 @@
       padding: 0 4px; border-radius: 3px;
       font-family: inherit;
     }
+
+    /* cljrs.ui-rendered control panel */
+    #cljrs-root {
+      border: 1px solid var(--border, #333);
+      border-radius: 4px;
+      padding: 0.5rem 0.75rem;
+      background: #0b0d14;
+    }
+    .sy-panel { display: flex; flex-direction: column; gap: 0.25rem; }
+    .sy-panel .sy-h {
+      margin: 0.5rem 0 0.15rem 0;
+      font-size: 0.75rem;
+      color: var(--fg-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .sy-srow {
+      display: grid;
+      grid-template-columns: 5rem 1fr 4rem;
+      gap: 0.5rem;
+      align-items: center;
+      font-size: 0.8rem;
+    }
+    .sy-srow .sy-slabel { color: var(--fg-dim); }
+    .sy-srow .sy-sval {
+      font-family: ui-monospace, monospace;
+      font-size: 0.75rem;
+      color: #ffcc60;
+      text-align: right;
+    }
+    .sy-srow input[type="range"] { width: 100%; }
+    .sy-wavebtn {
+      font-family: ui-monospace, monospace;
+      font-size: 0.75rem;
+      padding: 0.15rem 0.5rem;
+      background: #1d2029; color: #9abfff;
+      border: 1px solid #333; border-radius: 3px;
+      cursor: pointer;
+    }
+    .sy-foot {
+      margin: 0.4rem 0 0 0;
+      font-size: 0.7rem;
+      color: var(--fg-dim);
+    }
   </style>
 </head>
 <body>
@@ -65,21 +109,20 @@
       music as a first-class way to explore sound.
     </p>
     <p>
-      A single-voice subtractive synth whose patch parameters are
-      authored in Clojure. The DSP graph (oscillator → filter → gain →
-      output) is a fixed Web Audio graph in the browser; every edit to
-      the source re-reads the params and pushes them onto the audio
-      nodes with <code>setValueAtTime</code>. Hold <b>Alt</b> (or
-      <b>Ctrl</b>) and drag any number to scrub it live while the note
-      plays. The canvas on the left is an oscilloscope fed from an
-      <code>AnalyserNode</code>.
+      A single-voice subtractive synth whose patch parameters and
+      control panel UI are both authored in Clojure. The DSP graph
+      (oscillator → filter → gain → output) is a fixed Web Audio graph
+      in the browser; an animation-frame loop polls the cljrs-side
+      <code>(patch)</code> vector and pushes any changes onto the
+      audio nodes. The control panel below is rendered by
+      <code>cljrs.ui</code> — the editor source contains the entire
+      hiccup tree, so the same code that draws the sliders also
+      runs at build time to produce SEO-visible HTML.
     </p>
     <p class="sy-hint">
-      Why this split? The cljrs tree-walker is fast enough for
-      per-frame game logic but not for 48&thinsp;kHz per-sample DSP.
-      Patch-level params through Clojure, sample-level DSP in Web
-      Audio — the <code>call_floats</code> WASM hook is also in place
-      for a future all-Clojure buffer-render path.
+      Hold <b>Alt</b> (or <b>Ctrl</b>) and drag any number to scrub it
+      live. Editing the source re-evals it; <code>def</code>'d atoms
+      reset to source values, so source = preset / sliders = live tweak.
     </p>
 
     <div class="sy-wrap">
@@ -97,6 +140,11 @@
           </label>
           <span id="sy-meter">—</span>
         </div>
+
+        <!-- cljrs-prerender: ./synth.cljrs -->
+        <div id="cljrs-root"><!--ssr--><div class="sy-panel"><h4 class="sy-h">patch</h4><div class="sy-srow"><label class="sy-slabel">freq</label><input min="50.0" value="220.0" id="sy-s-freq" type="range" max="1200.0" step="1.0"/><span class="sy-sval">220.0</span></div><div class="sy-srow"><label class="sy-slabel">detune</label><input id="sy-s-detune" min="-50.0" step="0.1" value="7.0" type="range" max="50.0"/><span class="sy-sval">7.0</span></div><div class="sy-srow"><label class="sy-slabel">wave</label><button class="sy-wavebtn">sawtooth</button></div><h4 class="sy-h">filter</h4><div class="sy-srow"><label class="sy-slabel">cutoff</label><input type="range" min="60.0" id="sy-s-cutoff" max="6000.0" step="1.0" value="900.0"/><span class="sy-sval">900.0</span></div><div class="sy-srow"><label class="sy-slabel">Q</label><input id="sy-s-q" step="0.1" type="range" value="6.0" max="20.0" min="0.1"/><span class="sy-sval">6.0</span></div><h4 class="sy-h">envelope</h4><div class="sy-srow"><label class="sy-slabel">attack</label><input id="sy-s-attack" value="0.02" step="0.005" type="range" max="1.0" min="0.0"/><span class="sy-sval">0.02</span></div><div class="sy-srow"><label class="sy-slabel">decay</label><input id="sy-s-decay" max="1.0" type="range" step="0.005" min="0.0" value="0.15"/><span class="sy-sval">0.15</span></div><div class="sy-srow"><label class="sy-slabel">sustain</label><input value="0.6" min="0.0" step="0.01" type="range" id="sy-s-sustain" max="1.0"/><span class="sy-sval">0.6</span></div><div class="sy-srow"><label class="sy-slabel">release</label><input min="0.0" max="2.0" type="range" value="0.35" id="sy-s-release" step="0.01"/><span class="sy-sval">0.35</span></div><h4 class="sy-h">LFO → cutoff</h4><div class="sy-srow"><label class="sy-slabel">rate</label><input step="0.1" max="20.0" type="range" value="4.0" min="0.0" id="sy-s-lfor"/><span class="sy-sval">4.0</span></div><div class="sy-srow"><label class="sy-slabel">depth</label><input id="sy-s-lfod" max="2000.0" step="1.0" min="0.0" value="300.0" type="range"/><span class="sy-sval">300.0</span></div><h4 class="sy-h">amp</h4><div class="sy-srow"><label class="sy-slabel">gain</label><input max="1.0" min="0.0" id="sy-s-gain" type="range" value="0.5" step="0.01"/><span class="sy-sval">0.5</span></div><p class="sy-foot">Patch values stream into Web Audio every frame. Edit a slider
+     for a live tweak, edit the source for a permanent change.</p></div><!--/ssr--></div>
+
         <div class="repl" id="sy-editor-wrap">
           <div id="sy-editor" style="height:420px;width:100%"></div>
           <div class="repl-toolbar" style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
@@ -112,59 +160,17 @@
 
     <h3>What's happening</h3>
     <ul>
-      <li>Each <code>def</code> at the top of the source is a patch knob. Editing one and pausing for ~400 ms triggers <code>applySource</code>, which re-reads the knobs with <code>repl.eval_floats</code> and schedules new values on the matching Web Audio nodes.</li>
-      <li><code>WAVE-TYPE</code> is a keyword — JS reads its name via <code>repl.eval</code>, maps it to an <code>OscillatorNode.type</code>.</li>
-      <li><code>Trigger</code> re-runs the ADSR envelope by calling <code>(patch)</code> on the cljrs side, which returns the full flat param vector the JS graph consumes.</li>
-      <li>The new <code>repl.call_floats(name, Float32Array)</code> WASM method is what a full DSP-in-Clojure port would use — a per-callback fn dispatch that skips the reader.</li>
+      <li>The right-hand panel is rendered by <code>cljrs.ui</code> — the source defines a <code>(ui-tree)</code> hiccup vector and a <code>(boot)</code> entry point that calls <code>(cljrs.ui/mount! "cljrs-root" ...)</code>.</li>
+      <li>Each patch param is an <code>atom</code> declared with <code>def</code> at the top of the source. Slider <code>:on-input</code> handlers <code>reset!</code> the atom and re-mount; the editor's auto-apply re-binds them to the source values on every edit (so source = preset, sliders = live tweak).</li>
+      <li>JS owns the AudioContext and the audio graph. An rAF loop calls <code>repl.eval_floats("(patch)")</code> every frame; if the vector changed it pushes new values onto the existing nodes with <code>setValueAtTime</code>.</li>
+      <li><code>WAVE-TYPE</code> is a keyword atom toggled by clicking the wave button; JS reads its name via <code>repl.eval</code>.</li>
+      <li><code>Trigger</code> re-runs the ADSR envelope. The wave-button + Trigger demonstrate two cljrs-driven controls (one inside the cljrs.ui tree, one outside in plain JS toolbar).</li>
     </ul>
   </main>
   <script type="module">
     import { mountChrome, loadWasm, makeEditor, attachAltDragScrub, loadMonaco } from "./_layout.js";
+    import "./_ui.js";
     mountChrome();
-
-    const INITIAL_SOURCE = `;; ============================================================
-;; Synth — patch params live here. Edits apply on a short debounce.
-;;   hold Alt (or Ctrl) and drag any number to scrub it live
-;;   press "Trigger" to retrigger the envelope
-;; ============================================================
-
-;; --- pitch + wave ---
-(def FREQ        220.0)   ; base frequency, Hz
-(def DETUNE        7.0)   ; cents
-(def WAVE-TYPE   :sawtooth)   ; :sine :square :sawtooth :triangle
-
-;; --- filter (biquad low-pass) ---
-(def FILTER-CUTOFF  900.0)   ; Hz
-(def FILTER-Q         6.0)
-
-;; --- amp envelope (seconds) ---
-(def ATTACK   0.02)
-(def DECAY    0.15)
-(def SUSTAIN  0.6)    ; 0..1
-(def RELEASE  0.35)
-
-;; --- LFO modulating filter cutoff ---
-(def LFO-RATE    4.0)    ; Hz
-(def LFO-DEPTH 300.0)    ; Hz of cutoff swing
-
-;; --- voice gain ---
-(def GAIN 0.5)
-
-;; The JS side pulls this flat vector on every apply. Order is a
-;; contract with synth.html. Keep it stable.
-(defn patch []
-  [FREQ DETUNE
-   FILTER-CUTOFF FILTER-Q
-   ATTACK DECAY SUSTAIN RELEASE
-   LFO-RATE LFO-DEPTH
-   GAIN])
-
-;; Future hook: if/when the tree-walker can keep up, swap this in
-;; for a full Clojure DSP path via repl.call_floats.
-(defn render-buffer [_buf-idx _sr _n]
-  ;; placeholder — returns an empty vec today.
-  [])
-`;
 
     // --- elements --------------------------------------------------------
 
@@ -195,7 +201,7 @@
     }
 
     function waveTypeFromKeyword(s) {
-      // repl.eval("WAVE-TYPE") returns something like ":sawtooth"
+      // repl.eval("@WAVE-TYPE") returns something like ":sawtooth"
       const m = s.match(/^:(sine|square|sawtooth|triangle)$/);
       return m ? m[1] : "sawtooth";
     }
@@ -205,7 +211,7 @@
       if (!repl) return null;
       const floats = repl.eval_floats("(patch)");
       if (floats.length < 11) return null;
-      const waveStr = repl.eval("WAVE-TYPE").trim();
+      const waveStr = repl.eval("@WAVE-TYPE").trim();
       return {
         freq:         floats[0],
         detune:       floats[1],
@@ -222,12 +228,31 @@
       };
     }
 
+    // Cheap structural diff so we only push when something changed.
+    function patchChanged(a, b) {
+      if (!a || !b) return true;
+      const keys = ["freq","detune","filterCutoff","filterQ",
+                    "attack","decay","sustain","release",
+                    "lfoRate","lfoDepth","gain","wave"];
+      for (const k of keys) if (a[k] !== b[k]) return true;
+      return false;
+    }
+
     function applySource(src) {
       if (!repl) return false;
       setStatus("…");
+      // Reset env so def re-binds atoms to source values on every apply.
+      repl.reset();
       const result = repl.eval(src);
       if (result.startsWith("read error") || result.startsWith("eval error")) {
         setStatus(result, "err");
+        return false;
+      }
+      // Re-mount the cljrs.ui tree so sliders show the new source values.
+      const r2 = repl.eval("(boot)");
+      if (typeof r2 === "string" &&
+          (r2.startsWith("read error") || r2.startsWith("eval error"))) {
+        setStatus(r2, "err");
         return false;
       }
       setStatus("applied.", "ok");
@@ -357,11 +382,21 @@
         parseFloat(masterSlider.value), audio.currentTime);
     });
 
-    // --- oscilloscope ----------------------------------------------------
+    // --- oscilloscope + patch poll --------------------------------------
 
     const scopeBuf = new Float32Array(1024);
 
     function drawScope() {
+      // Each frame: poll the cljrs patch atoms; if the value vector
+      // changed (slider drag, scrubbed number, edit), push to audio.
+      try {
+        const p = readPatch();
+        if (p && patchChanged(p, currentPatch)) {
+          currentPatch = p;
+          if (voice) pushPatch(p, false);
+        }
+      } catch (_) { /* eval errors are surfaced by applySource */ }
+
       ctx.fillStyle = "#0b0d14";
       ctx.fillRect(0, 0, W, H);
       // grid
@@ -403,10 +438,17 @@
     // --- boot ------------------------------------------------------------
 
     (async () => {
+      const SRC_URL = "./synth.cljrs";
+      const initialSource = await (await fetch(SRC_URL)).text();
+
       const mod = await loadWasm();
       repl = new mod.Repl();
+
+      // Hydrate the prerendered control panel before user can interact.
+      // applySource does a full re-mount (mount! diffs); calling it here
+      // serves as the hydration step.
       editor = await makeEditor(document.getElementById("sy-editor"), {
-        value: INITIAL_SOURCE,
+        value: initialSource,
         onApply: applySource,
         vimToggleEl: document.getElementById("sy-vim-toggle"),
         vimStatusEl: document.getElementById("sy-vim-status"),
@@ -414,7 +456,7 @@
       });
       const monaco = await loadMonaco();
       attachAltDragScrub(editor, monaco);
-      applySource(INITIAL_SOURCE);
+      applySource(initialSource);
       requestAnimationFrame(drawScope);
     })();
   </script>

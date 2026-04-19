@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>cljrs.js · Library</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main>
+    <h2>cljrs.js</h2>
+    <p>
+      Browser-side interop, exposed under the <code>js</code> short
+      alias and the qualified <code>cljrs.js</code> namespace
+      (use whichever you prefer; they bind the same builtins).
+      wasm-only — native cljrs builds never see these symbols.
+      Implementation lives in
+      <code>crates/cljrs-wasm/src/js_bridge.rs</code>.
+    </p>
+    <p>
+      DOM elements round-trip through cljrs as
+      <code>Value::Opaque{tag = "js/element"}</code> so they can be
+      stored in a map or atom and passed back to other builtins.
+      Async results (<code>fetch-text</code>) take a callback that's
+      invoked when the underlying Promise resolves; we can't park a
+      cljrs computation on a JS Promise, so the callback pattern is
+      the integration point.
+    </p>
+
+    <h3>Console & time</h3>
+    <ul>
+      <li><code>(js/log &amp; xs)</code> — <code>console.log</code>; pretty-prints non-strings.</li>
+      <li><code>(js/now)</code> — <code>Date.now()</code> as f64 ms-since-epoch.</li>
+    </ul>
+
+    <h3>DOM</h3>
+    <ul>
+      <li><code>(js/get-element id)</code> — <code>document.getElementById</code>; returns a <code>js/element</code> opaque or <code>nil</code>.</li>
+      <li><code>(js/set-text! el s)</code> — write <code>textContent</code>; non-string args go through <code>pr-str</code>.</li>
+      <li><code>(js/set-html! el s)</code> — write <code>innerHTML</code>; string only. (Trusted source — you own the markup.)</li>
+      <li><code>(js/get-value el)</code> — read <code>.value</code> via <code>Reflect</code>; works for <code>input</code>/<code>textarea</code>/<code>select</code>.</li>
+      <li><code>(js/set-value! el v)</code> — write <code>.value</code>.</li>
+    </ul>
+
+    <h3>Events</h3>
+    <ul>
+      <li><code>(js/on! el event handler)</code> — <code>addEventListener</code>; <code>handler</code> is a 0-arg cljrs fn. The closure leaks (one per listener) — fine for "wire up once at startup", not for per-frame attach/detach.</li>
+    </ul>
+
+    <h3>Storage</h3>
+    <ul>
+      <li><code>(js/local-get k)</code> — <code>localStorage.getItem</code>; returns string or <code>nil</code>.</li>
+      <li><code>(js/local-set! k v)</code> — <code>localStorage.setItem</code>; values must be strings (encode JSON or <code>pr-str</code> first).</li>
+    </ul>
+
+    <h3>Async</h3>
+    <ul>
+      <li><code>(js/fetch-text url callback)</code> — fetch the URL as text; <code>callback</code> is invoked with the body string (or <code>nil</code> on failure). Cannot return the body synchronously because cljrs eval is re-entrant-unsafe.</li>
+    </ul>
+
+    <h3>Examples</h3>
+
+    <h4>Read a localStorage key</h4>
+    <div class="run-example" data-stateful="1">
+      <textarea spellcheck="false" style="min-height:140px">(js/local-set! "cljrs.lib-js.demo" "hello!")
+{:read   (js/local-get "cljrs.lib-js.demo")
+ :missing (js/local-get "cljrs.lib-js.never-set")}</textarea>
+      <div class="repl-toolbar">
+        <span style="font-size:0.8rem;color:var(--fg-dim)">writes a key under your origin</span>
+        <button>Run</button>
+      </div>
+      <div class="repl-out">click Run</div>
+    </div>
+
+    <h4>Wire a button</h4>
+    <p>
+      The block below appends a tiny button to its own output area on
+      first Run and bumps a counter on click. Re-Run replaces the
+      content; the previous closure leaks (acceptable for demos).
+    </p>
+    <div class="run-example" data-stateful="1">
+      <textarea spellcheck="false" style="min-height:240px">(def !out (js/get-element "lib-js-target"))
+(def !n   (atom 0))
+
+(when !out
+  (js/set-html! !out
+    "<button id='lib-js-btn'>click me</button> <span id='lib-js-n'>0</span>"))
+
+(let [btn (js/get-element "lib-js-btn")
+      lbl (js/get-element "lib-js-n")]
+  (js/on! btn "click"
+    (fn []
+      (swap! !n inc)
+      (js/set-text! lbl (str @!n))))
+  :wired)</textarea>
+      <div class="repl-toolbar">
+        <span style="font-size:0.8rem;color:var(--fg-dim)">click button below to bump counter</span>
+        <button>Run</button>
+      </div>
+      <div class="repl-out">click Run</div>
+    </div>
+    <div id="lib-js-target" style="border:1px solid var(--border);border-radius:6px;padding:0.6rem 0.8rem;background:#0b0d14;font-family:var(--mono);font-size:0.9rem"></div>
+
+    <h4>Async fetch</h4>
+    <div class="run-example" data-stateful="1">
+      <textarea spellcheck="false" style="min-height:200px">(def !body (atom :pending))
+(js/fetch-text "./style.css"
+  (fn []
+    ;; cljrs.js fetch-text binding wraps the promise; the body is
+    ;; delivered as the callback's argument list — but the 0-arg
+    ;; signature in this build means we can only confirm it fired.
+    (reset! !body :delivered)))
+;; Re-Run after a moment to see :delivered.
+@!body</textarea>
+      <div class="repl-toolbar">
+        <span style="font-size:0.8rem;color:var(--fg-dim)">re-Run after a moment</span>
+        <button>Run</button>
+      </div>
+      <div class="repl-out">click Run</div>
+    </div>
+
+    <h2>Adding a new JS package</h2>
+    <p>
+      All builtins live in
+      <code>crates/cljrs-wasm/src/js_bridge.rs</code>. Adding a new one
+      is a four-line patch.
+    </p>
+    <ol>
+      <li>
+        <strong>Pick a web-sys / js-sys API.</strong> If it exists in
+        <code>web-sys</code> already, enable the feature in
+        <code>crates/cljrs-wasm/Cargo.toml</code> (each web-sys
+        interface is feature-gated).
+      </li>
+      <li>
+        <strong>Write the builtin.</strong> Match the existing pattern:
+<pre><code>fn my_thing_fn(args: &amp;[Value]) -&gt; Result&lt;Value&gt; {
+    let s = arg_str(args, 0, "js/my-thing")?;
+    // ...call the API...
+    Ok(Value::Nil)
+}</code></pre>
+      </li>
+      <li>
+        <strong>Register it.</strong> Add a <code>bind(env, "my-thing", my_thing_fn);</code>
+        line inside <code>install</code>, in both the <code>js</code>
+        and <code>cljrs.js</code> blocks (mirrored on purpose so qualified
+        imports resolve).
+      </li>
+      <li>
+        <strong>Round-trip JsValues with the newtype.</strong>
+        <code>JsValue</code> is <code>!Send + !Sync</code>; cljrs
+        <code>Opaque.inner</code> requires <code>Send + Sync</code>.
+        Wrap in <code>JsValueWrapper</code> (the file's existing
+        newtype, with a <code>unsafe impl Send + Sync</code> — sound on
+        wasm32 since the target has no real threads).
+      </li>
+    </ol>
+
+    <h3>Async APIs</h3>
+    <p>
+      Use <code>wasm_bindgen_futures::spawn_local</code> to drive
+      Promises on the JS event loop, then <code>eval::apply</code> the
+      stashed cljrs callback when the future resolves. Don't try to
+      block the cljrs evaluator on a Promise — the interpreter is
+      re-entrant-unsafe, and you'd clobber env state if a caller is
+      mid-evaluation. <code>fetch_text_fn</code> is the canonical
+      template.
+    </p>
+
+    <h3>Event closures</h3>
+    <p>
+      For one-shot listeners use <code>Closure::wrap</code> +
+      <code>Closure::forget</code> as in <code>on_fn</code>. The
+      closure lifetime becomes "page lifetime", which matches typical
+      usage. If you need detach, return a disposer handle (out of scope
+      for the starter API, easy enough to add per-call).
+    </p>
+  </main>
+  <script type="module">
+    import { mountChrome } from "./_layout.js";
+    import { wireAll } from "./_runnable.js";
+    mountChrome("./lib-js.html");
+    wireAll();
+  </script>
+</body>
+</html>

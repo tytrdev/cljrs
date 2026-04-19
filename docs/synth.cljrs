@@ -1,0 +1,136 @@
+;; ============================================================
+;; Synth — patch params + control-panel UI live here.
+;;
+;; Two layers:
+;;   1. Patch params (FREQ, FILTER-CUTOFF, ...) — atoms holding
+;;      the current value. The JS audio engine polls (patch) every
+;;      animation frame and pushes any changes onto the Web Audio
+;;      graph.
+;;   2. UI tree — a hiccup view rendered by cljrs.ui that contains
+;;      every slider, the status line, and the oscilloscope canvas.
+;;      Sliders mutate the patch atoms and re-mount.
+;;
+;; Edits to this file:
+;;   • Re-eval the file (def re-binds to source value, defonce
+;;     keeps UI-only state).
+;;   • (boot) re-mounts the cljrs.ui tree.
+;;   • The JS audio loop notices patch values changed and pushes
+;;     them onto the audio nodes — no special wiring needed.
+;;
+;; Hold Alt (or Ctrl) and drag any number to scrub it live.
+;; ============================================================
+
+(ns synth)
+(require '[cljrs.ui :as ui])
+
+;; --- patch atoms --------------------------------------------------
+;; Plain `def` so each re-apply snaps the value back to whatever the
+;; editor source says. Sliders mutate the atom for live tweaking
+;; between edits.
+
+(def FREQ           (atom 220.0))   ; base frequency, Hz
+(def DETUNE         (atom 7.0))     ; cents
+(def WAVE-TYPE      (atom :sawtooth)) ; :sine :square :sawtooth :triangle
+
+(def FILTER-CUTOFF  (atom 900.0))   ; Hz
+(def FILTER-Q       (atom 6.0))
+
+(def ATTACK         (atom 0.02))
+(def DECAY          (atom 0.15))
+(def SUSTAIN        (atom 0.6))     ; 0..1
+(def RELEASE        (atom 0.35))
+
+(def LFO-RATE       (atom 4.0))     ; Hz
+(def LFO-DEPTH      (atom 300.0))   ; Hz of cutoff swing
+
+(def GAIN           (atom 0.5))
+
+;; The JS side polls this flat vector each rAF tick. Order is a
+;; contract with synth.html. Keep it stable.
+(defn patch []
+  [@FREQ @DETUNE
+   @FILTER-CUTOFF @FILTER-Q
+   @ATTACK @DECAY @SUSTAIN @RELEASE
+   @LFO-RATE @LFO-DEPTH
+   @GAIN])
+
+;; Future hook: if/when the tree-walker can keep up, swap this in
+;; for a full Clojure DSP path via repl.call_floats.
+(defn render-buffer [_buf-idx _sr _n]
+  ;; placeholder — returns an empty vec today.
+  [])
+
+;; --- UI helpers ---------------------------------------------------
+
+(defn read-num [el-id]
+  (let [s (cljrs.js/get-value (cljrs.js/get-element el-id))]
+    (double (read-string s))))
+
+(defn slider-row [label el-id atom-ref min-v max-v step]
+  [:div {:class "sy-srow"}
+   [:label {:class "sy-slabel"} label]
+   [:input {:id    el-id
+            :type  "range"
+            :min   min-v
+            :max   max-v
+            :step  step
+            :value @atom-ref
+            :on-input (fn []
+                        (reset! atom-ref (read-num el-id))
+                        (boot))}]
+   [:span {:class "sy-sval"} (str @atom-ref)]])
+
+(def __wave-cycle [:sine :square :sawtooth :triangle])
+
+(defn next-wave [w]
+  (let [v __wave-cycle
+        n (count v)
+        i (loop [i 0]
+            (cond (>= i n) 0
+                  (= (nth v i) w) (mod (+ i 1) n)
+                  :else (recur (+ i 1))))]
+    (nth v i)))
+
+(defn wave-row []
+  [:div {:class "sy-srow"}
+   [:label {:class "sy-slabel"} "wave"]
+   [:button {:class "sy-wavebtn"
+             :on-click (fn []
+                         (swap! WAVE-TYPE next-wave)
+                         (boot))}
+    (name @WAVE-TYPE)]])
+
+(defn ui-tree []
+  [:div {:class "sy-panel"}
+   [:h4 {:class "sy-h"} "patch"]
+   (slider-row "freq"     "sy-s-freq"     FREQ           50.0  1200.0 1.0)
+   (slider-row "detune"   "sy-s-detune"   DETUNE        -50.0    50.0 0.1)
+   (wave-row)
+   [:h4 {:class "sy-h"} "filter"]
+   (slider-row "cutoff"   "sy-s-cutoff"   FILTER-CUTOFF  60.0  6000.0 1.0)
+   (slider-row "Q"        "sy-s-q"        FILTER-Q        0.1    20.0 0.1)
+   [:h4 {:class "sy-h"} "envelope"]
+   (slider-row "attack"   "sy-s-attack"   ATTACK          0.0     1.0 0.005)
+   (slider-row "decay"    "sy-s-decay"    DECAY           0.0     1.0 0.005)
+   (slider-row "sustain"  "sy-s-sustain"  SUSTAIN         0.0     1.0 0.01)
+   (slider-row "release"  "sy-s-release"  RELEASE         0.0     2.0 0.01)
+   [:h4 {:class "sy-h"} "LFO → cutoff"]
+   (slider-row "rate"     "sy-s-lfor"     LFO-RATE        0.0    20.0 0.1)
+   (slider-row "depth"    "sy-s-lfod"     LFO-DEPTH       0.0  2000.0 1.0)
+   [:h4 {:class "sy-h"} "amp"]
+   (slider-row "gain"     "sy-s-gain"     GAIN            0.0     1.0 0.01)
+   [:p {:class "sy-foot"}
+    "Patch values stream into Web Audio every frame. Edit a slider
+     for a live tweak, edit the source for a permanent change."]])
+
+;; --- entry points -------------------------------------------------
+
+;; Build-time: prerender binary calls this; output is injected into
+;; <div id="cljrs-root"> in synth.html.
+(defn prerender []
+  (cljrs.ui/render-html (ui-tree)))
+
+;; Runtime: synth.html's onApply re-evals this file and then calls
+;; (boot). Re-mounts the panel; Preact diffs against the live DOM.
+(defn boot []
+  (cljrs.ui/mount! "cljrs-root" (ui-tree)))
