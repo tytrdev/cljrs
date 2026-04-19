@@ -34,28 +34,49 @@
       <li><code>(ml/zeros rows cols)</code> — zero-initialized param.</li>
     </ul>
 
+    <h3>Init helpers</h3>
+    <ul>
+      <li><code>(ml/xavier rows cols)</code> — Glorot init: stddev = <code>√(2 / (in + out))</code>. Sane default for <code>tanh</code>/<code>sigmoid</code> layers.</li>
+      <li><code>(ml/kaiming rows cols)</code> — He init: stddev = <code>√(2 / fan_in)</code>. Sane default for <code>relu</code>/<code>gelu</code> layers.</li>
+    </ul>
+
     <h3>Ops (build the graph)</h3>
     <ul>
       <li><code>(ml/matmul a b)</code> — matrix multiply; inner dims must match.</li>
-      <li><code>(ml/add a b)</code> — element-wise; shapes must match.</li>
-      <li><code>(ml/sub a b)</code> — element-wise.</li>
-      <li><code>(ml/add-bias a b)</code> — add a <code>(1 cols)</code> bias to every row of <code>a</code>.</li>
-      <li><code>(ml/relu x)</code> · <code>(ml/tanh x)</code> — element-wise nonlinearities.</li>
-      <li><code>(ml/mse pred target)</code> — mean squared error; reduces to a <code>(1 1)</code> tensor.</li>
+      <li><code>(ml/matmul-gpu a b)</code> — same shape contract; dispatches a wgpu compute kernel on native, falls back to CPU on wasm with a one-time warning. Wired into the autograd graph so backward still flows.</li>
+      <li><code>(ml/add a b)</code> · <code>(ml/sub a b)</code> — element-wise; shapes must match.</li>
+      <li><code>(ml/add-bias a b)</code> — broadcast a <code>(1 cols)</code> bias across every row of <code>a</code>.</li>
+      <li><code>(ml/relu x)</code> · <code>(ml/tanh x)</code> · <code>(ml/sigmoid x)</code> · <code>(ml/gelu x)</code> — element-wise nonlinearities.</li>
+      <li><code>(ml/softmax x)</code> — row-wise softmax (numerically stabilized). Rows sum to 1.</li>
+      <li><code>(ml/conv1d-valid input kernel)</code> — 1-D valid convolution. Both args must be <code>(1 N)</code>; output is <code>(1 N - K + 1)</code>.</li>
+    </ul>
+
+    <h3>Losses</h3>
+    <ul>
+      <li><code>(ml/mse pred target)</code> — mean squared error.</li>
+      <li><code>(ml/mae pred target)</code> — mean absolute error; less sensitive to outliers.</li>
+      <li><code>(ml/cross-entropy probs targets)</code> — categorical cross-entropy. Pair with <code>ml/softmax</code> on the prediction side and <code>ml/one-hot</code> on the target side.</li>
+      <li>All three reduce to a <code>(1 1)</code> tensor — feed straight into <code>backward!</code>.</li>
     </ul>
 
     <h3>Train</h3>
     <ul>
       <li><code>(ml/backward! loss)</code> — reverse-mode autodiff over the graph rooted at <code>loss</code>. Accumulates grads on every reachable param.</li>
       <li><code>(ml/sgd-step! params lr)</code> — for each param: <code>w &lt;- w - lr*grad</code>, then zero the grad.</li>
-      <li><code>(ml/set-data! tensor data)</code> — overwrite a tensor's buffer in place. Use to stream new minibatch inputs without rebuilding the graph wrapper.</li>
+      <li><code>(ml/adam-step! params lr)</code> · <code>(ml/adam-step! params lr beta1 beta2 eps)</code> — Adam optimizer. Defaults: <code>0.9</code>, <code>0.999</code>, <code>1e-8</code>.</li>
+      <li><code>(ml/rmsprop-step! params lr)</code> · <code>(ml/rmsprop-step! params lr decay eps)</code> — RMSProp; defaults <code>0.9</code>, <code>1e-8</code>.</li>
+      <li><code>(ml/reset-optim!)</code> — wipe Adam/RMSProp moment buffers (useful between unrelated training runs in one session).</li>
+      <li><code>(ml/set-data! tensor data)</code> — overwrite a tensor's buffer in place. Use to stream new minibatch inputs without rebuilding the graph wrapper. Shape must match.</li>
     </ul>
 
-    <h3>Inspect</h3>
+    <h3>Inspect & post-process</h3>
     <ul>
       <li><code>(ml/scalar t)</code> — first element as a number; convenient for losses.</li>
       <li><code>(ml/tolist t)</code> — flat vector of f32s (boxed as cljrs floats).</li>
       <li><code>(ml/shape t)</code> — <code>[rows cols]</code>.</li>
+      <li><code>(ml/argmax t)</code> — index of the max along each row. Single-row tensors return an Int; multi-row tensors return a vector of Ints.</li>
+      <li><code>(ml/one-hot k n)</code> · <code>(ml/one-hot [k0 k1 ...] n)</code> — build a one-hot tensor of width <code>n</code>. Multi-index form returns one row per index.</li>
+      <li><code>(ml/normalize t)</code> — z-score normalize the whole buffer; returns a fresh leaf (no autograd flow).</li>
     </ul>
 
     <h3>Examples</h3>
@@ -123,6 +144,71 @@
       </div>
       <div class="repl-out">click Run</div>
     </div>
+
+    <h4>Softmax classifier with Adam</h4>
+    <p>
+      Three-class linear classifier on a hand-built toy dataset. Each Run
+      takes one Adam step over the full batch. Re-Run a dozen times and
+      <code>:acc</code> climbs to 1.0 while <code>:loss</code> falls.
+      Demonstrates <code>kaiming</code>, <code>softmax</code>,
+      <code>cross-entropy</code>, <code>one-hot</code>,
+      <code>argmax</code>, and <code>adam-step!</code> together.
+    </p>
+    <div class="run-example" data-stateful="1">
+      <textarea spellcheck="false" style="min-height:320px">(defonce X (ml/tensor [[ 1.0  0.0]
+                       [ 0.9  0.1]
+                       [ 0.0  1.0]
+                       [ 0.1  0.9]
+                       [-1.0 -1.0]
+                       [-0.9 -0.8]]))
+(defonce Y-idx [0 0 1 1 2 2])
+(defonce Y (ml/one-hot Y-idx 3))
+(defonce W (ml/kaiming 2 3))
+(defonce b (ml/zeros 1 3))
+
+(let [logits (ml/add-bias (ml/matmul X W) b)
+      probs  (ml/softmax logits)
+      loss   (ml/cross-entropy probs Y)]
+  (ml/backward! loss)
+  (ml/adam-step! [W b] 0.05)
+  {:loss (ml/scalar loss)
+   :pred (ml/argmax probs)
+   :want Y-idx
+   :acc  (double (/ (count (filter true?
+                                   (map = (ml/argmax probs) Y-idx)))
+                    (count Y-idx)))})</textarea>
+      <div class="repl-toolbar">
+        <span style="font-size:0.8rem;color:var(--fg-dim)">re-Run for more Adam steps</span>
+        <button>Run</button>
+      </div>
+      <div class="repl-out">click Run</div>
+    </div>
+
+    <h4>1-D convolution</h4>
+    <p>
+      A 3-tap edge-detect kernel applied to a step signal. <code>conv1d-valid</code>
+      participates in the autograd graph, so you can learn the kernel
+      with the same <code>backward!</code> + <code>sgd-step!</code> pipeline.
+    </p>
+    <div class="run-example" data-stateful="1">
+      <textarea spellcheck="false" style="min-height:160px">(def signal (ml/tensor [[0.0 0.0 0.0 1.0 1.0 1.0 0.0 0.0]]))
+(def kernel (ml/tensor [[-1.0 0.0 1.0]]))
+(ml/tolist (ml/conv1d-valid signal kernel))
+;; → [0 0 1 0 0 -1] — non-zero at the rising and falling edges.
+</textarea>
+      <div class="repl-toolbar">
+        <span style="font-size:0.8rem;color:var(--fg-dim)">edges of a step</span>
+        <button>Run</button>
+      </div>
+      <div class="repl-out">click Run</div>
+    </div>
+
+    <h3>See also</h3>
+    <ul>
+      <li><a href="./ml.html">ML demo page</a> — end-to-end MNIST-shaped training loop in the browser.</li>
+      <li><a href="./lib-rust.html">Rust interop</a> — <code>cljrs.ml</code> is the canonical example of the install pattern.</li>
+      <li><a href="./lib-shader.html">Shader stdlib</a> — for forward passes large enough to want GPU; pair with <code>matmul-gpu</code> on native.</li>
+    </ul>
   </main>
   <script type="module">
     import { mountChrome, mountLibrarySidebar } from "./_layout.js";

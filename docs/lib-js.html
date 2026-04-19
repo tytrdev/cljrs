@@ -55,7 +55,7 @@
 
     <h3>Async</h3>
     <ul>
-      <li><code>(js/fetch-text url callback)</code> — fetch the URL as text; <code>callback</code> is invoked with the body string (or <code>nil</code> on failure). Cannot return the body synchronously because cljrs eval is re-entrant-unsafe.</li>
+      <li><code>(js/fetch-text url callback)</code> — fetch the URL as text; <code>(callback body)</code> is invoked when the underlying Promise resolves, with the response body as a single string argument (or <code>nil</code> on network/decode failure). Cannot return the body synchronously because cljrs eval is re-entrant-unsafe.</li>
     </ul>
 
     <h3>Examples</h3>
@@ -102,15 +102,22 @@
     <div id="lib-js-target" style="border:1px solid var(--border);border-radius:6px;padding:0.6rem 0.8rem;background:#0b0d14;font-family:var(--mono);font-size:0.9rem"></div>
 
     <h4>Async fetch</h4>
+    <p>
+      Fetch this page's stylesheet, then peek at it once the Promise
+      resolves. The first Run kicks off the request and prints
+      <code>:pending</code>; Run again a moment later to read the body
+      length the callback stored.
+    </p>
     <div class="run-example" data-stateful="1">
-      <textarea spellcheck="false" style="min-height:200px">(def !body (atom :pending))
-(js/fetch-text "./style.css"
-  (fn []
-    ;; cljrs.js fetch-text binding wraps the promise; the body is
-    ;; delivered as the callback's argument list — but the 0-arg
-    ;; signature in this build means we can only confirm it fired.
-    (reset! !body :delivered)))
-;; Re-Run after a moment to see :delivered.
+      <textarea spellcheck="false" style="min-height:220px">(defonce !body (atom :pending))
+
+(when (= @!body :pending)
+  (js/fetch-text "./style.css"
+    (fn [body]
+      (reset! !body
+              {:bytes (count body)
+               :head  (subs body 0 (min 80 (count body)))}))))
+
 @!body</textarea>
       <div class="repl-toolbar">
         <span style="font-size:0.8rem;color:var(--fg-dim)">re-Run after a moment</span>
@@ -175,6 +182,13 @@
       usage. If you need detach, return a disposer handle (out of scope
       for the starter API, easy enough to add per-call).
     </p>
+
+    <h3>See also</h3>
+    <ul>
+      <li><a href="./lib-ui.html">cljrs.ui</a> — hiccup → DOM; pair with <code>cljrs.js</code> for any imperative escape hatch.</li>
+      <li><a href="./lib-rust.html">Rust interop</a> — the install pattern this whole namespace is built on.</li>
+      <li><a href="./js-interop.html">js-interop reference</a> — broader notes on calling JS from cljrs.</li>
+    </ul>
   </main>
   <script type="module">
     import { mountChrome, mountLibrarySidebar } from "./_layout.js";

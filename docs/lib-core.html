@@ -157,6 +157,33 @@
       <div class="repl-out">click Run</div>
     </div>
 
+    <h4>juxt + group-by</h4>
+    <p>
+      Real-world data crunching: bucket some sample orders by region
+      and project each bucket through <code>juxt</code> to compute
+      multiple aggregates in a single pass.
+    </p>
+    <div class="run-example" data-stateful="1">
+      <textarea spellcheck="false" style="min-height:240px">(def orders
+  [{:region :west :amount 120}
+   {:region :east :amount 80}
+   {:region :west :amount 30}
+   {:region :east :amount 200}
+   {:region :west :amount 90}
+   {:region :east :amount 45}])
+
+(let [agg (juxt count
+                (fn [xs] (reduce + (map :amount xs)))
+                (fn [xs] (apply max (map :amount xs))))]
+  (update-vals (group-by :region orders) agg))
+;; → {:west [3 240 120], :east [3 325 200]} — [count total max]</textarea>
+      <div class="repl-toolbar">
+        <span style="font-size:0.8rem;color:var(--fg-dim)">composes with update-vals to fan out</span>
+        <button>Run</button>
+      </div>
+      <div class="repl-out">click Run</div>
+    </div>
+
     <h4>String + regex</h4>
     <div class="run-example" data-stateful="1">
       <textarea spellcheck="false" style="min-height:140px">(let [s "the rain in spain falls mainly on the plain"]
@@ -169,6 +196,14 @@
       </div>
       <div class="repl-out">click Run</div>
     </div>
+
+    <h3>See also</h3>
+    <ul>
+      <li><a href="./lib-ui.html">cljrs.ui</a> — hiccup for the DOM, built on top of these collections.</li>
+      <li><a href="./lib-music.html">cljrs.music</a> — pure data → data, also authored entirely in cljrs.</li>
+      <li><a href="./lib-rust.html">Rust interop</a> — how the host builtins on this page are wired in.</li>
+      <li><a href="./coverage.html">Coverage matrix</a> — flat list of every <code>clojure.core</code> name and whether it ships.</li>
+    </ul>
   </main>
   <script type="module">
     import { mountChrome, mountLibrarySidebar } from "./_layout.js";

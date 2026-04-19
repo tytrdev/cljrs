@@ -99,6 +99,55 @@
       <div class="repl-out">click Run</div>
     </div>
 
+    <h4>Walking-bass line over a progression</h4>
+    <p>
+      Take each chord of a I-IV-V-I progression in G, arpeggiate it
+      <code>:up</code>, flatten the result, then convert the whole
+      melody to Hz so a Web Audio scheduler could play it directly.
+    </p>
+    <div class="run-example" data-stateful="1">
+      <textarea spellcheck="false" style="min-height:240px">(let [g     (cljrs.music/note :g3)
+      prog  (cljrs.music/progression
+              g [[1 :maj] [4 :maj] [5 :7] [1 :maj]])
+      arp   (mapcat (fn [c] (cljrs.music/arpeggiate c :up)) prog)
+      bass  (cljrs.music/transpose arp -12)]
+  {:chords prog
+   :melody (vec arp)
+   :bass   (vec bass)
+   :hz     (mapv (fn [n]
+                   ;; round to 0.1 Hz for readable output
+                   (/ (round (* 10.0 (cljrs.music/midi->hz n))) 10.0))
+                 arp)})</textarea>
+      <div class="repl-toolbar">
+        <span style="font-size:0.8rem;color:var(--fg-dim)">data-only — feed to Web Audio yourself</span>
+        <button>Run</button>
+      </div>
+      <div class="repl-out">click Run</div>
+    </div>
+
+    <h4>Pentatonic riff generator</h4>
+    <p>
+      A deterministic "random walk" through the A-minor pentatonic
+      scale. cljrs has no <code>rand</code>, so we hash an index into
+      the scale length. Re-running with different <code>:steps</code>
+      values is a quick way to A/B melodic shapes.
+    </p>
+    <div class="run-example" data-stateful="1">
+      <textarea spellcheck="false" style="min-height:200px">(defn riff [steps]
+  (let [scale (cljrs.music/scale (cljrs.music/note :a3) :pentatonic)
+        n     (count scale)]
+    (mapv (fn [i] (nth scale (mod (+ (* i 3) (* i i)) n)))
+          (range steps))))
+
+{:8  (riff 8)
+ :16 (riff 16)}</textarea>
+      <div class="repl-toolbar">
+        <span style="font-size:0.8rem;color:var(--fg-dim)">deterministic, reproducible riffs</span>
+        <button>Run</button>
+      </div>
+      <div class="repl-out">click Run</div>
+    </div>
+
     <h3>Audio</h3>
     <p>
       Synthesis lives in the demo pages (<a href="./synth.html">Synth</a>,
@@ -111,6 +160,13 @@
       <a href="./lib-js.html">cljrs.js bridge</a> — wrap
       <code>AudioContext</code> as an opaque, expose a few mutators.
     </p>
+
+    <h3>See also</h3>
+    <ul>
+      <li><a href="./synth.html">Synth demo</a> — live-coded subtractive synth driven by these helpers.</li>
+      <li><a href="./sequencer.html">Sequencer</a> — turns these vectors into Web Audio events.</li>
+      <li><a href="./lib-rust.html">Rust interop</a> — to add a real <code>cljrs.audio</code> namespace, follow the install pattern here.</li>
+    </ul>
   </main>
   <script type="module">
     import { mountChrome, mountLibrarySidebar } from "./_layout.js";

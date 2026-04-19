@@ -152,6 +152,13 @@
       already-painted DOM. <a href="./ui-demo.html">See ui-demo</a> for
       the canonical end-to-end example.
     </p>
+
+    <h3>See also</h3>
+    <ul>
+      <li><a href="./lib-js.html">cljrs.js</a> — when you need a DOM API <code>cljrs.ui</code> doesn't expose. The two layers compose: build hiccup with <code>ui</code>, escape hatch via <code>js/get-element</code>.</li>
+      <li><a href="./lib-core.html">cljrs.core</a> — the collection ops the view function spends most of its time in.</li>
+      <li><a href="./ui-demo.html">UI demo</a> — the canonical prerender + hydrate page.</li>
+    </ul>
   </main>
   <script type="module">
     import { mountChrome, mountLibrarySidebar } from "./_layout.js";
