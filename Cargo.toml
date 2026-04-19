@@ -49,6 +49,10 @@ name = "bench"
 path = "src/bin/bench.rs"
 
 [[bin]]
+name = "prerender"
+path = "src/bin/prerender.rs"
+
+[[bin]]
 name = "demo"
 path = "src/bin/demo.rs"
 required-features = ["demo"]

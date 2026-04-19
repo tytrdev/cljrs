@@ -12,6 +12,7 @@ use cljrs::{builtins, env::Env, eval, reader};
 use wasm_bindgen::prelude::*;
 
 mod js_bridge;
+mod ui_bridge;
 
 #[wasm_bindgen(start)]
 pub fn _start() {
@@ -27,6 +28,7 @@ pub fn eval_source(src: &str) -> String {
     cljrs_physics::install(&env);
     cljrs_ml::install(&env);
     js_bridge::install(&env);
+    ui_bridge::install(&env);
     eval_in(&env, src)
 }
 
@@ -46,6 +48,7 @@ impl Repl {
         cljrs_physics::install(&env);
         cljrs_ml::install(&env);
         js_bridge::install(&env);
+        ui_bridge::install(&env);
         Repl { env }
     }
 
@@ -183,6 +186,7 @@ impl Repl {
         cljrs_physics::install(&self.env);
         cljrs_ml::install(&self.env);
         js_bridge::install(&self.env);
+        ui_bridge::install(&self.env);
     }
 }
 

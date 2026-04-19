@@ -1,0 +1,52 @@
+;; docs/ui-demo.cljrs — sample page rendered through cljrs.ui.
+;;
+;; Loaded twice:
+;;   1. At build time by `src/bin/prerender.rs` — calls `(prerender)`
+;;      which returns a hiccup vector; the binary stringifies it and
+;;      `docs/build-ui.sh` injects the HTML into ui-demo.html.
+;;   2. At page load by ui-demo.html — REPL evals this whole file,
+;;      then calls `(cljrs.ui/hydrate! ...)` so Preact attaches event
+;;      handlers to the already-painted DOM.
+
+(ns ui-demo)
+
+;; --- state --------------------------------------------------------
+
+(def !state (atom {:n 0 :items ["learn cljrs" "build UI lib"]}))
+
+;; --- view ---------------------------------------------------------
+;; Pure: state-map -> hiccup. No side effects, no DOM lookups. Build
+;; time uses this same fn (via render-html) so what you see at first
+;; paint matches what hydrate then takes over.
+
+(defn view [s]
+  [:div {:class "ui-demo"}
+   [:h3 "Counter"]
+   [:p "Count: " [:strong (str (get s :n))]]
+   [:div {:class "ui-row"}
+    [:button {:on-click (fn [] (cljrs.ui/mount! "cljrs-root"
+                                                (view (swap! !state update :n inc))))}
+     "+"]
+    [:button {:on-click (fn [] (cljrs.ui/mount! "cljrs-root"
+                                                (view (swap! !state update :n dec))))}
+     "−"]
+    [:button {:on-click (fn [] (cljrs.ui/mount! "cljrs-root"
+                                                (view (swap! !state assoc :n 0))))}
+     "reset"]]
+   [:h3 "List"]
+   [:ul (mapv (fn [item] [:li item]) (get s :items))]
+   [:p {:class "ui-foot"}
+    "Rendered by cljrs.ui — same hiccup at build time and at hydrate time."]])
+
+;; --- entry points -------------------------------------------------
+
+;; Build-time: prerender binary calls this and pipes the string into
+;; ui-demo.html's <div id="cljrs-root">.
+(defn prerender []
+  (cljrs.ui/render-html (view @!state)))
+
+;; Runtime: ui-demo.html calls this after wasm loads. Hydrate first
+;; so Preact reuses the prerendered DOM, then immediately re-mount
+;; (cheap diff) so the closures wired into !state are live.
+(defn boot []
+  (cljrs.ui/hydrate! "cljrs-root" (view @!state)))

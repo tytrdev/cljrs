@@ -76,6 +76,16 @@ pub fn install(env: &Env) {
             env.define_global(alias, v);
         }
     }
+    // clojure.string compatibility — every str/* is also reachable as
+    // clojure.string/* so existing Clojure code that uses the canonical
+    // qualified prefix runs unchanged.
+    for (name, _) in core_fns() {
+        if let Some(rest) = name.strip_prefix("str/") {
+            if let Ok(v) = env.lookup(name) {
+                env.define_global(&format!("clojure.string/{rest}"), v);
+            }
+        }
+    }
     install_prelude(env);
     env.set_current_ns(crate::env::USER_NS);
 }
@@ -100,7 +110,8 @@ fn install_prelude(env: &Env) {
     const PRELUDE: &str = include_str!("core.clj");
     const TEST_NS: &str = include_str!("cljrs_test.clj");
     const MUSIC_NS: &str = include_str!("cljrs_music.clj");
-    for (label, src) in [("core.clj", PRELUDE), ("cljrs_test.clj", TEST_NS), ("cljrs_music.clj", MUSIC_NS)] {
+    const UI_NS: &str = include_str!("cljrs_ui.clj");
+    for (label, src) in [("core.clj", PRELUDE), ("cljrs_test.clj", TEST_NS), ("cljrs_music.clj", MUSIC_NS), ("cljrs_ui.clj", UI_NS)] {
         let forms = match crate::reader::read_all(src) {
             Ok(f) => f,
             Err(e) => panic!("cljrs prelude {label} parse failed: {e}"),
@@ -187,6 +198,8 @@ fn core_fns() -> Vec<(&'static str, fn(&[Value]) -> Result<Value>)> {
         ("str/includes?", str_includes_fn),
         ("str/trim", str_trim_fn),
         ("str/blank?", str_blank_fn),
+        ("str/index-of", str_index_of_fn),
+        ("str/last-index-of", str_last_index_of_fn),
         ("string?", string_q),
         ("number?", number_q),
         ("integer?", integer_q),
@@ -1306,6 +1319,30 @@ fn str_blank_fn(args: &[Value]) -> Result<Value> {
         Value::Str(s) => s.trim().is_empty(),
         _ => false,
     }))
+}
+fn str_index_of_fn(args: &[Value]) -> Result<Value> {
+    let s = as_str(&args[0])?;
+    let needle = as_str(&args[1])?;
+    let start = match args.get(2) {
+        Some(Value::Int(i)) => (*i).max(0) as usize,
+        Some(_) => return Err(Error::Type("str/index-of: from-index must be int".into())),
+        None => 0,
+    };
+    if start > s.len() {
+        return Ok(Value::Nil);
+    }
+    Ok(match s[start..].find(needle) {
+        Some(off) => Value::Int((start + off) as i64),
+        None => Value::Nil,
+    })
+}
+fn str_last_index_of_fn(args: &[Value]) -> Result<Value> {
+    let s = as_str(&args[0])?;
+    let needle = as_str(&args[1])?;
+    Ok(match s.rfind(needle) {
+        Some(off) => Value::Int(off as i64),
+        None => Value::Nil,
+    })
 }
 
 // ---- Type predicates ---------------------------------------------------

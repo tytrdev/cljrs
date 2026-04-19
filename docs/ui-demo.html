@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>UI Demo · cljrs</title>
+  <link rel="stylesheet" href="./style.css">
+  <style>
+    .ui-demo { display: flex; flex-direction: column; gap: 0.75rem; }
+    .ui-row { display: flex; gap: 0.5rem; }
+    .ui-row button {
+      font-family: inherit; font-size: 0.9rem;
+      padding: 0.3rem 0.9rem;
+    }
+    .ui-foot { color: var(--fg-dim); font-size: 0.8rem; }
+    .ui-status {
+      font-family: ui-monospace, monospace;
+      font-size: 0.75rem;
+      color: var(--fg-dim);
+      min-height: 1em;
+      white-space: pre-wrap;
+    }
+    .ui-status.err { color: #ff6666; }
+    .ui-status.ok  { color: #8ec07c; }
+    #cljrs-root {
+      border: 1px solid var(--border, #333);
+      border-radius: 4px;
+      padding: 0.75rem 1rem;
+      background: #0b0d14;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h2>UI Demo — cljrs.ui</h2>
+    <p>
+      The block below was rendered to HTML at build time by
+      <code>src/bin/prerender.rs</code> (no JS needed for first paint),
+      then hydrated by Preact once wasm loaded. View source on this
+      page to see the prerendered markup inline.
+    </p>
+
+    <!-- cljrs-prerender: ./ui-demo.cljrs -->
+    <div id="cljrs-root"><div class="ui-demo"><h3>Counter</h3><p>Count: <strong>0</strong></p><div class="ui-row"><button>+</button><button>−</button><button>reset</button></div><h3>List</h3><ul><li>learn cljrs</li><li>build UI lib</li></ul><p class="ui-foot">Rendered by cljrs.ui — same hiccup at build time and at hydrate time.</p></div></div>
+
+    <div class="ui-status" id="ui-status">booting…</div>
+
+    <h3 style="margin-top:2rem">Source</h3>
+    <p>
+      Edit and re-mount live. Same source runs at build time
+      (<code>(prerender)</code>) and at boot (<code>(boot)</code>).
+    </p>
+    <div class="repl">
+      <textarea id="ui-src" spellcheck="false" style="height:24rem;width:100%;font-family:ui-monospace,monospace"></textarea>
+      <div class="repl-toolbar"><button id="ui-apply">Apply</button></div>
+    </div>
+  </main>
+
+  <script type="module">
+    import { mountChrome, loadWasm, attachHighlightOverlay } from "./_layout.js";
+    import "./_ui.js";
+
+    mountChrome("./ui-demo.html");
+
+    const status = document.getElementById("ui-status");
+    const setStatus = (msg, kind) => {
+      status.textContent = msg;
+      status.classList.toggle("err", kind === "err");
+      status.classList.toggle("ok", kind === "ok");
+    };
+
+    const SRC_URL = "./ui-demo.cljrs";
+    const ta = document.getElementById("ui-src");
+
+    // Fetch the page's cljrs source. Used both for the initial REPL
+    // boot and to populate the live editor.
+    const src = await (await fetch(SRC_URL)).text();
+    ta.value = src;
+    await attachHighlightOverlay(ta.parentNode, ta);
+
+    setStatus("loading wasm…");
+    const mod = await loadWasm();
+    const repl = new mod.Repl();
+
+    const apply = (source) => {
+      try {
+        const r = repl.eval(source);
+        if (typeof r === "string" && r.startsWith("eval error")) {
+          setStatus(r, "err");
+        } else {
+          // After (re-)evaluation, run boot to (re-)mount.
+          const r2 = repl.eval("(boot)");
+          if (typeof r2 === "string" && r2.startsWith("eval error")) {
+            setStatus(r2, "err");
+          } else {
+            setStatus("mounted ✓", "ok");
+          }
+        }
+      } catch (e) {
+        setStatus(String(e), "err");
+      }
+    };
+
+    apply(ta.value);
+    document.getElementById("ui-apply").addEventListener("click", () => {
+      // Reset so def/defonce mutations don't accumulate.
+      repl.reset();
+      apply(ta.value);
+    });
+  </script>
+</body>
+</html>
