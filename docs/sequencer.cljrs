@@ -54,32 +54,36 @@
 ;; Recipes constants. Keeps a per-call seed in an atom that we tick
 ;; with the wall-clock'ish counter every Randomize click.
 
-;; defonce so repeated applySource (debounced auto-apply on edit, plus
-;; the initial boot) doesn't snap the seed back to 1 between clicks.
+;; Park–Miller LCG: seed_{n+1} = (seed_n * 16807) mod (2^31 - 1).
+;; Sized so the product (max 2147483646 * 16807 ≈ 3.6e13) stays well
+;; inside the f64 53-bit mantissa — if cljrs promotes to float on
+;; overflow, low-order bits are preserved and mod-by-small-N works.
+;; The original 2^32 LCG had seed*multiplier ~ 2^64, which loses the
+;; bottom ~12 bits in f64 and made (mod seed 8) collapse to 0.
+(def __M 2147483647)  ; 2^31 - 1, Mersenne prime
+(def __A 16807)       ; Park–Miller minimal standard multiplier
+
 (defonce __rng-seed (atom 1))
 
 (defn __rng-next []
   (let [s @__rng-seed
-        ;; Numerical Recipes LCG: a=1664525, c=1013904223, m=2^32
-        n (mod (+ (* s 1664525) 1013904223) 4294967296)]
+        n (mod (* s __A) __M)
+        ;; mod must return int; if it collapses to float guard with int.
+        n (int n)]
     (reset! __rng-seed n)
     n))
 
 (defn __rand-float []
-  ;; Same overflow-to-float concern as __rand-int. f64 division works
-  ;; fine either way, but coerce to a consistent type on the way out.
-  (let [r (sequencer/__rng-next)]
-    (/ (* 1.0 r) 4294967296.0)))
+  (/ (* 1.0 (sequencer/__rng-next)) 2147483647.0))
 
 (defn __rand-int [n]
-  ;; The LCG multipliers push i64 into float overflow territory when
-  ;; the seed gets large (especially after the js/now mix). cljrs
-  ;; silently promotes the product to f64, and (mod float float)
-  ;; returns float — which nth rejects. Coerce to int here.
-  (int (mod (sequencer/__rng-next) n)))
+  (mod (sequencer/__rng-next) n))
 
 (defn __reseed! [x]
-  (reset! __rng-seed (mod (+ (* x 2654435761) 1) 4294967296)))
+  ;; Force into Park–Miller's valid range [1, M-1].
+  (let [v (mod (int x) __M)
+        v (if (<= v 0) (+ v 1) v)]
+    (reset! __rng-seed v)))
 
 ;; --- randomize helpers --------------------------------------------
 
@@ -93,7 +97,10 @@
 ;; so even if the env got reset between clicks (re-apply, repl.reset)
 ;; successive clicks still produce visibly different patterns.
 (defn __mix-seed! [salt]
-  (let [t (int (js/now))]
+  ;; Fold js/now into the seed so successive clicks diverge even if
+  ;; the env got reset. We truncate the timestamp mod M so the
+  ;; downstream multiply in __rng-next doesn't overflow f64 precision.
+  (let [t (mod (int (js/now)) __M)]
     (sequencer/__reseed! (+ salt t (sequencer/__rng-next)))))
 
 (defn randomize-kick! []
