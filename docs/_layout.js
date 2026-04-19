@@ -174,6 +174,10 @@ export async function makeEditor(container, opts = {}) {
     const debounceMs = opts.debounceMs ?? 300;
     let timer = null;
     editor.onDidChangeModelContent(() => {
+      // Programmatic setValue (e.g., tab switch, share-link load) sets
+      // editor._cljrsSuppressApply = true around the call to skip the
+      // duplicate apply that the user didn't ask for.
+      if (editor._cljrsSuppressApply) return;
       clearTimeout(timer);
       timer = setTimeout(() => opts.onApply(editor.getValue()), debounceMs);
     });
@@ -182,6 +186,16 @@ export async function makeEditor(container, opts = {}) {
       opts.onApply(editor.getValue());
     });
   }
+  // Wrap setValue so callers can replace the buffer without triggering
+  // the debounced auto-apply that fires on user keystrokes.
+  const _origSet = editor.setValue.bind(editor);
+  editor.setValueQuiet = (v) => {
+    editor._cljrsSuppressApply = true;
+    try { _origSet(v); } finally {
+      // Defer the unset past Monaco's synchronous change-event flush.
+      queueMicrotask(() => { editor._cljrsSuppressApply = false; });
+    }
+  };
 
   if (opts.vimToggleEl) {
     const vimLib = await loadMonacoVim();

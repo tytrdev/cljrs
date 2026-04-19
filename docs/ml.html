@@ -985,7 +985,7 @@
       warnedSlowStep = false;
       console.time(`[ml] reset+apply ${name}`);
       repl.reset();
-      editor.setValue(SOURCES[name]);
+      editor.setValueQuiet(SOURCES[name]);
       applySource(SOURCES[name]);
       console.timeEnd(`[ml] reset+apply ${name}`);
       if (running) startTrain();
