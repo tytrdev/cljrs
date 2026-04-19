@@ -56,16 +56,31 @@ function toVNode(node) {
         }
       }
       const flatKids = [];
+      // Walk one child slot, splicing nested child-lists (from cljrs
+      // `(map ...)` results that arrive here as a JS array of hiccup
+      // vectors) but stopping at any value that has already become a
+      // vnode (h() returns an Object — re-entering toVNode on it
+      // would coerce it to "[object Object]").
       const pushKid = (c) => {
-        if (c == null) return;
-        if (Array.isArray(c) && c.length > 0 && Array.isArray(c[0])) {
-          // Splice nested child-list (from cljrs `map` results).
-          for (const cc of c) pushKid(toVNode(cc));
-        } else if (Array.isArray(c) && c.length > 0 && (c[0] == null || typeof c[0] === "object")) {
-          for (const cc of c) pushKid(toVNode(cc));
-        } else {
-          flatKids.push(toVNode(c));
+        if (c == null || c === false) return;
+        if (Array.isArray(c)) {
+          if (c.length === 0) return;
+          const head = c[0];
+          // Element form `[tag ...]` — first slot is a string tag.
+          if (typeof head === "string") {
+            flatKids.push(toVNode(c));
+            return;
+          }
+          // Otherwise it's a list of children to splice in.
+          for (const cc of c) pushKid(cc);
+          return;
         }
+        if (typeof c === "string" || typeof c === "number") {
+          flatKids.push(c);
+          return;
+        }
+        // Already a Preact vnode (object) — pass through.
+        flatKids.push(c);
       };
       for (const c of kids) pushKid(c);
       return h(tag, fixedProps, ...flatKids);
