@@ -268,7 +268,7 @@
 
 (def HIDDEN-SIZE 24)
 (def LR          0.02)
-(def N-PER-CLASS 80)
+(def N-PER-CLASS 30)
 (def NOISE       0.18)
 
 (defonce USE-GPU? (atom false))
@@ -341,7 +341,7 @@
     [(ml/scalar loss)]))
 
 ;; viz: pack a confidence grid + the points.
-(def GRID 32)
+(def GRID 18)
 (defn viz []
   (let [pts @DATA
         xs (vec (mapcat (fn [p] [(nth p 0) (nth p 1)]) pts))
@@ -404,7 +404,7 @@
                  (assoc g (+ xi (* 8 yi))
                         (max (nth g (+ xi (* 8 yi))) v))))
         line (fn [g x0 y0 x1 y1]
-               (let [steps 12]
+               (let [steps 6]
                  (reduce (fn [g i]
                            (let [t (/ (* 1.0 i) steps)
                                  x (+ x0 (* t (- x1 x0)))
@@ -423,13 +423,15 @@
     {:x (vec (mapcat first items))
      :y (vec (map second items))}))
 
-(defonce TRAIN (atom (make-set 20 0.6)))   ; 200 examples
-(defonce TEST  (atom (make-set 5  0.6)))   ; 50  examples
+(defonce TRAIN (atom (make-set 6 0.6)))    ; 60 examples — small so the
+(defonce TEST  (atom (make-set 2 0.6)))    ; 20 examples   tree-walker
+                                           ; can build the dataset in
+                                           ; well under a second.
 
 (defn fix-data! []
-  (when (not (= (count (:y @TRAIN)) 200))
-    (reset! TRAIN (make-set 20 0.6))
-    (reset! TEST  (make-set 5  0.6))))
+  (when (not (= (count (:y @TRAIN)) 60))
+    (reset! TRAIN (make-set 6 0.6))
+    (reset! TEST  (make-set 2 0.6))))
 (fix-data!)
 
 (defonce W1 (atom (ml/kaiming 64 HIDDEN)))
@@ -531,7 +533,7 @@
                  (assoc g (+ xi (* 8 yi))
                         (max (nth g (+ xi (* 8 yi))) v))))
         line (fn [g x0 y0 x1 y1]
-               (let [steps 12]
+               (let [steps 6]
                  (reduce (fn [g i]
                            (let [t (/ (* 1.0 i) steps)
                                  x (+ x0 (* t (- x1 x0)))

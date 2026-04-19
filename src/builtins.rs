@@ -86,6 +86,11 @@ pub fn install(env: &Env) {
             }
         }
     }
+    // Numeric constants. Bind as plain values, not zero-arity fns,
+    // so user code can write `(* PI x)` directly.
+    env.define_global("PI", Value::Float(std::f64::consts::PI));
+    env.define_global("E",  Value::Float(std::f64::consts::E));
+    env.define_global("TAU", Value::Float(std::f64::consts::TAU));
     install_prelude(env);
     env.set_current_ns(crate::env::USER_NS);
 }
@@ -136,6 +141,7 @@ fn core_fns() -> Vec<(&'static str, fn(&[Value]) -> Result<Value>)> {
         ("<=", le),
         (">=", ge),
         ("not", not_fn),
+        ("not=", not_eq_fn),
         ("str", to_str),
         ("println", println_fn),
         ("pr-str", pr_str_fn),
@@ -1996,6 +2002,19 @@ fn le(args: &[Value]) -> Result<Value> {
 }
 fn ge(args: &[Value]) -> Result<Value> {
     cmp(args, |a, b| a >= b)
+}
+
+fn not_eq_fn(args: &[Value]) -> Result<Value> {
+    // (not= ...) — variadic. Returns true unless every arg is = to the
+    // first. Mirrors Clojure's spec: (not= a b c) ≡ (not (= a b c)).
+    if args.is_empty() {
+        return Err(Error::Arity { expected: ">=1".into(), got: 0 });
+    }
+    let first = &args[0];
+    for a in &args[1..] {
+        if first != a { return Ok(Value::Bool(true)); }
+    }
+    Ok(Value::Bool(false))
 }
 
 fn not_fn(args: &[Value]) -> Result<Value> {

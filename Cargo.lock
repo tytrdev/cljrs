@@ -377,6 +377,8 @@ name = "cljrs"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "cljrs-ml",
+ "cljrs-physics",
  "eframe",
  "imbl",
  "melior",

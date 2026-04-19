@@ -44,6 +44,13 @@ wgpu = { version = "24", optional = true }
 pollster = { version = "0.4", optional = true }
 bytemuck = { version = "1", optional = true, features = ["derive"] }
 
+[dev-dependencies]
+# Used by tests/page_sources.rs to evaluate every demo page's embedded
+# cljrs source, catching missing builtins / bad references before they
+# reach a browser.
+cljrs-physics = { path = "crates/cljrs-physics" }
+cljrs-ml = { path = "crates/cljrs-ml" }
+
 [[bin]]
 name = "bench"
 path = "src/bin/bench.rs"
