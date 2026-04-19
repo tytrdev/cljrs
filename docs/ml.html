@@ -830,7 +830,13 @@
       if (!repl || !running) return;
       const out = repl.call_ints("train-step!", []);
       if (out.length === 0) {
-        applySource(editor.getValue());
+        // train-step! threw or returned non-numeric. Surface the actual
+        // error and PAUSE — re-applying the source every frame turns
+        // the failure into a runaway reader-allocation loop.
+        const err = repl.eval("(try (train-step!) (catch _ e (str e)))");
+        setStatus(`train-step! failed: ${err}`, "err");
+        running = false;
+        runBtn.textContent = "Resume";
         return;
       }
       lastLoss = out[0];
@@ -843,7 +849,15 @@
     function drawMain() {
       const r = RENDERERS[activeTab];
       let buf = null;
-      if (repl) buf = repl.eval_floats("(viz)");
+      if (repl) {
+        buf = repl.eval_floats("(viz)");
+        if (buf.length === 0 && running) {
+          const err = repl.eval("(try (viz) (catch _ e (str e)))");
+          if (typeof err === "string" && !err.startsWith("[")) {
+            setStatus(`(viz) failed: ${err}`, "err");
+          }
+        }
+      }
       r(mainX, mainC.width, mainC.height, buf);
     }
 

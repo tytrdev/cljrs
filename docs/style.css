@@ -253,11 +253,26 @@ footer {
 .run-example .repl-out.err { color: var(--danger); }
 
 /* Library docs sidebar layout. Used by lib-*.html via mountLibrarySidebar. */
-.lib-layout { display: flex; gap: 1.5rem; align-items: flex-start; }
-.lib-layout main { flex: 1 1 0; min-width: 0; }
+.lib-layout {
+  display: flex;
+  gap: 2rem;
+  align-items: flex-start;
+  max-width: 1140px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+.lib-layout main {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+}
 .lib-sidebar {
-  flex: 0 0 200px; position: sticky; top: 1rem;
-  font-size: 0.85rem;
+  flex: 0 0 180px;
+  position: sticky;
+  top: 1rem;
+  font-size: 0.88rem;
   border-right: 1px solid var(--border);
   padding-right: 1rem;
 }
