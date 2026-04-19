@@ -66,6 +66,8 @@ pub fn install(env: &Env) {
     bind(env, "get-element", get_element_fn);
     bind(env, "set-text!", set_text_fn);
     bind(env, "set-html!", set_html_fn);
+    bind(env, "get-value", get_value_fn);
+    bind(env, "set-value!", set_value_fn);
     bind(env, "on!", on_fn);
     bind(env, "local-get", local_get_fn);
     bind(env, "local-set!", local_set_fn);
@@ -78,6 +80,8 @@ pub fn install(env: &Env) {
     bind(env, "get-element", get_element_fn);
     bind(env, "set-text!", set_text_fn);
     bind(env, "set-html!", set_html_fn);
+    bind(env, "get-value", get_value_fn);
+    bind(env, "set-value!", set_value_fn);
     bind(env, "on!", on_fn);
     bind(env, "local-get", local_get_fn);
     bind(env, "local-set!", local_set_fn);
@@ -174,6 +178,35 @@ fn get_element_fn(args: &[Value]) -> Result<Value> {
         Some(el) => Ok(opaque_el(el.into())),
         None => Ok(Value::Nil),
     }
+}
+
+fn get_value_fn(args: &[Value]) -> Result<Value> {
+    let el_js = arg_element(args, 0, "js/get-value")?;
+    // Use Reflect to read .value — works for input/textarea/select
+    // without web-sys having to know which it is.
+    let v = js_sys::Reflect::get(&el_js, &JsValue::from_str("value"))
+        .map_err(|_| Error::Eval("js/get-value: reflect failed".into()))?;
+    if v.is_undefined() || v.is_null() {
+        return Ok(Value::Nil);
+    }
+    Ok(Value::Str(Arc::from(v.as_string().unwrap_or_default().as_str())))
+}
+
+fn set_value_fn(args: &[Value]) -> Result<Value> {
+    let el_js = arg_element(args, 0, "js/set-value!")?;
+    let val = match args.get(1) {
+        Some(Value::Str(s)) => s.to_string(),
+        Some(Value::Nil) => String::new(),
+        Some(other) => other.to_pr_string(),
+        None => return Err(Error::Eval("js/set-value!: missing value".into())),
+    };
+    js_sys::Reflect::set(
+        &el_js,
+        &JsValue::from_str("value"),
+        &JsValue::from_str(&val),
+    )
+    .map_err(|_| Error::Eval("js/set-value!: reflect set failed".into()))?;
+    Ok(Value::Nil)
 }
 
 fn set_text_fn(args: &[Value]) -> Result<Value> {

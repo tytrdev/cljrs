@@ -95,8 +95,14 @@
       </div>
 
       <div class="ji-col">
-        <div class="repl" id="ji-editor">
-          <textarea id="ji-src" spellcheck="false" style="min-height:520px"></textarea>
+        <div class="repl" id="ji-editor-wrap">
+          <div id="ji-editor" style="height:520px;width:100%"></div>
+          <div class="repl-toolbar" style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+            <span id="ji-vim-status" style="font-family:ui-monospace,monospace;font-size:0.75rem;color:var(--fg-dim)"></span>
+            <label style="font-size:0.75rem;color:var(--fg-dim)">
+              <input type="checkbox" id="ji-vim-toggle"> vim mode
+            </label>
+          </div>
         </div>
         <div id="ji-status" class="ji-status">loading…</div>
         <p class="ji-hint">
@@ -120,7 +126,7 @@
   </main>
 
   <script type="module">
-    import { mountChrome, loadWasm, attachHighlightOverlay } from "./_layout.js";
+    import { mountChrome, loadWasm, makeEditor, attachAltDragScrub, loadMonaco } from "./_layout.js";
     mountChrome();
 
     const INITIAL_SOURCE = `;; ============================================================
@@ -199,14 +205,13 @@
 
 (defn add-todo []
   (let [input (js/get-element "ji-todo-input")
-        ;; we don't have a getter for input.value yet — read via
-        ;; localStorage round-trip would be silly. Instead the JS
-        ;; demo wiring mirrors the input value into a data attr we
-        ;; could read; for now we just append a timestamped row.
-        t (str "todo @ " (int (js/now)))]
-    (swap! todos conj t)
-    (save-todos @todos)
-    (render-todos)))
+        raw (js/get-value input)
+        t (when raw (clojure.string/trim raw))]
+    (when (and t (not= "" t))
+      (swap! todos conj t)
+      (save-todos @todos)
+      (js/set-value! input "")
+      (render-todos))))
 
 (defn clear-todos []
   (reset! todos [])
@@ -221,12 +226,7 @@
 :ok
 `;
 
-    const ta = document.getElementById("ji-src");
     const status = document.getElementById("ji-status");
-    const editor = document.getElementById("ji-editor");
-
-    ta.value = INITIAL_SOURCE;
-    await attachHighlightOverlay(editor, ta);
 
     const mod = await loadWasm();
     let repl = new mod.Repl();
@@ -236,14 +236,14 @@
       status.className = "ji-status " + (cls || "");
     }
 
-    function run() {
+    function run(src) {
       // Fresh repl each apply: the cljrs source attaches listeners on
       // every load, and we don't want N stacked handlers per button.
       // `defonce` keeps the counter / todo atoms across reloads anyway,
       // so the user-visible state is preserved.
       try {
         repl = new mod.Repl();
-        const result = repl.eval(ta.value);
+        const result = repl.eval(src);
         if (result.startsWith("read error") || result.startsWith("eval error")) {
           setStatus(result, "err");
         } else {
@@ -254,14 +254,17 @@
       }
     }
 
-    // Debounced apply-on-edit.
-    let timer = null;
-    ta.addEventListener("input", () => {
-      clearTimeout(timer);
-      timer = setTimeout(run, 300);
+    const editor = await makeEditor(document.getElementById("ji-editor"), {
+      value: INITIAL_SOURCE,
+      onApply: run,
+      vimToggleEl: document.getElementById("ji-vim-toggle"),
+      vimStatusEl: document.getElementById("ji-vim-status"),
+      vimKey: "js-interop",
     });
+    const monaco = await loadMonaco();
+    attachAltDragScrub(editor, monaco);
 
-    run();
+    run(editor.getValue());
   </script>
 </body>
 </html>

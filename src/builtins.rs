@@ -1263,11 +1263,19 @@ fn str_split_fn(args: &[Value]) -> Result<Value> {
         return Err(Error::Arity { expected: "2".into(), got: args.len() });
     }
     let s = as_str(&args[0])?;
-    let sep = as_str(&args[1])?;
-    let parts: Vec<Value> = s
-        .split(sep)
-        .map(|p| Value::Str(Arc::from(p)))
-        .collect();
+    // Accept either a string separator or a compiled Regex literal —
+    // Clojure's clojure.string/split takes a regex; cljrs has been
+    // string-only until now.
+    let parts: Vec<Value> = match &args[1] {
+        Value::Regex(re) => re
+            .split(s)
+            .map(|p| Value::Str(Arc::from(p)))
+            .collect(),
+        _ => s
+            .split(as_str(&args[1])?)
+            .map(|p| Value::Str(Arc::from(p)))
+            .collect(),
+    };
     Ok(Value::Vector(parts.into_iter().collect()))
 }
 
