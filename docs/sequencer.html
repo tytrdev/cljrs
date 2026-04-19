@@ -115,6 +115,45 @@
       font-size: 0.7rem;
       color: var(--fg-dim);
     }
+    #cljrs-root .sq-presets {
+      display: flex; flex-wrap: wrap; gap: 0.25rem;
+      align-items: center; font-size: 0.72rem;
+      margin-bottom: 0.3rem;
+    }
+    #cljrs-root .sq-preset {
+      font-family: ui-monospace, monospace;
+      font-size: 0.7rem;
+      padding: 0.15rem 0.5rem;
+      background: #1d2029; color: #9abfff;
+      border: 1px solid #333; border-radius: 3px;
+      cursor: pointer;
+    }
+    #cljrs-root .sq-preset:hover { background: #262a36; }
+    #cljrs-root .sq-preset.active {
+      background: #ffcc60; color: #0b0d14; border-color: #ffcc60;
+    }
+    #cljrs-root .sq-sends {
+      display: grid;
+      grid-template-columns: auto repeat(6, minmax(0, 1fr));
+      gap: 0.4rem 0.6rem;
+      align-items: center;
+      font-size: 0.7rem;
+      margin: 0.3rem 0;
+      padding: 0.3rem 0.4rem;
+      background: #11141d;
+      border: 1px solid #222;
+      border-radius: 3px;
+    }
+    #cljrs-root .sq-srow {
+      display: flex; flex-direction: column; gap: 2px;
+      min-width: 0;
+    }
+    #cljrs-root .sq-slabel { color: var(--fg-dim); font-size: 0.65rem; }
+    #cljrs-root .sq-sval {
+      font-family: ui-monospace, monospace;
+      font-size: 0.65rem; color: #ffcc60;
+    }
+    #cljrs-root .sq-srow input[type="range"] { width: 100%; }
   </style>
 </head>
 <body>
@@ -148,7 +187,7 @@
     <div class="sq-wrap">
       <div class="sq-stage">
         <!-- cljrs-prerender: ./sequencer.cljrs -->
-        <div id="cljrs-root"><!--ssr--><div class="sq-panel"><div class="sq-toolbar2"><button class="sq-rand">Randomize melody</button><button class="sq-rand">kick</button><button class="sq-rand">snare</button><button class="sq-rand">hat</button><span class="sq-randhint">regenerate from current scale</span></div><div class="sq-grid"><div class="sq-label">kick</div><div class="sq-cell on beat"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-cell on beat"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-cell on beat"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-cell on beat"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-label">snare</div><div class="sq-cell beat"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-cell on beat"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-cell beat"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-cell on beat"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-label">hat</div><div class="sq-cell on beat"></div><div class="sq-cell"></div><div class="sq-cell on"></div><div class="sq-cell"></div><div class="sq-cell on beat"></div><div class="sq-cell"></div><div class="sq-cell on"></div><div class="sq-cell"></div><div class="sq-cell on beat"></div><div class="sq-cell"></div><div class="sq-cell on"></div><div class="sq-cell"></div><div class="sq-cell on beat"></div><div class="sq-cell"></div><div class="sq-cell on"></div><div class="sq-cell"></div></div><div class="sq-mel-row"><div class="sq-label">melody</div><div class="sq-mel-cell">C4</div><div class="sq-mel-cell">D#4</div><div class="sq-mel-cell">G4</div><div class="sq-mel-cell">G#4</div><div class="sq-mel-cell">C5</div><div class="sq-mel-cell">G4</div><div class="sq-mel-cell">D#4</div><div class="sq-mel-cell">C4</div><div class="sq-mel-cell">C4</div><div class="sq-mel-cell">D#4</div><div class="sq-mel-cell">G4</div><div class="sq-mel-cell">C5</div><div class="sq-mel-cell">D4</div><div class="sq-mel-cell">C5</div><div class="sq-mel-cell">G#4</div><div class="sq-mel-cell">G4</div></div><p class="sq-foot">Click any cell to toggle. Edit the source for a permanent change; sliders / clicks are live tweaks until the next apply.</p></div><!--/ssr--></div>
+        <div id="cljrs-root"><!--ssr--><div class="sq-panel"><div class="sq-toolbar2"><button class="sq-rand">Randomize melody</button><button class="sq-rand">kick</button><button class="sq-rand">snare</button><button class="sq-rand">hat</button><span class="sq-randhint">regenerate from current scale</span></div><div class="sq-presets"><span class="sq-randhint">melody voice:</span><button class="sq-preset">init</button><button class="sq-preset">pad</button><button class="sq-preset">lead</button><button class="sq-preset">bass</button><button class="sq-preset">acid</button><button class="sq-preset">bell</button><button class="sq-preset active">pluck</button><button class="sq-preset">brass</button><button class="sq-preset">strings</button></div><div class="sq-sends"><span class="sq-randhint">sends:</span><div class="sq-srow"><label class="sq-slabel">dry</label><input min="0.0" max="1.0" type="range" value="0.9" id="sq-s-dry" step="0.01"/><span class="sq-sval">0.9</span></div><div class="sq-srow"><label class="sq-slabel">reverb</label><input id="sq-s-rev" step="0.01" value="0.2" min="0.0" type="range" max="1.0"/><span class="sq-sval">0.2</span></div><div class="sq-srow"><label class="sq-slabel">delay</label><input type="range" id="sq-s-del" min="0.0" step="0.01" value="0.2" max="1.0"/><span class="sq-sval">0.2</span></div><div class="sq-srow"><label class="sq-slabel">rev-tail</label><input type="range" id="sq-s-revdec" step="0.05" value="2.0" max="5.0" min="0.2"/><span class="sq-sval">2.0</span></div><div class="sq-srow"><label class="sq-slabel">del-time</label><input min="0.01" type="range" max="1.2" step="0.005" value="0.375" id="sq-s-deltime"/><span class="sq-sval">0.375</span></div><div class="sq-srow"><label class="sq-slabel">del-fb</label><input type="range" min="0.0" value="0.4" step="0.01" id="sq-s-delfb" max="0.95"/><span class="sq-sval">0.4</span></div></div><div class="sq-grid"><div class="sq-label">kick</div><div class="sq-cell on beat"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-cell on beat"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-cell on beat"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-cell on beat"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-label">snare</div><div class="sq-cell beat"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-cell on beat"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-cell beat"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-cell on beat"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-cell"></div><div class="sq-label">hat</div><div class="sq-cell on beat"></div><div class="sq-cell"></div><div class="sq-cell on"></div><div class="sq-cell"></div><div class="sq-cell on beat"></div><div class="sq-cell"></div><div class="sq-cell on"></div><div class="sq-cell"></div><div class="sq-cell on beat"></div><div class="sq-cell"></div><div class="sq-cell on"></div><div class="sq-cell"></div><div class="sq-cell on beat"></div><div class="sq-cell"></div><div class="sq-cell on"></div><div class="sq-cell"></div></div><div class="sq-mel-row"><div class="sq-label">melody</div><div class="sq-mel-cell">C4</div><div class="sq-mel-cell">D#4</div><div class="sq-mel-cell">G4</div><div class="sq-mel-cell">G#4</div><div class="sq-mel-cell">C5</div><div class="sq-mel-cell">G4</div><div class="sq-mel-cell">D#4</div><div class="sq-mel-cell">C4</div><div class="sq-mel-cell">C4</div><div class="sq-mel-cell">D#4</div><div class="sq-mel-cell">G4</div><div class="sq-mel-cell">C5</div><div class="sq-mel-cell">D4</div><div class="sq-mel-cell">C5</div><div class="sq-mel-cell">G#4</div><div class="sq-mel-cell">G4</div></div><p class="sq-foot">Click any cell to toggle. Pick a melody preset to re-voice the melody line. Reverb / delay sends live to the right.</p></div><!--/ssr--></div>
         <div class="sq-overlay" id="sq-overlay">stopped · — bpm</div>
       </div>
       <div class="sq-col">
@@ -203,6 +242,21 @@
     let analyser = null;
     let playing = false;
 
+    // Effects buses (reverb + delay). Built once on ensureAudio.
+    // All drum voices and the melody voice send into these.
+    let revBus = null, revNode = null, revReturn = null;
+    let delBus = null, delNode = null, delFB = null, delReturn = null;
+    let lastRevDecay = -1;
+    let currentBus = null;
+    // Melody patch cache — refreshed per melody note so preset changes
+    // take effect at the next sequencer step.
+    let melPatch = {
+      wave: "triangle",
+      detune: 0, cutoff: 2200, q: 1.5,
+      attack: 0.005, decay: 0.2, sustain: 0.4, release: 0.18,
+      gain: 0.45, envAmt: 0, envDecay: 0.2,
+    };
+
     // Score caches (refreshed every applySource and at the start of each
     // step so live edits / cell toggles take effect immediately).
     let bpm = 120;
@@ -240,7 +294,56 @@
       snare  = pullVec("(snare)",  STEPS);
       hat    = pullVec("(hat)",    STEPS);
       melody = pullVec("(melody)", STEPS);
+      readMelPatch();
+      readBus();
       return true;
+    }
+
+    function waveOf(s) {
+      const m = (s || "").match(/:(sine|square|sawtooth|triangle)/);
+      return m ? m[1] : "triangle";
+    }
+    function readMelPatch() {
+      if (!repl) return;
+      try {
+        const f = repl.eval_floats("(mel-patch)");
+        if (f.length >= 10) {
+          melPatch.detune   = f[0];
+          melPatch.cutoff   = f[1];
+          melPatch.q        = f[2];
+          melPatch.attack   = f[3];
+          melPatch.decay    = f[4];
+          melPatch.sustain  = f[5];
+          melPatch.release  = f[6];
+          melPatch.gain     = f[7];
+          melPatch.envAmt   = f[8];
+          melPatch.envDecay = f[9];
+        }
+        melPatch.wave = waveOf(repl.eval("@MEL-WAVE"));
+      } catch (_) {}
+    }
+    function readBus() {
+      if (!repl || !audio) return;
+      try {
+        const f = repl.eval_floats("(bus)");
+        if (f.length < 6) return;
+        const b = {
+          mixDry:    f[0], mixRev: f[1], mixDelay: f[2],
+          delayTime: f[3], delayFB: f[4], revDecay: f[5],
+        };
+        currentBus = b;
+        const now = audio.currentTime;
+        revReturn.gain.setValueAtTime(b.mixRev, now);
+        delReturn.gain.setValueAtTime(b.mixDelay, now);
+        delNode.delayTime.setValueAtTime(
+          Math.max(0.001, Math.min(2.0, b.delayTime)), now);
+        delFB.gain.setValueAtTime(
+          Math.max(0, Math.min(0.95, b.delayFB)), now);
+        if (Math.abs(b.revDecay - lastRevDecay) > 0.02) {
+          revNode.buffer = makeReverbIR(audio, Math.max(0.2, b.revDecay));
+          lastRevDecay = b.revDecay;
+        }
+      } catch (_) {}
     }
 
     function applySource(src) {
@@ -288,6 +391,24 @@
     // Standard Chris Wilson "lookahead scheduler": setInterval ticks at
     // TICK_MS and walks every step whose start time is within the next
     // LOOKAHEAD_S, queuing it on the audio clock.
+    // Synthesized exp-decay noise IR for the reverb convolver.
+    // Duplicated from synth.html — sequencer runs on its own page
+    // and doesn't share a module.
+    function makeReverbIR(ctx, seconds) {
+      const sr = ctx.sampleRate;
+      const len = Math.max(1, Math.floor(sr * seconds));
+      const buf = ctx.createBuffer(2, len, sr);
+      for (let ch = 0; ch < 2; ch++) {
+        const d = buf.getChannelData(ch);
+        for (let i = 0; i < len; i++) {
+          const t = i / len;
+          const env = Math.pow(1 - t, 2.5);
+          d[i] = (Math.random() * 2 - 1) * env;
+        }
+      }
+      return buf;
+    }
+
     function ensureAudio() {
       if (audio) return audio;
       audio = new (window.AudioContext || window.webkitAudioContext)();
@@ -296,7 +417,42 @@
       analyser = audio.createAnalyser();
       analyser.fftSize = 1024;
       master.connect(analyser).connect(audio.destination);
+
+      // Reverb bus.
+      revBus = audio.createGain(); revBus.gain.value = 1.0;
+      revNode = audio.createConvolver();
+      revNode.buffer = makeReverbIR(audio, 2.0);
+      lastRevDecay = 2.0;
+      revReturn = audio.createGain(); revReturn.gain.value = 0.2;
+      revBus.connect(revNode).connect(revReturn).connect(master);
+
+      // Delay bus with lowpassed feedback path.
+      delBus = audio.createGain(); delBus.gain.value = 1.0;
+      delNode = audio.createDelay(2.0);
+      delNode.delayTime.value = 0.375;
+      delFB = audio.createGain(); delFB.gain.value = 0.4;
+      delReturn = audio.createGain(); delReturn.gain.value = 0.2;
+      const delLP = audio.createBiquadFilter();
+      delLP.type = "lowpass"; delLP.frequency.value = 3000;
+      delBus.connect(delNode);
+      delNode.connect(delLP).connect(delFB).connect(delNode);
+      delNode.connect(delReturn).connect(master);
       return audio;
+    }
+
+    // Sum of (dry-to-master, send-to-revBus, send-to-delBus) for a
+    // voice's output. Used by every drum + melody scheduler below.
+    function connectSends(node) {
+      const dry = audio.createGain();
+      const rev = audio.createGain();
+      const del = audio.createGain();
+      const mixDry = currentBus ? currentBus.mixDry : 0.9;
+      dry.gain.value = mixDry;
+      rev.gain.value = 1.0;
+      del.gain.value = 1.0;
+      node.connect(dry).connect(master);
+      if (revBus) node.connect(rev).connect(revBus);
+      if (delBus) node.connect(del).connect(delBus);
     }
 
     function midiToHz(n) { return 440 * Math.pow(2, (n - 69) / 12); }
@@ -309,7 +465,8 @@
       g.gain.setValueAtTime(0.0001, t);
       g.gain.exponentialRampToValueAtTime(0.9, t + 0.005);
       g.gain.exponentialRampToValueAtTime(0.0001, t + 0.25);
-      osc.connect(g).connect(master);
+      osc.connect(g);
+      connectSends(g);
       osc.start(t); osc.stop(t + 0.3);
     }
 
@@ -326,7 +483,8 @@
       ng.gain.setValueAtTime(0.0001, t);
       ng.gain.exponentialRampToValueAtTime(0.6, t + 0.005);
       ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
-      noise.connect(bp).connect(ng).connect(master);
+      noise.connect(bp).connect(ng);
+      connectSends(ng);
       noise.start(t); noise.stop(t + 0.25);
 
       const body = audio.createOscillator();
@@ -335,7 +493,8 @@
       bg.gain.setValueAtTime(0.0001, t);
       bg.gain.exponentialRampToValueAtTime(0.4, t + 0.005);
       bg.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
-      body.connect(bg).connect(master);
+      body.connect(bg);
+      connectSends(bg);
       body.start(t); body.stop(t + 0.15);
     }
 
@@ -352,21 +511,54 @@
       g.gain.setValueAtTime(0.0001, t);
       g.gain.exponentialRampToValueAtTime(0.25, t + 0.002);
       g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
-      noise.connect(hp).connect(g).connect(master);
+      noise.connect(hp).connect(g);
+      connectSends(g);
       noise.start(t); noise.stop(t + 0.06);
     }
 
+    // Melody voice: full subtractive chain (osc -> filter -> gain)
+    // honoring the currently-loaded preset. Filter envelope retriggers
+    // per note for TB-303-like bite.
     function scheduleMelodyNote(t, midi) {
+      const p = melPatch;
       const osc = audio.createOscillator();
-      osc.type = "triangle";
+      osc.type = p.wave;
       osc.frequency.setValueAtTime(midiToHz(midi), t);
+      osc.detune.setValueAtTime(p.detune, t);
+
+      const filt = audio.createBiquadFilter();
+      filt.type = "lowpass";
+      filt.Q.setValueAtTime(p.q, t);
+
       const g = audio.createGain();
-      const dur = Math.min(0.18, 60.0 / bpm / 4 * 0.9);
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(0.35, t + 0.01);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-      osc.connect(g).connect(master);
-      osc.start(t); osc.stop(t + dur + 0.02);
+      const stepDur = 60.0 / bpm / 4;
+      const a = Math.max(0.001, p.attack);
+      const d = Math.max(0.001, p.decay);
+      const r = Math.max(0.01, p.release);
+      // Hold through the step, release at the tail.
+      const hold = Math.max(a + d, stepDur * 0.8);
+      const peak = Math.max(0.001, p.gain);
+      const sus = peak * Math.max(0, Math.min(1, p.sustain));
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(peak, t + a);
+      g.gain.linearRampToValueAtTime(sus, t + a + d);
+      g.gain.setValueAtTime(sus, t + hold);
+      g.gain.linearRampToValueAtTime(0, t + hold + r);
+
+      // Per-note filter envelope.
+      if (p.envAmt && p.envAmt > 0.1) {
+        const base = Math.max(20, p.cutoff);
+        const pk = Math.min(18000, base + p.envAmt);
+        const dec = Math.max(0.01, p.envDecay);
+        filt.frequency.setValueAtTime(pk, t);
+        filt.frequency.exponentialRampToValueAtTime(base, t + dec);
+      } else {
+        filt.frequency.setValueAtTime(p.cutoff, t);
+      }
+
+      osc.connect(filt).connect(g);
+      connectSends(g);
+      osc.start(t); osc.stop(t + hold + r + 0.05);
     }
 
     function scheduleStep(stepIdx, t) {
@@ -383,6 +575,10 @@
 
     function schedulerTick() {
       const stepDur = 60.0 / bpm / 4; // 16th note in seconds
+      // Bus + mel-patch are cheap to read each tick so preset button
+      // clicks and slider drags take effect mid-bar.
+      readMelPatch();
+      readBus();
       while (nextStepTime < audio.currentTime + LOOKAHEAD_S) {
         // Refresh the score at the top of every bar so cell toggles
         // and Randomize clicks reach the audio path within at most

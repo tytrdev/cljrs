@@ -39,6 +39,32 @@
 ;; playhead column.
 (def STEP   (atom -1))
 
+;; --- melody-voice patch (mirrors synth.cljrs) ---------------------
+;; The sequencer's melody voice reads these atoms. The JS side polls
+;; (mel-patch) each step and applies them to the new oscillator.
+
+(def MEL-WAVE       (atom :triangle))
+(def MEL-DETUNE     (atom 0.0))
+(def MEL-CUTOFF     (atom 2200.0))
+(def MEL-Q          (atom 1.5))
+(def MEL-ATTACK     (atom 0.005))
+(def MEL-DECAY      (atom 0.2))
+(def MEL-SUSTAIN    (atom 0.4))
+(def MEL-RELEASE    (atom 0.18))
+(def MEL-GAIN       (atom 0.45))
+(def MEL-ENV-AMT    (atom 0.0))
+(def MEL-ENV-DECAY  (atom 0.2))
+
+;; Send / bus params — symmetric with synth.cljrs.
+(def MIX-DRY    (atom 0.9))
+(def MIX-REV    (atom 0.2))
+(def MIX-DELAY  (atom 0.2))
+(def DELAY-TIME (atom 0.375))
+(def DELAY-FB   (atom 0.4))
+(def REV-DECAY  (atom 2.0))
+
+(def PRESET (atom :pluck))
+
 ;; --- score readers (JS contract) ----------------------------------
 ;; The JS scheduler reads each pattern with repl.eval_floats every step.
 ;; Names + counts must stay stable.
@@ -48,6 +74,74 @@
 (defn snare  [] @SNARE)
 (defn hat    [] @HAT)
 (defn melody [] @MELODY)
+
+(defn mel-patch []
+  [@MEL-DETUNE @MEL-CUTOFF @MEL-Q
+   @MEL-ATTACK @MEL-DECAY @MEL-SUSTAIN @MEL-RELEASE
+   @MEL-GAIN @MEL-ENV-AMT @MEL-ENV-DECAY])
+
+(defn bus []
+  [@MIX-DRY @MIX-REV @MIX-DELAY @DELAY-TIME @DELAY-FB @REV-DECAY])
+
+;; --- preset patches -----------------------------------------------
+;; Same data as the synth page. The sequencer's picker applies these
+;; to the melody-voice atoms so the bar's melody takes on that tone.
+
+(def PRESETS
+  {:init   {:wave :triangle :detune 0.0 :cutoff 2200.0 :q 1.5
+            :attack 0.005 :decay 0.2 :sustain 0.4 :release 0.18 :gain 0.45
+            :env-amt 0.0 :env-decay 0.2}
+
+   :pad    {:wave :sawtooth :detune 22.0 :cutoff 1400.0 :q 1.5
+            :attack 0.25 :decay 0.3 :sustain 0.8 :release 0.8 :gain 0.32
+            :env-amt 0.0 :env-decay 0.5}
+
+   :lead   {:wave :sawtooth :detune 10.0 :cutoff 2800.0 :q 4.0
+            :attack 0.005 :decay 0.2 :sustain 0.7 :release 0.2 :gain 0.4
+            :env-amt 1200.0 :env-decay 0.4}
+
+   :bass   {:wave :square :detune 0.0 :cutoff 650.0 :q 3.5
+            :attack 0.005 :decay 0.12 :sustain 0.55 :release 0.12 :gain 0.5
+            :env-amt 500.0 :env-decay 0.15}
+
+   :acid   {:wave :sawtooth :detune 0.0 :cutoff 320.0 :q 16.0
+            :attack 0.003 :decay 0.08 :sustain 0.2 :release 0.1 :gain 0.5
+            :env-amt 2400.0 :env-decay 0.22}
+
+   :bell   {:wave :sawtooth :detune 37.0 :cutoff 4000.0 :q 2.0
+            :attack 0.001 :decay 0.5 :sustain 0.0 :release 1.0 :gain 0.32
+            :env-amt 1500.0 :env-decay 0.3}
+
+   :pluck  {:wave :triangle :detune 4.0 :cutoff 2200.0 :q 2.0
+            :attack 0.001 :decay 0.2 :sustain 0.0 :release 0.18 :gain 0.45
+            :env-amt 1800.0 :env-decay 0.18}
+
+   :brass  {:wave :sawtooth :detune 8.0 :cutoff 1500.0 :q 3.0
+            :attack 0.05 :decay 0.2 :sustain 0.75 :release 0.25 :gain 0.4
+            :env-amt 900.0 :env-decay 0.3}
+
+   :strings {:wave :sawtooth :detune 15.0 :cutoff 1800.0 :q 2.0
+             :attack 0.15 :decay 0.3 :sustain 0.85 :release 0.6 :gain 0.38
+             :env-amt 300.0 :env-decay 0.4}})
+
+(def PRESET-ORDER [:init :pad :lead :bass :acid :bell :pluck :brass :strings])
+
+(defn load-preset! [k]
+  (let [p (get PRESETS k)]
+    (when p
+      (reset! MEL-WAVE      (get p :wave))
+      (reset! MEL-DETUNE    (get p :detune))
+      (reset! MEL-CUTOFF    (get p :cutoff))
+      (reset! MEL-Q         (get p :q))
+      (reset! MEL-ATTACK    (get p :attack))
+      (reset! MEL-DECAY     (get p :decay))
+      (reset! MEL-SUSTAIN   (get p :sustain))
+      (reset! MEL-RELEASE   (get p :release))
+      (reset! MEL-GAIN      (get p :gain))
+      (reset! MEL-ENV-AMT   (get p :env-amt))
+      (reset! MEL-ENV-DECAY (get p :env-decay))
+      (reset! PRESET k)
+      (sequencer/render!))))
 
 ;; --- LCG (deterministic random) -----------------------------------
 ;; cljrs has no `rand`. Linear congruential generator, Numerical
@@ -178,6 +272,46 @@
       (mapv (fn [i] (sequencer/__mel-cell i (nth mel i) (= i head)))
             (range 16)))))
 
+(defn __preset-btn [k]
+  [:button {:class (str "sq-preset" (if (= k @PRESET) " active" ""))
+            :on-click (fn [] (sequencer/load-preset! k))}
+   (name k)])
+
+(defn __preset-row []
+  (vec
+    (concat
+      [:div {:class "sq-presets"}]
+      [[:span {:class "sq-randhint"} "melody voice:"]]
+      (mapv sequencer/__preset-btn PRESET-ORDER))))
+
+(defn __read-num [el-id]
+  (let [s (cljrs.js/get-value (cljrs.js/get-element el-id))]
+    (double (read-string s))))
+
+(defn __slider [label el-id atom-ref min-v max-v step]
+  [:div {:class "sq-srow"}
+   [:label {:class "sq-slabel"} label]
+   [:input {:id    el-id
+            :type  "range"
+            :min   min-v
+            :max   max-v
+            :step  step
+            :value @atom-ref
+            :on-input (fn []
+                        (reset! atom-ref (sequencer/__read-num el-id))
+                        (sequencer/render!))}]
+   [:span {:class "sq-sval"} (str @atom-ref)]])
+
+(defn __sends-panel []
+  [:div {:class "sq-sends"}
+   [:span {:class "sq-randhint"} "sends:"]
+   (sequencer/__slider "dry"      "sq-s-dry"     MIX-DRY     0.0  1.0  0.01)
+   (sequencer/__slider "reverb"   "sq-s-rev"     MIX-REV     0.0  1.0  0.01)
+   (sequencer/__slider "delay"    "sq-s-del"     MIX-DELAY   0.0  1.0  0.01)
+   (sequencer/__slider "rev-tail" "sq-s-revdec"  REV-DECAY   0.2  5.0  0.05)
+   (sequencer/__slider "del-time" "sq-s-deltime" DELAY-TIME  0.01 1.2  0.005)
+   (sequencer/__slider "del-fb"   "sq-s-delfb"   DELAY-FB    0.0  0.95 0.01)])
+
 (defn ui-tree []
   (let [head @STEP
         k    @KICK
@@ -200,6 +334,8 @@
        "hat"]
       [:span {:class "sq-randhint"}
        "regenerate from current scale"]]
+     (sequencer/__preset-row)
+     (sequencer/__sends-panel)
      [:div {:class "sq-grid"}
       (sequencer/__row :kick  "kick"  k  head)
       (sequencer/__row :snare "snare" sn head)
@@ -207,8 +343,8 @@
      [:div {:class "sq-mel-row"}
       (sequencer/__mel-row mel head)]
      [:p {:class "sq-foot"}
-      "Click any cell to toggle. Edit the source for a permanent change; "
-      "sliders / clicks are live tweaks until the next apply."]]))
+      "Click any cell to toggle. Pick a melody preset to re-voice the "
+      "melody line. Reverb / delay sends live to the right."]]))
 
 ;; --- entry points -------------------------------------------------
 

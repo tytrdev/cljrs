@@ -48,6 +48,26 @@
 
 (def GAIN           (atom 0.5))
 
+;; Per-note filter envelope — the TB-303 secret sauce. The filter
+;; envelope re-triggers on every note; ENV-AMT is how far (in Hz) the
+;; cutoff opens above the base at the start of each note. Zero = off.
+(def ENV-AMT        (atom 0.0))     ; Hz of cutoff opening
+(def ENV-DECAY      (atom 0.25))    ; seconds for env to close
+
+;; Effect sends + bus params. The JS side creates a reverb (convolver
+;; fed by a synthetic exp-decay noise impulse response) and a feedback
+;; delay, each living on master. Voices send to both; the bus amounts
+;; + dry mix are polled each frame.
+(def MIX-DRY        (atom 0.9))     ; dry voice -> master
+(def MIX-REV        (atom 0.15))    ; reverb bus return
+(def MIX-DELAY      (atom 0.15))    ; delay bus return
+(def DELAY-TIME     (atom 0.375))   ; seconds (dotted 8th @ 120bpm)
+(def DELAY-FB       (atom 0.4))     ; 0..0.95
+(def REV-DECAY      (atom 2.0))     ; seconds — regenerates IR on change
+
+;; Current patch name. Set by load-preset!; purely cosmetic.
+(def PRESET (atom :init))
+
 ;; The JS side polls this flat vector each rAF tick. Order is a
 ;; contract with synth.html. Keep it stable.
 (defn patch []
@@ -55,7 +75,84 @@
    @FILTER-CUTOFF @FILTER-Q
    @ATTACK @DECAY @SUSTAIN @RELEASE
    @LFO-RATE @LFO-DEPTH
-   @GAIN])
+   @GAIN
+   @ENV-AMT @ENV-DECAY])
+
+;; Second vector polled for the bus. Kept separate so the existing
+;; (patch) contract is unchanged and (patch) stays cheap.
+(defn bus []
+  [@MIX-DRY @MIX-REV @MIX-DELAY @DELAY-TIME @DELAY-FB @REV-DECAY])
+
+;; --- preset patches -----------------------------------------------
+;; Simple data maps. load-preset! resets the atoms above from these.
+;; Edit here to add your own — the UI picker rebuilds from PRESETS.
+
+(def PRESETS
+  {:init   {:wave :sawtooth :detune 7.0 :cutoff 900.0 :q 6.0
+            :attack 0.02 :decay 0.15 :sustain 0.6 :release 0.35
+            :lfor 4.0 :lfod 300.0 :gain 0.5
+            :env-amt 0.0 :env-decay 0.25}
+
+   :pad    {:wave :sawtooth :detune 22.0 :cutoff 1400.0 :q 1.5
+            :attack 0.6 :decay 0.4 :sustain 0.8 :release 1.6
+            :lfor 0.4 :lfod 180.0 :gain 0.35
+            :env-amt 0.0 :env-decay 0.5}
+
+   :lead   {:wave :sawtooth :detune 10.0 :cutoff 2800.0 :q 4.0
+            :attack 0.005 :decay 0.2 :sustain 0.7 :release 0.25
+            :lfor 5.5 :lfod 250.0 :gain 0.45
+            :env-amt 1200.0 :env-decay 0.4}
+
+   :bass   {:wave :square :detune 0.0 :cutoff 650.0 :q 3.5
+            :attack 0.005 :decay 0.12 :sustain 0.55 :release 0.12
+            :lfor 0.0 :lfod 0.0 :gain 0.55
+            :env-amt 500.0 :env-decay 0.15}
+
+   :acid   {:wave :sawtooth :detune 0.0 :cutoff 320.0 :q 16.0
+            :attack 0.003 :decay 0.08 :sustain 0.2 :release 0.1
+            :lfor 0.0 :lfod 0.0 :gain 0.55
+            :env-amt 2400.0 :env-decay 0.22}
+
+   :bell   {:wave :sawtooth :detune 37.0 :cutoff 4000.0 :q 2.0
+            :attack 0.001 :decay 0.8 :sustain 0.0 :release 1.4
+            :lfor 6.0 :lfod 40.0 :gain 0.35
+            :env-amt 1500.0 :env-decay 0.3}
+
+   :pluck  {:wave :triangle :detune 4.0 :cutoff 2200.0 :q 2.0
+            :attack 0.001 :decay 0.25 :sustain 0.0 :release 0.25
+            :lfor 0.0 :lfod 0.0 :gain 0.5
+            :env-amt 1800.0 :env-decay 0.18}
+
+   :brass  {:wave :sawtooth :detune 8.0 :cutoff 1500.0 :q 3.0
+            :attack 0.08 :decay 0.25 :sustain 0.75 :release 0.3
+            :lfor 5.0 :lfod 80.0 :gain 0.45
+            :env-amt 900.0 :env-decay 0.35}
+
+   :strings {:wave :sawtooth :detune 15.0 :cutoff 1800.0 :q 2.0
+             :attack 0.25 :decay 0.4 :sustain 0.85 :release 1.0
+             :lfor 5.2 :lfod 60.0 :gain 0.4
+             :env-amt 300.0 :env-decay 0.5}})
+
+(def PRESET-ORDER [:init :pad :lead :bass :acid :bell :pluck :brass :strings])
+
+(defn load-preset! [k]
+  (let [p (get PRESETS k)]
+    (when p
+      (reset! WAVE-TYPE     (get p :wave))
+      (reset! DETUNE        (get p :detune))
+      (reset! FILTER-CUTOFF (get p :cutoff))
+      (reset! FILTER-Q      (get p :q))
+      (reset! ATTACK        (get p :attack))
+      (reset! DECAY         (get p :decay))
+      (reset! SUSTAIN       (get p :sustain))
+      (reset! RELEASE       (get p :release))
+      (reset! LFO-RATE      (get p :lfor))
+      (reset! LFO-DEPTH     (get p :lfod))
+      (reset! GAIN          (get p :gain))
+      (reset! ENV-AMT       (get p :env-amt))
+      (reset! ENV-DECAY     (get p :env-decay))
+      (reset! PRESET k)
+      (boot))))
 
 ;; Future hook: if/when the tree-walker can keep up, swap this in
 ;; for a full Clojure DSP path via repl.call_floats.
@@ -103,8 +200,22 @@
                          (boot))}
     (name @WAVE-TYPE)]])
 
+(defn preset-btn [k]
+  [:button {:class (str "sy-preset" (if (= k @PRESET) " active" ""))
+            :on-click (fn [] (synth/load-preset! k))}
+   (name k)])
+
+(defn preset-row []
+  (vec
+    (concat
+      [:div {:class "sy-presets"}]
+      [[:span {:class "sy-slabel"} "preset"]]
+      (mapv synth/preset-btn PRESET-ORDER))))
+
 (defn ui-tree []
   [:div {:class "sy-panel"}
+   [:h4 {:class "sy-h"} "preset"]
+   (synth/preset-row)
    [:h4 {:class "sy-h"} "patch"]
    (slider-row "transpose" "sy-s-freq"    FREQ          -24.0    24.0 1.0)
    (slider-row "detune"   "sy-s-detune"   DETUNE        -50.0    50.0 0.1)
@@ -112,6 +223,8 @@
    [:h4 {:class "sy-h"} "filter"]
    (slider-row "cutoff"   "sy-s-cutoff"   FILTER-CUTOFF  60.0  6000.0 1.0)
    (slider-row "Q"        "sy-s-q"        FILTER-Q        0.1    20.0 0.1)
+   (slider-row "env-amt"  "sy-s-envamt"   ENV-AMT         0.0  4000.0 1.0)
+   (slider-row "env-dec"  "sy-s-envdec"   ENV-DECAY       0.01    1.0 0.01)
    [:h4 {:class "sy-h"} "envelope"]
    (slider-row "attack"   "sy-s-attack"   ATTACK          0.0     1.0 0.005)
    (slider-row "decay"    "sy-s-decay"    DECAY           0.0     1.0 0.005)
@@ -122,9 +235,16 @@
    (slider-row "depth"    "sy-s-lfod"     LFO-DEPTH       0.0  2000.0 1.0)
    [:h4 {:class "sy-h"} "amp"]
    (slider-row "gain"     "sy-s-gain"     GAIN            0.0     1.0 0.01)
+   [:h4 {:class "sy-h"} "sends"]
+   (slider-row "dry"      "sy-s-dry"      MIX-DRY         0.0     1.0 0.01)
+   (slider-row "reverb"   "sy-s-rev"      MIX-REV         0.0     1.0 0.01)
+   (slider-row "delay"    "sy-s-del"      MIX-DELAY       0.0     1.0 0.01)
+   (slider-row "rev-tail" "sy-s-revdec"   REV-DECAY       0.2     5.0 0.05)
+   (slider-row "del-time" "sy-s-deltime"  DELAY-TIME      0.01    1.2 0.005)
+   (slider-row "del-fb"   "sy-s-delfb"    DELAY-FB        0.0    0.95 0.01)
    [:p {:class "sy-foot"}
-    "Patch values stream into Web Audio every frame. Edit a slider
-     for a live tweak, edit the source for a permanent change."]])
+    "Patch values stream into Web Audio every frame. Pick a preset to snap
+     all knobs, then edit sliders for a live tweak."]])
 
 ;; --- entry points -------------------------------------------------
 

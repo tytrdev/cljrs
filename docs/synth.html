@@ -92,6 +92,24 @@
       border: 1px solid #333; border-radius: 3px;
       cursor: pointer;
     }
+    .sy-presets {
+      display: flex; flex-wrap: wrap; gap: 0.25rem;
+      align-items: center;
+      font-size: 0.75rem;
+    }
+    .sy-presets .sy-slabel { margin-right: 0.3rem; color: var(--fg-dim); }
+    .sy-preset {
+      font-family: ui-monospace, monospace;
+      font-size: 0.72rem;
+      padding: 0.15rem 0.5rem;
+      background: #1d2029; color: #9abfff;
+      border: 1px solid #333; border-radius: 3px;
+      cursor: pointer;
+    }
+    .sy-preset:hover { background: #262a36; }
+    .sy-preset.active {
+      background: #ffcc60; color: #0b0d14; border-color: #ffcc60;
+    }
     .sy-foot {
       margin: 0.4rem 0 0 0;
       font-size: 0.7rem;
@@ -148,8 +166,8 @@
         </div>
 
         <!-- cljrs-prerender: ./synth.cljrs -->
-        <div id="cljrs-root"><!--ssr--><div class="sy-panel"><h4 class="sy-h">patch</h4><div class="sy-srow"><label class="sy-slabel">transpose</label><input max="24.0" step="1.0" value="0.0" min="-24.0" id="sy-s-freq" type="range"/><span class="sy-sval">0.0</span></div><div class="sy-srow"><label class="sy-slabel">detune</label><input max="50.0" id="sy-s-detune" type="range" value="7.0" step="0.1" min="-50.0"/><span class="sy-sval">7.0</span></div><div class="sy-srow"><label class="sy-slabel">wave</label><button class="sy-wavebtn">sawtooth</button></div><h4 class="sy-h">filter</h4><div class="sy-srow"><label class="sy-slabel">cutoff</label><input type="range" id="sy-s-cutoff" min="60.0" max="6000.0" step="1.0" value="900.0"/><span class="sy-sval">900.0</span></div><div class="sy-srow"><label class="sy-slabel">Q</label><input type="range" step="0.1" value="6.0" id="sy-s-q" min="0.1" max="20.0"/><span class="sy-sval">6.0</span></div><h4 class="sy-h">envelope</h4><div class="sy-srow"><label class="sy-slabel">attack</label><input id="sy-s-attack" type="range" step="0.005" min="0.0" value="0.02" max="1.0"/><span class="sy-sval">0.02</span></div><div class="sy-srow"><label class="sy-slabel">decay</label><input step="0.005" min="0.0" id="sy-s-decay" value="0.15" type="range" max="1.0"/><span class="sy-sval">0.15</span></div><div class="sy-srow"><label class="sy-slabel">sustain</label><input max="1.0" min="0.0" type="range" id="sy-s-sustain" value="0.6" step="0.01"/><span class="sy-sval">0.6</span></div><div class="sy-srow"><label class="sy-slabel">release</label><input value="0.35" step="0.01" type="range" min="0.0" max="2.0" id="sy-s-release"/><span class="sy-sval">0.35</span></div><h4 class="sy-h">LFO → cutoff</h4><div class="sy-srow"><label class="sy-slabel">rate</label><input type="range" id="sy-s-lfor" step="0.1" max="20.0" value="4.0" min="0.0"/><span class="sy-sval">4.0</span></div><div class="sy-srow"><label class="sy-slabel">depth</label><input type="range" max="2000.0" step="1.0" min="0.0" value="300.0" id="sy-s-lfod"/><span class="sy-sval">300.0</span></div><h4 class="sy-h">amp</h4><div class="sy-srow"><label class="sy-slabel">gain</label><input min="0.0" type="range" step="0.01" max="1.0" value="0.5" id="sy-s-gain"/><span class="sy-sval">0.5</span></div><p class="sy-foot">Patch values stream into Web Audio every frame. Edit a slider
-     for a live tweak, edit the source for a permanent change.</p></div><!--/ssr--></div>
+        <div id="cljrs-root"><!--ssr--><div class="sy-panel"><h4 class="sy-h">preset</h4><div class="sy-presets"><span class="sy-slabel">preset</span><button class="sy-preset active">init</button><button class="sy-preset">pad</button><button class="sy-preset">lead</button><button class="sy-preset">bass</button><button class="sy-preset">acid</button><button class="sy-preset">bell</button><button class="sy-preset">pluck</button><button class="sy-preset">brass</button><button class="sy-preset">strings</button></div><h4 class="sy-h">patch</h4><div class="sy-srow"><label class="sy-slabel">transpose</label><input min="-24.0" step="1.0" id="sy-s-freq" max="24.0" type="range" value="0.0"/><span class="sy-sval">0.0</span></div><div class="sy-srow"><label class="sy-slabel">detune</label><input type="range" step="0.1" min="-50.0" max="50.0" id="sy-s-detune" value="7.0"/><span class="sy-sval">7.0</span></div><div class="sy-srow"><label class="sy-slabel">wave</label><button class="sy-wavebtn">sawtooth</button></div><h4 class="sy-h">filter</h4><div class="sy-srow"><label class="sy-slabel">cutoff</label><input id="sy-s-cutoff" value="900.0" max="6000.0" step="1.0" min="60.0" type="range"/><span class="sy-sval">900.0</span></div><div class="sy-srow"><label class="sy-slabel">Q</label><input step="0.1" min="0.1" type="range" value="6.0" max="20.0" id="sy-s-q"/><span class="sy-sval">6.0</span></div><div class="sy-srow"><label class="sy-slabel">env-amt</label><input min="0.0" step="1.0" value="0.0" type="range" id="sy-s-envamt" max="4000.0"/><span class="sy-sval">0.0</span></div><div class="sy-srow"><label class="sy-slabel">env-dec</label><input min="0.01" value="0.25" id="sy-s-envdec" max="1.0" step="0.01" type="range"/><span class="sy-sval">0.25</span></div><h4 class="sy-h">envelope</h4><div class="sy-srow"><label class="sy-slabel">attack</label><input min="0.0" value="0.02" step="0.005" max="1.0" id="sy-s-attack" type="range"/><span class="sy-sval">0.02</span></div><div class="sy-srow"><label class="sy-slabel">decay</label><input min="0.0" max="1.0" id="sy-s-decay" step="0.005" value="0.15" type="range"/><span class="sy-sval">0.15</span></div><div class="sy-srow"><label class="sy-slabel">sustain</label><input type="range" id="sy-s-sustain" step="0.01" value="0.6" min="0.0" max="1.0"/><span class="sy-sval">0.6</span></div><div class="sy-srow"><label class="sy-slabel">release</label><input min="0.0" value="0.35" max="2.0" step="0.01" id="sy-s-release" type="range"/><span class="sy-sval">0.35</span></div><h4 class="sy-h">LFO → cutoff</h4><div class="sy-srow"><label class="sy-slabel">rate</label><input max="20.0" id="sy-s-lfor" step="0.1" type="range" value="4.0" min="0.0"/><span class="sy-sval">4.0</span></div><div class="sy-srow"><label class="sy-slabel">depth</label><input min="0.0" type="range" value="300.0" id="sy-s-lfod" max="2000.0" step="1.0"/><span class="sy-sval">300.0</span></div><h4 class="sy-h">amp</h4><div class="sy-srow"><label class="sy-slabel">gain</label><input id="sy-s-gain" max="1.0" min="0.0" step="0.01" value="0.5" type="range"/><span class="sy-sval">0.5</span></div><h4 class="sy-h">sends</h4><div class="sy-srow"><label class="sy-slabel">dry</label><input step="0.01" min="0.0" type="range" max="1.0" value="0.9" id="sy-s-dry"/><span class="sy-sval">0.9</span></div><div class="sy-srow"><label class="sy-slabel">reverb</label><input value="0.15" min="0.0" step="0.01" max="1.0" id="sy-s-rev" type="range"/><span class="sy-sval">0.15</span></div><div class="sy-srow"><label class="sy-slabel">delay</label><input max="1.0" id="sy-s-del" type="range" value="0.15" step="0.01" min="0.0"/><span class="sy-sval">0.15</span></div><div class="sy-srow"><label class="sy-slabel">rev-tail</label><input max="5.0" type="range" step="0.05" value="2.0" id="sy-s-revdec" min="0.2"/><span class="sy-sval">2.0</span></div><div class="sy-srow"><label class="sy-slabel">del-time</label><input max="1.2" value="0.375" id="sy-s-deltime" step="0.005" type="range" min="0.01"/><span class="sy-sval">0.375</span></div><div class="sy-srow"><label class="sy-slabel">del-fb</label><input min="0.0" type="range" id="sy-s-delfb" step="0.01" value="0.4" max="0.95"/><span class="sy-sval">0.4</span></div><p class="sy-foot">Patch values stream into Web Audio every frame. Pick a preset to snap
+     all knobs, then edit sliders for a live tweak.</p></div><!--/ssr--></div>
 
         <div class="repl" id="sy-editor-wrap">
           <div id="sy-editor" style="height:420px;width:100%"></div>
@@ -200,6 +218,16 @@
     let audio = null;      // AudioContext
     let master = null;     // master GainNode
     let scopeNode = null;  // shared analyser for the oscilloscope
+    // Effect buses. Each voice splits into three sends: dry (->master),
+    // reverb (->convolver->master), delay (->delay->master).
+    let revBus = null;     // input GainNode feeding the convolver
+    let revNode = null;    // ConvolverNode
+    let revReturn = null;  // GainNode after convolver (MIX-REV)
+    let delBus = null;     // input GainNode feeding delay
+    let delNode = null;    // DelayNode
+    let delFB = null;      // GainNode feedback
+    let delReturn = null;  // GainNode after delay (MIX-DELAY)
+    let lastRevDecay = -1;
     // Polyphonic voice table: midi-note -> voice obj.
     // A voice persists from keydown until its release ramp + safety
     // tail finish, at which point it removes itself.
@@ -207,6 +235,7 @@
     const MAX_VOICES = 8;
     let playing = false;
     let currentPatch = null;
+    let currentBus = null;
 
     function setStatus(msg, cls) {
       status.className = cls ? `sy-status ${cls}` : "sy-status";
@@ -237,7 +266,23 @@
         lfoRate:      floats[8],
         lfoDepth:     floats[9],
         gain:         floats[10],
+        envAmt:       floats.length > 11 ? floats[11] : 0,
+        envDecay:     floats.length > 12 ? floats[12] : 0.25,
         wave:         waveTypeFromKeyword(waveStr),
+      };
+    }
+
+    function readBus() {
+      if (!repl) return null;
+      const f = repl.eval_floats("(bus)");
+      if (f.length < 6) return null;
+      return {
+        mixDry:    f[0],
+        mixRev:    f[1],
+        mixDelay:  f[2],
+        delayTime: f[3],
+        delayFB:   f[4],
+        revDecay:  f[5],
       };
     }
 
@@ -246,7 +291,14 @@
       if (!a || !b) return true;
       const keys = ["freq","detune","filterCutoff","filterQ",
                     "attack","decay","sustain","release",
-                    "lfoRate","lfoDepth","gain","wave"];
+                    "lfoRate","lfoDepth","gain","wave",
+                    "envAmt","envDecay"];
+      for (const k of keys) if (a[k] !== b[k]) return true;
+      return false;
+    }
+    function busChanged(a, b) {
+      if (!a || !b) return true;
+      const keys = ["mixDry","mixRev","mixDelay","delayTime","delayFB","revDecay"];
       for (const k of keys) if (a[k] !== b[k]) return true;
       return false;
     }
@@ -274,10 +326,36 @@
         currentPatch = p;
         applyPatchToVoices(p);
       }
+      const b = readBus();
+      if (b) {
+        currentBus = b;
+        applyBus(b);
+      }
       return true;
     }
 
     // --- audio graph -----------------------------------------------------
+
+    // Synthesize an exponentially-decaying stereo noise impulse response
+    // for the convolver. Good-enough algorithmic reverb for a demo: a
+    // 2-sec tail with configurable RT-60.
+    function makeReverbIR(ctx, seconds) {
+      const sr = ctx.sampleRate;
+      const len = Math.max(1, Math.floor(sr * seconds));
+      const buf = ctx.createBuffer(2, len, sr);
+      // Exponential decay envelope; factor controls perceived RT-60.
+      for (let ch = 0; ch < 2; ch++) {
+        const d = buf.getChannelData(ch);
+        for (let i = 0; i < len; i++) {
+          const t = i / len;
+          // (1-t)^decay gives smooth tail, with a tiny early-reflection
+          // bump from a cheap log-curve on top.
+          const env = Math.pow(1 - t, 2.5);
+          d[i] = (Math.random() * 2 - 1) * env;
+        }
+      }
+      return buf;
+    }
 
     function ensureAudio() {
       if (audio) return audio;
@@ -289,7 +367,55 @@
       scopeNode.fftSize = 1024;
       master.connect(scopeNode);
       scopeNode.connect(audio.destination);
+
+      // --- reverb bus ---------------------------------------------
+      // voices -> revBus (send amount=1) -> convolver -> revReturn (mix) -> master
+      revBus = audio.createGain();
+      revBus.gain.value = 1.0;
+      revNode = audio.createConvolver();
+      revNode.buffer = makeReverbIR(audio, 2.0);
+      lastRevDecay = 2.0;
+      revReturn = audio.createGain();
+      revReturn.gain.value = 0.15;
+      revBus.connect(revNode).connect(revReturn).connect(master);
+
+      // --- delay bus ----------------------------------------------
+      // voices -> delBus -> delNode -> delReturn -> master
+      //                         \-> delFB -> delNode (feedback loop)
+      delBus = audio.createGain();
+      delBus.gain.value = 1.0;
+      delNode = audio.createDelay(2.0);
+      delNode.delayTime.value = 0.375;
+      delFB = audio.createGain();
+      delFB.gain.value = 0.4;
+      delReturn = audio.createGain();
+      delReturn.gain.value = 0.15;
+      // Soften the feedback path with a lowpass so repeats don't get harsh.
+      const delLP = audio.createBiquadFilter();
+      delLP.type = "lowpass"; delLP.frequency.value = 3000;
+      delBus.connect(delNode);
+      delNode.connect(delLP).connect(delFB).connect(delNode);
+      delNode.connect(delReturn).connect(master);
       return audio;
+    }
+
+    function applyBus(b) {
+      if (!audio || !b) return;
+      const now = audio.currentTime;
+      revReturn.gain.setValueAtTime(b.mixRev, now);
+      delReturn.gain.setValueAtTime(b.mixDelay, now);
+      delNode.delayTime.setValueAtTime(
+        Math.max(0.001, Math.min(2.0, b.delayTime)), now);
+      delFB.gain.setValueAtTime(Math.max(0, Math.min(0.95, b.delayFB)), now);
+      // Regenerate IR only when decay time actually changes (cheap buf alloc).
+      if (Math.abs(b.revDecay - lastRevDecay) > 0.02) {
+        revNode.buffer = makeReverbIR(audio, Math.max(0.2, b.revDecay));
+        lastRevDecay = b.revDecay;
+      }
+      // Push dry mix to every live voice's dry send gain.
+      for (const v of voices.values()) {
+        if (v.drySend) v.drySend.gain.setValueAtTime(b.mixDry, now);
+      }
     }
 
     // Build a fresh voice for a given midi note. Each voice owns its
@@ -321,13 +447,27 @@
       const gain = audio.createGain();
       gain.gain.setValueAtTime(0, now);
 
-      osc.connect(filter).connect(gain).connect(master);
+      // Per-voice sends. Signal fans out from `gain` (post-amp-env)
+      // into: drySend -> master, revSend -> revBus, delSend -> delBus.
+      const drySend = audio.createGain();
+      const revSend = audio.createGain();
+      const delSend = audio.createGain();
+      const dryMix = (currentBus && currentBus.mixDry != null) ? currentBus.mixDry : 0.9;
+      drySend.gain.setValueAtTime(dryMix, now);
+      revSend.gain.setValueAtTime(1.0, now);
+      delSend.gain.setValueAtTime(1.0, now);
+
+      osc.connect(filter).connect(gain);
+      gain.connect(drySend).connect(master);
+      if (revBus) gain.connect(revSend).connect(revBus);
+      if (delBus) gain.connect(delSend).connect(delBus);
 
       osc.start();
       lfo.start();
       return {
         midi, noteFreq,
         osc, filter, gain, lfo, lfoGain,
+        drySend, revSend, delSend,
         // 'attack' until released, then 'release'. Used to pick the
         // right ADSR transition on note-off.
         stage: "attack",
@@ -345,6 +485,19 @@
       g.setValueAtTime(0, now);
       g.linearRampToValueAtTime(p.gain, now + a);
       g.linearRampToValueAtTime(p.gain * p.sustain, now + a + d);
+
+      // Per-note filter envelope — the TB-303 signature. Open the
+      // cutoff by envAmt at note-on, exp-decay back down to the
+      // steady-state cutoff over envDecay seconds.
+      if (p.envAmt && p.envAmt > 0.1) {
+        const fc = v.filter.frequency;
+        const base = p.filterCutoff;
+        const peak = Math.min(18000, base + p.envAmt);
+        const dec = Math.max(0.01, p.envDecay);
+        fc.cancelScheduledValues(now);
+        fc.setValueAtTime(peak, now);
+        fc.exponentialRampToValueAtTime(Math.max(20, base), now + dec);
+      }
     }
 
     // Release ramp + delayed cleanup. Removes the voice from the table
@@ -359,7 +512,15 @@
       g.setValueAtTime(g.value, now);
       g.linearRampToValueAtTime(0, now + rel);
       setTimeout(() => {
-        try { v.osc.stop(); v.lfo.stop(); v.osc.disconnect(); v.lfo.disconnect(); } catch (_) {}
+        try {
+          v.osc.stop(); v.lfo.stop();
+          v.osc.disconnect(); v.lfo.disconnect();
+          if (v.drySend) v.drySend.disconnect();
+          if (v.revSend) v.revSend.disconnect();
+          if (v.delSend) v.delSend.disconnect();
+          if (v.gain) v.gain.disconnect();
+          if (v.filter) v.filter.disconnect();
+        } catch (_) {}
         if (voices.get(v.midi) === v) voices.delete(v.midi);
         updateOverlay();
       }, rel * 1000 + 50);
@@ -373,7 +534,11 @@
       for (const v of voices.values()) {
         v.osc.type = p.wave;
         v.osc.detune.setValueAtTime(p.detune + 100 * p.freq, now);
-        v.filter.frequency.setValueAtTime(p.filterCutoff, now);
+        // Skip cutoff push when a per-note filter envelope is active so
+        // we don't stomp the in-flight exp ramp. Q still tracks live.
+        if (!(p.envAmt && p.envAmt > 0.1)) {
+          v.filter.frequency.setValueAtTime(p.filterCutoff, now);
+        }
         v.filter.Q.setValueAtTime(p.filterQ, now);
         v.lfo.frequency.setValueAtTime(p.lfoRate, now);
         v.lfoGain.gain.setValueAtTime(p.lfoDepth, now);
@@ -523,6 +688,11 @@
         if (p && patchChanged(p, currentPatch)) {
           currentPatch = p;
           applyPatchToVoices(p);
+        }
+        const b = readBus();
+        if (b && busChanged(b, currentBus)) {
+          currentBus = b;
+          applyBus(b);
         }
       } catch (_) { /* eval errors are surfaced by applySource */ }
 
