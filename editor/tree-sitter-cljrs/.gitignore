@@ -1,0 +1,8 @@
+node_modules/
+src/parser.c
+src/tree_sitter/
+build/
+*.so
+*.dylib
+*.dll
+*.wasm

@@ -1,0 +1,29 @@
+{
+  "name": "cljrs",
+  "displayName": "cljrs",
+  "description": "Syntax highlighting for the cljrs Clojure dialect.",
+  "version": "0.1.0",
+  "publisher": "cljrs",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": ["Programming Languages"],
+  "contributes": {
+    "languages": [
+      {
+        "id": "cljrs",
+        "aliases": ["cljrs", "Cljrs"],
+        "extensions": [".cljrs"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "cljrs",
+        "scopeName": "source.cljrs",
+        "path": "./syntaxes/cljrs.tmLanguage.json"
+      }
+    ]
+  }
+}

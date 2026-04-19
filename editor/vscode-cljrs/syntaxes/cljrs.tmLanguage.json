@@ -1,0 +1,93 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "cljrs",
+  "scopeName": "source.cljrs",
+  "fileTypes": ["cljrs"],
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#string" },
+    { "include": "#regex" },
+    { "include": "#type-hint" },
+    { "include": "#metadata" },
+    { "include": "#reader-macro" },
+    { "include": "#definer-form" },
+    { "include": "#special-form" },
+    { "include": "#keyword" },
+    { "include": "#number" },
+    { "include": "#nil-bool" },
+    { "include": "#character" },
+    { "include": "#symbol" }
+  ],
+  "repository": {
+    "comment": {
+      "match": "(;).*$",
+      "name": "comment.line.semicolon.cljrs"
+    },
+    "string": {
+      "begin": "\"",
+      "end": "\"",
+      "name": "string.quoted.double.cljrs",
+      "patterns": [
+        { "match": "\\\\.", "name": "constant.character.escape.cljrs" }
+      ]
+    },
+    "regex": {
+      "begin": "#\"",
+      "end": "\"",
+      "name": "string.regexp.cljrs",
+      "patterns": [
+        { "match": "\\\\.", "name": "constant.character.escape.cljrs" }
+      ]
+    },
+    "type-hint": {
+      "match": "(\\^)(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|isize|usize)\\b",
+      "captures": {
+        "1": { "name": "punctuation.definition.metadata.cljrs" },
+        "2": { "name": "support.type.primitive.cljrs" }
+      }
+    },
+    "metadata": {
+      "match": "(\\^)([^\\s()\\[\\]{}\"@,;'`~^\\\\]+)",
+      "captures": {
+        "1": { "name": "punctuation.definition.metadata.cljrs" },
+        "2": { "name": "entity.other.attribute-name.cljrs" }
+      }
+    },
+    "reader-macro": {
+      "match": "(~@|['`~@])",
+      "name": "keyword.operator.macro.cljrs"
+    },
+    "definer-form": {
+      "match": "(?<=\\()\\s*(def|defn|defn-|defmacro|defonce|defn-native|defn-gpu|defn-gpu-pixel|defmulti|defmethod|defprotocol|defrecord|deftest)\\b",
+      "captures": {
+        "1": { "name": "storage.type.function.cljrs" }
+      }
+    },
+    "special-form": {
+      "match": "(?<=\\(|\\s)(fn|let|loop|recur|if|do|when|when-not|if-let|when-let|cond|case|try|catch|finally|throw|ns|require|import|quote|and|or|->|->>|dotimes|doseq|is|testing|run-tests)(?=\\s|\\))",
+      "captures": {
+        "1": { "name": "keyword.control.cljrs" }
+      }
+    },
+    "keyword": {
+      "match": "(:){1,2}[^\\s()\\[\\]{}\"@,;'`~^\\\\]+",
+      "name": "constant.other.keyword.cljrs"
+    },
+    "number": {
+      "match": "\\b(?:0[xX][0-9a-fA-F]+|[-+]?[0-9]+/[0-9]+|[-+]?[0-9]+(?:\\.[0-9]+)?(?:[eE][-+]?[0-9]+)?M?)\\b",
+      "name": "constant.numeric.cljrs"
+    },
+    "nil-bool": {
+      "match": "\\b(nil|true|false)\\b",
+      "name": "constant.language.cljrs"
+    },
+    "character": {
+      "match": "\\\\(newline|space|tab|return|formfeed|backspace|.)",
+      "name": "constant.character.cljrs"
+    },
+    "symbol": {
+      "match": "[^\\s()\\[\\]{}\"@,;'`~^\\\\]+",
+      "name": "variable.other.cljrs"
+    }
+  }
+}

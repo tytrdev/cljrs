@@ -1,0 +1,22 @@
+{
+  "name": "tree-sitter-cljrs",
+  "version": "0.1.0",
+  "description": "tree-sitter grammar for the cljrs Clojure dialect",
+  "main": "bindings/node",
+  "keywords": ["parser", "tree-sitter", "clojure", "cljrs"],
+  "license": "MIT",
+  "scripts": {
+    "generate": "tree-sitter generate",
+    "test": "tree-sitter test"
+  },
+  "devDependencies": {
+    "tree-sitter-cli": "^0.22.0"
+  },
+  "tree-sitter": [
+    {
+      "scope": "source.cljrs",
+      "file-types": ["cljrs", "clj"],
+      "highlights": "queries/highlights.scm"
+    }
+  ]
+}
