@@ -1,26 +1,39 @@
 // Shared header/footer injection + REPL wiring. Loaded as a module from
 // every docs page so content files stay small.
 
+// Top-level nav: kept deliberately short. Hub pages (demos.html,
+// library.html, benchmarks.html) fan out to the long tail.
 const NAV = [
-  { href: "./index.html", label: "Overview" },
-  { href: "./syntax.html", label: "Syntax" },
-  { href: "./coverage.html", label: "Coverage" },
-  { href: "./demos.html", label: "Demos" },
-  { href: "./gpu-web.html", label: "GPU" },
-  { href: "./physics.html", label: "Physics" },
-  { href: "./platformer.html", label: "Platformer" },
-  { href: "./life.html", label: "Life" },
-  { href: "./synth.html", label: "Synth" },
-  { href: "./sequencer.html", label: "Sequencer" },
-  { href: "./ml.html", label: "ML" },
-  { href: "./js-interop.html", label: "JS" },
-  { href: "./ui-demo.html", label: "UI" },
-  { href: "./library.html", label: "Library" },
+  { href: "./index.html",      label: "Overview" },
+  { href: "./demos.html",      label: "Demos" },
+  { href: "./library.html",    label: "Library" },
   { href: "./benchmarks.html", label: "Benchmarks" },
-  { href: "./bench.html", label: "Matmul" },
-  { href: "./repl.html", label: "REPL" },
-  { href: "./roadmap.html", label: "Roadmap" },
+  { href: "./repl.html",       label: "REPL" },
+  { href: "./roadmap.html",    label: "Roadmap" },
 ];
+// Subpages — used only to highlight the parent nav item when you're
+// deep in the site (e.g., lib-core.html highlights "Library").
+const NAV_PARENT = {
+  "syntax.html":      "index.html",
+  "coverage.html":    "index.html",
+  "gpu-web.html":     "demos.html",
+  "physics.html":     "demos.html",
+  "platformer.html":  "demos.html",
+  "life.html":        "demos.html",
+  "synth.html":       "demos.html",
+  "sequencer.html":   "demos.html",
+  "ml.html":          "demos.html",
+  "js-interop.html":  "demos.html",
+  "ui-demo.html":     "demos.html",
+  "lib-core.html":    "library.html",
+  "lib-ui.html":      "library.html",
+  "lib-shader.html":  "library.html",
+  "lib-ml.html":      "library.html",
+  "lib-music.html":   "library.html",
+  "lib-js.html":      "library.html",
+  "lib-rust.html":    "library.html",
+  "bench.html":       "benchmarks.html",
+};
 
 function basename(href) {
   return href.split("/").pop();
@@ -80,21 +93,25 @@ export async function highlightAll(root = document) {
 export function mountChrome(activePath) {
   const header = document.createElement("header");
   const active = basename(activePath || location.pathname);
+  // Highlight the parent nav item when on a subpage.
+  const activeForNav = NAV_PARENT[active] || active;
   header.innerHTML = `
     <h1><a href="./index.html">cljrs</a></h1>
     <nav>
       ${NAV.map(
         (n) =>
           `<a href="${n.href}" class="${
-            basename(n.href) === active ? "active" : ""
+            basename(n.href) === activeForNav ? "active" : ""
           }">${n.label}</a>`
       ).join("")}
+      <a class="nav-gh" href="https://github.com/tytrdev/cljrs"
+         target="_blank" rel="noopener">GitHub</a>
     </nav>
   `;
   document.body.prepend(header);
 
   const footer = document.createElement("footer");
-  footer.innerHTML = `cljrs — a from-scratch Clojure in Rust. <a href="https://github.com/">source</a> · built ${new Date().toISOString().slice(0, 10)}`;
+  footer.innerHTML = `cljrs — a from-scratch Clojure in Rust · built ${new Date().toISOString().slice(0, 10)}`;
   document.body.append(footer);
 
   // Auto-highlight any static <pre><code> blocks on the page. Fires on
