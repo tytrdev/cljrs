@@ -305,3 +305,28 @@ clojure.core/with-in-str: JVM PushbackReader
 clojure.core/with-open: JVM AutoCloseable
 clojure.core/with-out-str: thread-local *out* (planned)
 clojure.core/printf: JVM Formatter
+
+# Round 2 — internal/JVM-specific names surfaced by deeper coverage scan
+clojure.core/&: rest-args binding marker, not a fn
+clojure.core/VecNode: gvec internal type, JVM-specific
+clojure.core/VecSeq: gvec internal type, JVM-specific
+clojure.core/add-classpath: deprecated, JVM classloader manipulation
+clojure.core/char-escape-string: pr-str internal, no separate API surface
+clojure.core/char-name-string: pr-str internal, no separate API surface
+clojure.core/namespace-munge: JVM class-name munging
+clojure.core/new: Java interop special form
+clojure.core/var: JVM Var reference, cljrs uses Symbol resolution
+clojure.core/deftype: JVM class generation; cljrs uses defrecord-like maps
+clojure.core/satisfies?: requires protocol implementation registry
+clojure.core/seq-to-map-for-destructuring: compiler-internal helper
+clojure.core/reader-conditional: only useful in .cljc files; cljrs has no reader conditionals yet
+clojure.core/reader-conditional?: see reader-conditional
+clojure.core/requiring-resolve: requires runtime resolve+require interop
+clojure.core/with-redefs: requires var rebinding, cljrs has no var indirection
+clojure.core/with-redefs-fn: see with-redefs
+clojure.core/stream-into!: JDK 8 Stream interop
+clojure.core/stream-reduce!: JDK 8 Stream interop
+clojure.core/stream-seq!: JDK 8 Stream interop
+clojure.core/stream-transduce!: JDK 8 Stream interop
+clojure.core/eduction: lazy-seq transducer wrapper, defer until lazy seqs land
+clojure.core/iteration: lazy paginated iteration, defer until lazy seqs land
