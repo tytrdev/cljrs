@@ -66,10 +66,17 @@
     n))
 
 (defn __rand-float []
-  (/ (sequencer/__rng-next) 4294967296.0))
+  ;; Same overflow-to-float concern as __rand-int. f64 division works
+  ;; fine either way, but coerce to a consistent type on the way out.
+  (let [r (sequencer/__rng-next)]
+    (/ (* 1.0 r) 4294967296.0)))
 
 (defn __rand-int [n]
-  (mod (sequencer/__rng-next) n))
+  ;; The LCG multipliers push i64 into float overflow territory when
+  ;; the seed gets large (especially after the js/now mix). cljrs
+  ;; silently promotes the product to f64, and (mod float float)
+  ;; returns float — which nth rejects. Coerce to int here.
+  (int (mod (sequencer/__rng-next) n)))
 
 (defn __reseed! [x]
   (reset! __rng-seed (mod (+ (* x 2654435761) 1) 4294967296)))
