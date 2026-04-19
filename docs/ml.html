@@ -104,7 +104,7 @@
       </div>
       <div class="ml-col">
         <div class="ml-toolbar">
-          <button id="ml-run">Pause</button>
+          <button id="ml-run">Run</button>
           <button id="ml-reset" title="Re-init weights">Reset</button>
           <label class="ml-gpu-toggle" title="Use ml/matmul-gpu (WGSL compute) instead of CPU matmul. On web this is a no-op fallback.">
             <input type="checkbox" id="ml-gpu"> GPU matmul
@@ -790,7 +790,7 @@
 
     // --- state -----------------------------------------------------------
     let repl = null;
-    let running = true;
+    let running = false; // start paused — user clicks Run when ready
     let activeTab = "fit";
     let lossHistory = [];
     let stepCount = 0;
@@ -868,16 +868,22 @@
       return true;
     }
 
+    let lastVizBuf = null;
     function drawMain() {
       const r = RENDERERS[activeTab];
-      let buf = null;
-      if (repl) {
+      let buf = lastVizBuf;
+      // Only re-run (viz) when actively training. Otherwise reuse the
+      // last buffer — repaint costs nothing, but eval_floats allocates
+      // a fresh autograd graph each call.
+      if (repl && running) {
         buf = repl.eval_floats("(viz)");
         if (buf.length === 0 && !runtimeError) {
           const err = repl.eval("(viz)");
           if (typeof err === "string" && !err.startsWith("[")) {
             reportRuntimeError("(viz)", err);
           }
+        } else {
+          lastVizBuf = buf;
         }
       }
       r(mainX, mainC.width, mainC.height, buf);
@@ -983,6 +989,7 @@
       stopTrain();
       runtimeError = null;
       warnedSlowStep = false;
+      lastVizBuf = null;
       console.time(`[ml] reset+apply ${name}`);
       repl.reset();
       editor.setValueQuiet(SOURCES[name]);
@@ -1016,7 +1023,8 @@
       applySource(SOURCES.fit);
       console.timeEnd("[ml] initial apply");
       requestAnimationFrame(frame);
-      startTrain();
+      // Boot paused — user clicks Run to begin training. Eliminates the
+      // automatic CPU saturation right after a heavy tab switch.
     })();
   </script>
 </body>
