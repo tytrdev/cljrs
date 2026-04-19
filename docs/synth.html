@@ -109,7 +109,7 @@
       music as a first-class way to explore sound.
     </p>
     <p>
-      A single-voice subtractive synth whose patch parameters and
+      A polyphonic subtractive synth whose patch parameters and
       control panel UI are both authored in Clojure. The DSP graph
       (oscillator → filter → gain → output) is a fixed Web Audio graph
       in the browser; an animation-frame loop polls the cljrs-side
@@ -123,6 +123,12 @@
       Hold <b>Alt</b> (or <b>Ctrl</b>) and drag any number to scrub it
       live. Editing the source re-evals it; <code>def</code>'d atoms
       reset to source values, so source = preset / sliders = live tweak.
+    </p>
+    <p class="sy-hint">
+      <b>Keyboard:</b> press <kbd>Start</kbd> first, then play with
+      <kbd>a s d f g h j k</kbd> (white keys, C major) and
+      <kbd>w e t y u</kbd> (black keys). Hold multiple keys for chords —
+      up to 8 voices ring simultaneously. Each voice has its own ADSR.
     </p>
 
     <div class="sy-wrap">
@@ -142,7 +148,7 @@
         </div>
 
         <!-- cljrs-prerender: ./synth.cljrs -->
-        <div id="cljrs-root"><!--ssr--><div class="sy-panel"><h4 class="sy-h">patch</h4><div class="sy-srow"><label class="sy-slabel">freq</label><input min="50.0" value="220.0" id="sy-s-freq" type="range" max="1200.0" step="1.0"/><span class="sy-sval">220.0</span></div><div class="sy-srow"><label class="sy-slabel">detune</label><input id="sy-s-detune" min="-50.0" step="0.1" value="7.0" type="range" max="50.0"/><span class="sy-sval">7.0</span></div><div class="sy-srow"><label class="sy-slabel">wave</label><button class="sy-wavebtn">sawtooth</button></div><h4 class="sy-h">filter</h4><div class="sy-srow"><label class="sy-slabel">cutoff</label><input type="range" min="60.0" id="sy-s-cutoff" max="6000.0" step="1.0" value="900.0"/><span class="sy-sval">900.0</span></div><div class="sy-srow"><label class="sy-slabel">Q</label><input id="sy-s-q" step="0.1" type="range" value="6.0" max="20.0" min="0.1"/><span class="sy-sval">6.0</span></div><h4 class="sy-h">envelope</h4><div class="sy-srow"><label class="sy-slabel">attack</label><input id="sy-s-attack" value="0.02" step="0.005" type="range" max="1.0" min="0.0"/><span class="sy-sval">0.02</span></div><div class="sy-srow"><label class="sy-slabel">decay</label><input id="sy-s-decay" max="1.0" type="range" step="0.005" min="0.0" value="0.15"/><span class="sy-sval">0.15</span></div><div class="sy-srow"><label class="sy-slabel">sustain</label><input value="0.6" min="0.0" step="0.01" type="range" id="sy-s-sustain" max="1.0"/><span class="sy-sval">0.6</span></div><div class="sy-srow"><label class="sy-slabel">release</label><input min="0.0" max="2.0" type="range" value="0.35" id="sy-s-release" step="0.01"/><span class="sy-sval">0.35</span></div><h4 class="sy-h">LFO → cutoff</h4><div class="sy-srow"><label class="sy-slabel">rate</label><input step="0.1" max="20.0" type="range" value="4.0" min="0.0" id="sy-s-lfor"/><span class="sy-sval">4.0</span></div><div class="sy-srow"><label class="sy-slabel">depth</label><input id="sy-s-lfod" max="2000.0" step="1.0" min="0.0" value="300.0" type="range"/><span class="sy-sval">300.0</span></div><h4 class="sy-h">amp</h4><div class="sy-srow"><label class="sy-slabel">gain</label><input max="1.0" min="0.0" id="sy-s-gain" type="range" value="0.5" step="0.01"/><span class="sy-sval">0.5</span></div><p class="sy-foot">Patch values stream into Web Audio every frame. Edit a slider
+        <div id="cljrs-root"><!--ssr--><div class="sy-panel"><h4 class="sy-h">patch</h4><div class="sy-srow"><label class="sy-slabel">transpose</label><input min="-24.0" value="0.0" id="sy-s-freq" type="range" max="24.0" step="1.0"/><span class="sy-sval">0.0</span></div><div class="sy-srow"><label class="sy-slabel">detune</label><input id="sy-s-detune" min="-50.0" step="0.1" value="7.0" type="range" max="50.0"/><span class="sy-sval">7.0</span></div><div class="sy-srow"><label class="sy-slabel">wave</label><button class="sy-wavebtn">sawtooth</button></div><h4 class="sy-h">filter</h4><div class="sy-srow"><label class="sy-slabel">cutoff</label><input type="range" min="60.0" id="sy-s-cutoff" max="6000.0" step="1.0" value="900.0"/><span class="sy-sval">900.0</span></div><div class="sy-srow"><label class="sy-slabel">Q</label><input id="sy-s-q" step="0.1" type="range" value="6.0" max="20.0" min="0.1"/><span class="sy-sval">6.0</span></div><h4 class="sy-h">envelope</h4><div class="sy-srow"><label class="sy-slabel">attack</label><input id="sy-s-attack" value="0.02" step="0.005" type="range" max="1.0" min="0.0"/><span class="sy-sval">0.02</span></div><div class="sy-srow"><label class="sy-slabel">decay</label><input id="sy-s-decay" max="1.0" type="range" step="0.005" min="0.0" value="0.15"/><span class="sy-sval">0.15</span></div><div class="sy-srow"><label class="sy-slabel">sustain</label><input value="0.6" min="0.0" step="0.01" type="range" id="sy-s-sustain" max="1.0"/><span class="sy-sval">0.6</span></div><div class="sy-srow"><label class="sy-slabel">release</label><input min="0.0" max="2.0" type="range" value="0.35" id="sy-s-release" step="0.01"/><span class="sy-sval">0.35</span></div><h4 class="sy-h">LFO → cutoff</h4><div class="sy-srow"><label class="sy-slabel">rate</label><input step="0.1" max="20.0" type="range" value="4.0" min="0.0" id="sy-s-lfor"/><span class="sy-sval">4.0</span></div><div class="sy-srow"><label class="sy-slabel">depth</label><input id="sy-s-lfod" max="2000.0" step="1.0" min="0.0" value="300.0" type="range"/><span class="sy-sval">300.0</span></div><h4 class="sy-h">amp</h4><div class="sy-srow"><label class="sy-slabel">gain</label><input max="1.0" min="0.0" id="sy-s-gain" type="range" value="0.5" step="0.01"/><span class="sy-sval">0.5</span></div><p class="sy-foot">Patch values stream into Web Audio every frame. Edit a slider
      for a live tweak, edit the source for a permanent change.</p></div><!--/ssr--></div>
 
         <div class="repl" id="sy-editor-wrap">
@@ -166,6 +172,7 @@
       <li>JS owns the AudioContext and the audio graph. An rAF loop calls <code>repl.eval_floats("(patch)")</code> every frame; if the vector changed it pushes new values onto the existing nodes with <code>setValueAtTime</code>.</li>
       <li><code>WAVE-TYPE</code> is a keyword atom toggled by clicking the wave button; JS reads its name via <code>repl.eval</code>.</li>
       <li><code>Trigger</code> re-runs the ADSR envelope. The wave-button + Trigger demonstrate two cljrs-driven controls (one inside the cljrs.ui tree, one outside in plain JS toolbar).</li>
+      <li><b>Polyphony.</b> Each held key gets its own Web Audio voice (osc → filter → gain) with an independent ADSR envelope. The voice table caps at 8 — past that, the oldest voice is stolen. Releasing a key triggers the release ramp; a delayed cleanup tears the voice down once it's silent. Live param edits propagate to every active voice so the chord morphs as you tweak.</li>
     </ul>
   </main>
   <script type="module">
@@ -192,7 +199,12 @@
     let repl = null;
     let audio = null;      // AudioContext
     let master = null;     // master GainNode
-    let voice = null;      // { osc, filter, gain, lfo, lfoGain, analyser }
+    let scopeNode = null;  // shared analyser for the oscilloscope
+    // Polyphonic voice table: midi-note -> voice obj.
+    // A voice persists from keydown until its release ramp + safety
+    // tail finish, at which point it removes itself.
+    const voices = new Map();
+    const MAX_VOICES = 8;
     let playing = false;
     let currentPatch = null;
 
@@ -260,7 +272,7 @@
       const p = readPatch();
       if (p) {
         currentPatch = p;
-        if (voice) pushPatch(p, false);
+        applyPatchToVoices(p);
       }
       return true;
     }
@@ -272,16 +284,27 @@
       audio = new (window.AudioContext || window.webkitAudioContext)();
       master = audio.createGain();
       master.gain.value = parseFloat(masterSlider.value);
-      master.connect(audio.destination);
+      // Single shared analyser — sums every voice for the oscilloscope.
+      scopeNode = audio.createAnalyser();
+      scopeNode.fftSize = 1024;
+      master.connect(scopeNode);
+      scopeNode.connect(audio.destination);
       return audio;
     }
 
-    function buildVoice(p) {
+    // Build a fresh voice for a given midi note. Each voice owns its
+    // own osc/filter/gain/lfo so voices are independent — true polyphony
+    // rather than retriggering one shared graph.
+    function buildVoice(midi, p) {
       const now = audio.currentTime;
+      const noteFreq = 440 * Math.pow(2, (midi - 69) / 12);
+
       const osc = audio.createOscillator();
       osc.type = p.wave;
-      osc.frequency.setValueAtTime(p.freq, now);
-      osc.detune.setValueAtTime(p.detune, now);
+      osc.frequency.setValueAtTime(noteFreq, now);
+      // FREQ slider doubles as a transpose in semitones; fold it into
+      // the oscillator's detune (cents) along with the detune knob.
+      osc.detune.setValueAtTime(p.detune + 100 * p.freq, now);
 
       const filter = audio.createBiquadFilter();
       filter.type = "lowpass";
@@ -298,85 +321,190 @@
       const gain = audio.createGain();
       gain.gain.setValueAtTime(0, now);
 
-      const analyser = audio.createAnalyser();
-      analyser.fftSize = 1024;
-
-      osc.connect(filter).connect(gain).connect(analyser).connect(master);
+      osc.connect(filter).connect(gain).connect(master);
 
       osc.start();
       lfo.start();
-      return { osc, filter, gain, lfo, lfoGain, analyser };
+      return {
+        midi, noteFreq,
+        osc, filter, gain, lfo, lfoGain,
+        // 'attack' until released, then 'release'. Used to pick the
+        // right ADSR transition on note-off.
+        stage: "attack",
+        startedAt: now,
+      };
     }
 
-    // Push new param values onto the existing graph. If `retrigger` is
-    // true, re-run the ADSR from zero.
-    function pushPatch(p, retrigger) {
-      if (!voice || !audio) return;
+    // ADSR attack/decay ramp to the sustain plateau.
+    function triggerAttack(v, p) {
       const now = audio.currentTime;
-      voice.osc.type = p.wave;
-      voice.osc.frequency.setValueAtTime(p.freq, now);
-      voice.osc.detune.setValueAtTime(p.detune, now);
-      voice.filter.frequency.setValueAtTime(p.filterCutoff, now);
-      voice.filter.Q.setValueAtTime(p.filterQ, now);
-      voice.lfo.frequency.setValueAtTime(p.lfoRate, now);
-      voice.lfoGain.gain.setValueAtTime(p.lfoDepth, now);
+      const g = v.gain.gain;
+      const a = Math.max(0.001, p.attack);
+      const d = Math.max(0.001, p.decay);
+      g.cancelScheduledValues(now);
+      g.setValueAtTime(0, now);
+      g.linearRampToValueAtTime(p.gain, now + a);
+      g.linearRampToValueAtTime(p.gain * p.sustain, now + a + d);
+    }
 
-      if (retrigger) {
-        // ADSR: ramp to peak over attack, decay to sustain*gain, hold.
-        const g = voice.gain.gain;
-        g.cancelScheduledValues(now);
-        g.setValueAtTime(0, now);
-        g.linearRampToValueAtTime(p.gain, now + Math.max(0.001, p.attack));
-        g.linearRampToValueAtTime(
-          p.gain * p.sustain,
-          now + Math.max(0.001, p.attack) + Math.max(0.001, p.decay));
-      } else {
-        // Non-retrigger param edit: gently glide the held gain so changes
-        // to GAIN are audible without clicks.
-        const g = voice.gain.gain;
-        const held = p.gain * p.sustain;
-        g.cancelScheduledValues(now);
-        g.setValueAtTime(g.value, now);
-        g.linearRampToValueAtTime(held, now + 0.05);
+    // Release ramp + delayed cleanup. Removes the voice from the table
+    // once silent so MAX_VOICES stays meaningful.
+    function triggerRelease(v, p) {
+      if (v.stage === "release") return;
+      v.stage = "release";
+      const now = audio.currentTime;
+      const rel = Math.max(0.01, p.release);
+      const g = v.gain.gain;
+      g.cancelScheduledValues(now);
+      g.setValueAtTime(g.value, now);
+      g.linearRampToValueAtTime(0, now + rel);
+      setTimeout(() => {
+        try { v.osc.stop(); v.lfo.stop(); v.osc.disconnect(); v.lfo.disconnect(); } catch (_) {}
+        if (voices.get(v.midi) === v) voices.delete(v.midi);
+        updateOverlay();
+      }, rel * 1000 + 50);
+    }
+
+    // Push patch tweaks (cutoff/Q/LFO/wave/gain) onto every live voice
+    // so live editing affects the whole chord, not just new notes.
+    function applyPatchToVoices(p) {
+      if (!audio) return;
+      const now = audio.currentTime;
+      for (const v of voices.values()) {
+        v.osc.type = p.wave;
+        v.osc.detune.setValueAtTime(p.detune + 100 * p.freq, now);
+        v.filter.frequency.setValueAtTime(p.filterCutoff, now);
+        v.filter.Q.setValueAtTime(p.filterQ, now);
+        v.lfo.frequency.setValueAtTime(p.lfoRate, now);
+        v.lfoGain.gain.setValueAtTime(p.lfoDepth, now);
+        if (v.stage === "attack") {
+          // Glide the sustain level so live GAIN/SUSTAIN edits are
+          // audible without clicks. Don't stomp the active attack ramp
+          // — just retarget the plateau.
+          const held = p.gain * p.sustain;
+          const g = v.gain.gain;
+          g.cancelScheduledValues(now);
+          g.setValueAtTime(g.value, now);
+          g.linearRampToValueAtTime(held, now + 0.05);
+        }
       }
+    }
+
+    function updateOverlay() {
+      if (!playing) { overlay.textContent = "silent"; return; }
+      const n = voices.size;
+      overlay.textContent = n === 0 ? "ready" : `playing (${n} voice${n === 1 ? "" : "s"})`;
+    }
+
+    // Note-on: enforce polyphony cap by stealing the oldest voice.
+    function noteOn(midi) {
+      if (!playing) return;
+      if (!currentPatch) currentPatch = readPatch();
+      if (!currentPatch) return;
+      // Re-trigger an already-held key cleanly.
+      const existing = voices.get(midi);
+      if (existing) {
+        if (existing.stage === "release") {
+          // Bring it back to attack stage.
+          existing.stage = "attack";
+        }
+        triggerAttack(existing, currentPatch);
+        return;
+      }
+      // Voice stealing: drop the oldest non-release voice if at cap.
+      if (voices.size >= MAX_VOICES) {
+        let oldest = null;
+        for (const v of voices.values()) {
+          if (!oldest || v.startedAt < oldest.startedAt) oldest = v;
+        }
+        if (oldest) triggerRelease(oldest, currentPatch);
+      }
+      const v = buildVoice(midi, currentPatch);
+      voices.set(midi, v);
+      triggerAttack(v, currentPatch);
+      updateOverlay();
+    }
+
+    function noteOff(midi) {
+      const v = voices.get(midi);
+      if (!v) return;
+      triggerRelease(v, currentPatch || readPatch() || { release: 0.3 });
     }
 
     function startPlaying() {
       ensureAudio();
       if (audio.state === "suspended") audio.resume();
       if (!currentPatch) currentPatch = readPatch();
-      if (!currentPatch) return;
-      voice = buildVoice(currentPatch);
-      pushPatch(currentPatch, true);
       playing = true;
       playBtn.textContent = "Stop";
-      overlay.textContent = "playing";
+      updateOverlay();
     }
 
     function stopPlaying() {
-      if (!voice || !audio) return;
-      const now = audio.currentTime;
-      const p = currentPatch || {};
-      const rel = Math.max(0.01, p.release ?? 0.2);
-      voice.gain.gain.cancelScheduledValues(now);
-      voice.gain.gain.setValueAtTime(voice.gain.gain.value, now);
-      voice.gain.gain.linearRampToValueAtTime(0, now + rel);
-      const v = voice;
-      setTimeout(() => {
-        try { v.osc.stop(); v.lfo.stop(); } catch (_) {}
-      }, rel * 1000 + 50);
-      voice = null;
+      // Release every live voice; cleanup timers will remove them.
+      const p = currentPatch || readPatch() || { release: 0.3 };
+      for (const v of voices.values()) triggerRelease(v, p);
       playing = false;
       playBtn.textContent = "Start";
-      overlay.textContent = "silent";
+      updateOverlay();
     }
 
     playBtn.addEventListener("click", () => {
       if (playing) stopPlaying(); else startPlaying();
     });
+    // Trigger button: play a quick middle-C blip as a smoke test.
     noteBtn.addEventListener("click", () => {
-      if (!playing) { startPlaying(); return; }
-      if (currentPatch) pushPatch(currentPatch, true);
+      if (!playing) startPlaying();
+      noteOn(60);
+      setTimeout(() => noteOff(60), 250);
+    });
+
+    // --- keyboard polyphony ---------------------------------------------
+    // Two-row mapping in C major starting on middle C. Black keys live
+    // on the QWERTY row above their white-key neighbours, the way most
+    // soft synths lay it out.
+    const KEY_TO_MIDI = {
+      "a": 60, "w": 61, "s": 62, "e": 63, "d": 64, "f": 65,
+      "t": 66, "g": 67, "y": 68, "h": 69, "u": 70, "j": 71,
+      "k": 72, "o": 73, "l": 74, "p": 75, ";": 76,
+    };
+    // Track which physical keys are held so OS key-repeat doesn't
+    // re-trigger the envelope every ~30ms.
+    const heldKeys = new Set();
+
+    function isTypingTarget(t) {
+      if (!t) return false;
+      if (t.isContentEditable) return true;
+      const tag = t.tagName;
+      return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+    }
+
+    window.addEventListener("keydown", (ev) => {
+      if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+      if (isTypingTarget(ev.target)) return;
+      const k = ev.key.toLowerCase();
+      const midi = KEY_TO_MIDI[k];
+      if (midi == null) return;
+      ev.preventDefault();
+      if (heldKeys.has(k)) return;
+      heldKeys.add(k);
+      if (!playing) startPlaying();
+      noteOn(midi);
+    });
+    window.addEventListener("keyup", (ev) => {
+      const k = ev.key.toLowerCase();
+      const midi = KEY_TO_MIDI[k];
+      if (midi == null) return;
+      heldKeys.delete(k);
+      noteOff(midi);
+    });
+    // Releasing focus mid-chord would otherwise leave voices hanging.
+    window.addEventListener("blur", () => {
+      for (const k of heldKeys) {
+        const m = KEY_TO_MIDI[k];
+        if (m != null) noteOff(m);
+      }
+      heldKeys.clear();
     });
     masterSlider.addEventListener("input", () => {
       if (master) master.gain.setValueAtTime(
@@ -394,7 +522,7 @@
         const p = readPatch();
         if (p && patchChanged(p, currentPatch)) {
           currentPatch = p;
-          if (voice) pushPatch(p, false);
+          applyPatchToVoices(p);
         }
       } catch (_) { /* eval errors are surfaced by applySource */ }
 
@@ -410,8 +538,8 @@
       ctx.strokeStyle = "#2a2f3d";
       ctx.beginPath(); ctx.moveTo(0, H / 2); ctx.lineTo(W, H / 2); ctx.stroke();
 
-      if (voice && voice.analyser) {
-        voice.analyser.getFloatTimeDomainData(scopeBuf);
+      if (scopeNode && (voices.size > 0 || playing)) {
+        scopeNode.getFloatTimeDomainData(scopeBuf);
         let peak = 0;
         ctx.strokeStyle = "#7cd98a";
         ctx.lineWidth = 2;

@@ -28,7 +28,10 @@
 ;; editor source says. Sliders mutate the atom for live tweaking
 ;; between edits.
 
-(def FREQ           (atom 220.0))   ; base frequency, Hz
+;; Pitch: keyboard drives note frequency, FREQ becomes a transpose
+;; offset in semitones applied to every active voice (handy for
+;; live-coded key changes without remapping the QWERTY row).
+(def FREQ           (atom 0.0))     ; transpose, semitones
 (def DETUNE         (atom 7.0))     ; cents
 (def WAVE-TYPE      (atom :sawtooth)) ; :sine :square :sawtooth :triangle
 
@@ -103,7 +106,7 @@
 (defn ui-tree []
   [:div {:class "sy-panel"}
    [:h4 {:class "sy-h"} "patch"]
-   (slider-row "freq"     "sy-s-freq"     FREQ           50.0  1200.0 1.0)
+   (slider-row "transpose" "sy-s-freq"    FREQ          -24.0    24.0 1.0)
    (slider-row "detune"   "sy-s-detune"   DETUNE        -50.0    50.0 0.1)
    (wave-row)
    [:h4 {:class "sy-h"} "filter"]
