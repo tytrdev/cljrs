@@ -206,6 +206,74 @@ export async function makeEditor(container, opts = {}) {
   return editor;
 }
 
+// Scrubbable-token visual affordance: subtle outline on numbers and
+// hex-color strings, with each color tinted in its own color. CSS is
+// injected once into <head>; per-color rules are added on demand.
+let scrubStylesInstalled = false;
+const knownColorClasses = new Set();
+function ensureScrubStyles() {
+  if (scrubStylesInstalled) return;
+  scrubStylesInstalled = true;
+  const css = `
+    .cljrs-tok-number-deco {
+      background: rgba(255,204,96,0.10);
+      outline: 1px solid rgba(255,204,96,0.30);
+      border-radius: 2px;
+    }
+    body.cljrs-scrub-mode .cljrs-tok-number-deco {
+      background: rgba(255,204,96,0.30);
+      outline-color: rgba(255,204,96,0.80);
+      cursor: ew-resize !important;
+    }
+    body.cljrs-scrub-mode .cljrs-tok-color-deco {
+      cursor: pointer !important;
+    }
+  `;
+  const style = document.createElement("style");
+  style.id = "cljrs-scrub-styles";
+  style.textContent = css;
+  document.head.appendChild(style);
+}
+function ensureColorClass(hex) {
+  // hex looks like "#rrggbb"
+  const cls = "cljrs-color-" + hex.slice(1).toLowerCase();
+  if (knownColorClasses.has(cls)) return cls;
+  knownColorClasses.add(cls);
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  const css = `
+    .${cls} {
+      background: rgba(${r},${g},${b},0.18);
+      outline: 1px solid rgba(${r},${g},${b},0.55);
+      border-radius: 2px;
+    }
+    body.cljrs-scrub-mode .${cls} {
+      background: rgba(${r},${g},${b},0.45);
+      outline-color: rgba(${r},${g},${b},0.95);
+    }
+  `;
+  const style = document.createElement("style");
+  style.textContent = css;
+  document.head.appendChild(style);
+  return cls;
+}
+
+// Single global tracker for whether Alt/Ctrl is currently held — drives
+// the `cljrs-scrub-mode` body class so all editors highlight in sync.
+let scrubModListeners = false;
+function ensureScrubModListeners() {
+  if (scrubModListeners) return;
+  scrubModListeners = true;
+  const update = (e) => {
+    document.body.classList.toggle("cljrs-scrub-mode", !!(e.altKey || e.ctrlKey));
+  };
+  for (const ev of ["keydown", "keyup", "mousemove", "mousedown", "mouseup"]) {
+    window.addEventListener(ev, update, true);
+  }
+  window.addEventListener("blur", () => document.body.classList.remove("cljrs-scrub-mode"));
+}
+
 /// Wire Alt/Ctrl + mousedown on numbers (drag to scrub) and on
 /// `"#rrggbb"` string literals (click to open a color picker) for a
 /// Monaco editor. The editor's onApply hook handles re-evaluation.
@@ -228,6 +296,48 @@ export function attachAltDragScrub(editor, monaco) {
       columnSelection: false,
     });
   } catch {}
+
+  ensureScrubStyles();
+  ensureScrubModListeners();
+
+  // ----- decorations: scan buffer + mark numbers / hex colors -----
+  let decoIds = [];
+  function refreshDecorations() {
+    const model = editor.getModel();
+    if (!model) return;
+    const decos = [];
+    const lineCount = model.getLineCount();
+    for (let ln = 1; ln <= lineCount; ln++) {
+      const line = model.getLineContent(ln);
+      let m;
+      const seen = []; // [start,end) of color spans, to skip number scan inside
+      const hexRe = /"#[0-9a-fA-F]{6}"/g;
+      while ((m = hexRe.exec(line)) != null) {
+        const s = m.index + 1;
+        const e = s + m[0].length;
+        const cls = ensureColorClass(m[0].slice(1, 8)); // strip outer quotes
+        decos.push({
+          range: new monaco.Range(ln, s, ln, e),
+          options: { inlineClassName: `cljrs-tok-color-deco ${cls}` },
+        });
+        seen.push([s, e]);
+      }
+      const numRe = /-?\d+(?:\.\d+)?/g;
+      while ((m = numRe.exec(line)) != null) {
+        const s = m.index + 1;
+        const e = s + m[0].length;
+        // Skip numbers inside a color literal (e.g. "#abc123").
+        if (seen.some(([cs, ce]) => s >= cs && e <= ce)) continue;
+        decos.push({
+          range: new monaco.Range(ln, s, ln, e),
+          options: { inlineClassName: "cljrs-tok-number-deco" },
+        });
+      }
+    }
+    decoIds = editor.deltaDecorations(decoIds, decos);
+  }
+  refreshDecorations();
+  editor.onDidChangeModelContent(refreshDecorations);
 
   // ----- helpers -----
   const NUM_RE   = /-?\d+(?:\.\d+)?/g;
