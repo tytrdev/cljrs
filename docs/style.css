@@ -75,14 +75,30 @@ header nav { flex: 1; align-items: center; }
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 0.35rem 0;
-  margin-top: 0.4rem;
+  /* No margin-top — a gap breaks the :hover chain between trigger and
+     dropdown. Offset the visual position via translateY inside a
+     wrapper that keeps an invisible bridge so the pointer can cross
+     without the dropdown dismissing. */
+  margin-top: 0;
   display: none;
   flex-direction: column;
   z-index: 100;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
+.nav-group .nav-dropdown::before {
+  /* Invisible bridge between trigger and dropdown so moving the
+     pointer down doesn't exit the :hover region. */
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -0.6rem;
+  height: 0.6rem;
+}
 .nav-group:hover .nav-dropdown,
 .nav-group:focus-within .nav-dropdown { display: flex; }
+/* Slight visual detach without losing hover chain. */
+.nav-group .nav-dropdown { transform: translateY(0.4rem); }
 .nav-group .nav-dropdown a {
   display: block;
   padding: 0.3rem 0.9rem;
