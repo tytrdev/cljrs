@@ -1,0 +1,539 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Life — live coded</title>
+  <link rel="stylesheet" href="./style.css">
+  <style>
+    .lf-wrap { display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-start; }
+    .lf-stage {
+      background: #0b0d14;
+      border: 1px solid var(--border, #333);
+      border-radius: 4px;
+      flex: 0 0 auto;
+      position: relative;
+    }
+    .lf-stage canvas { display: block; cursor: crosshair; }
+    .lf-overlay {
+      position: absolute; top: 6px; left: 10px;
+      color: #9aa;
+      font: 0.7rem ui-monospace, monospace;
+      pointer-events: none;
+      text-shadow: 0 0 2px #000;
+    }
+    .lf-col {
+      flex: 1 1 400px;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .lf-toolbar {
+      display: flex; gap: 0.5rem; align-items: center;
+      font-size: 0.8rem; color: var(--fg-dim);
+      flex-wrap: wrap;
+    }
+    .lf-toolbar button, .lf-toolbar select {
+      font-family: inherit; font-size: 0.8rem; padding: 0.25rem 0.7rem;
+    }
+    .lf-status {
+      font-family: ui-monospace, monospace;
+      font-size: 0.75rem;
+      color: var(--fg-dim);
+      min-height: 1em;
+      white-space: pre-wrap;
+    }
+    .lf-status.err { color: #ff6666; }
+    .lf-status.ok { color: #8ec07c; }
+    .lf-hint { font-size: 0.75rem; color: var(--fg-dim); }
+    .lf-hint kbd {
+      background: #1d2029; border: 1px solid #333;
+      padding: 0 4px; border-radius: 3px;
+      font-family: inherit;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h2>Game of Life — live coded</h2>
+    <p class="lf-hint" style="margin-top:-0.4rem">
+      Inspired by Bret Victor's
+      <a href="https://www.youtube.com/watch?v=PUv66718DII">Inventing on Principle</a>
+      (2012) · see also <a href="https://worrydream.com/">worrydream.com</a>.
+    </p>
+    <p>
+      Conway's Life with every rule in the editor. Edit the
+      <code>BIRTH</code> / <code>SURVIVE</code> sets to invent new automata
+      (Conway = B3/S23, HighLife = B36/S23, Day&amp;Night = B3678/S34678,
+      Seeds = B2/S). Toggle <code>WRAP?</code> for a torus, swap
+      <code>NEIGHBORHOOD</code> between Moore and von Neumann, or rewrite
+      <code>cell-color</code> for a fresh palette. State is preserved across
+      every edit — click cells to toggle them while it runs.
+    </p>
+    <p class="lf-hint">
+      <kbd>Click</kbd> toggle a cell ·
+      <kbd>Drag</kbd> paint cells alive ·
+      hold <kbd>Alt</kbd>/<kbd>Ctrl</kbd> + drag any number in the source for a live scrubber
+    </p>
+
+    <div class="lf-wrap">
+      <div class="lf-stage" id="lf-stage" tabindex="0">
+        <canvas id="lf-canvas" width="480" height="480"></canvas>
+        <div class="lf-overlay" id="lf-overlay"></div>
+      </div>
+      <div class="lf-col">
+        <div class="lf-toolbar">
+          <button id="lf-pause">Pause</button>
+          <button id="lf-step">Step</button>
+          <select id="lf-seed">
+            <option value="random">Reset: random</option>
+            <option value="clear">Reset: clear</option>
+            <option value="glider">Reset: glider</option>
+            <option value="pulsar">Reset: pulsar</option>
+            <option value="acorn">Reset: acorn</option>
+          </select>
+          <span id="lf-fps">—</span>
+          <span id="lf-pop"></span>
+        </div>
+        <div class="repl" id="lf-editor-wrap">
+          <div id="lf-editor" style="height:420px;width:100%"></div>
+          <div class="repl-toolbar" style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+            <span id="lf-vim-status" style="font-family:ui-monospace,monospace;font-size:0.75rem;color:var(--fg-dim)"></span>
+            <label style="font-size:0.75rem;color:var(--fg-dim)">
+              <input type="checkbox" id="lf-vim-toggle"> vim mode
+            </label>
+            <button data-share style="font-size:0.75rem;padding:0.25rem 0.7rem;margin-left:0.5rem">Share</button>
+          </div>
+        </div>
+        <div id="lf-status" class="lf-status"></div>
+      </div>
+    </div>
+
+    <h3>How it works</h3>
+    <ul>
+      <li>The grid lives in a <code>Uint8Array</code> on the JS side, so re-evaluating the source never touches it. JS owns state, cljrs owns rules.</li>
+      <li>Every frame, JS sends a flat <code>[w h wrap? n0 n1 ...]</code> packet to <code>(next-grid ...)</code> via <code>repl.call_ints</code>; cljrs returns the next generation as a flat vector. One Clojure call per frame, no per-cell crossings.</li>
+      <li><code>BIRTH</code> / <code>SURVIVE</code> are sets — change them and the next frame uses the new rule. The grid keeps evolving.</li>
+      <li><code>cell-color</code> is a pure function of <code>(alive? neighbors age)</code> returning a packed <code>0xRRGGBB</code> int. JS pulls the palette via <code>call_ints</code> too.</li>
+    </ul>
+  </main>
+  <script type="module">
+    import { mountChrome, loadWasm, makeEditor, attachAltDragScrub, loadMonaco, attachShareLink } from "./_layout.js";
+    mountChrome();
+
+    const INITIAL_SOURCE = `;; ============================================================
+;; Conway's Game of Life — every rule lives here.
+;;   numbers: hold Alt (or Ctrl) and drag to scrub
+;;   strings: hold Alt (or Ctrl) and click a "#rrggbb" to pick
+;; Edits apply live. The grid is owned by JS so editing
+;; rules NEVER resets the simulation.
+;; ============================================================
+
+;; --- rule (B/S notation) ---
+;;   Conway:        BIRTH #{3}     SURVIVE #{2 3}
+;;   HighLife:      BIRTH #{3 6}   SURVIVE #{2 3}
+;;   Day & Night:   BIRTH #{3 6 7 8} SURVIVE #{3 4 6 7 8}
+;;   Seeds:         BIRTH #{2}     SURVIVE #{}
+;;   Replicator:    BIRTH #{1 3 5 7} SURVIVE #{1 3 5 7}
+(def BIRTH    #{3})
+(def SURVIVE  #{2 3})
+
+;; --- topology ---
+(def WRAP?         1)   ; 1 = torus, 0 = dead borders
+(def NEIGHBORHOOD  8)   ; 8 = Moore, 4 = von Neumann
+
+;; --- palette (cells, neighbors-based hue) ---
+(def COLOR-DEAD   "#0b0d14")
+(def COLOR-ALIVE  "#7cd98a")
+(def COLOR-BIRTH  "#ffcc60")  ; just-born this step
+(def COLOR-OLD    "#3a8a4a")  ; alive >= AGE-OLD steps
+
+(def AGE-OLD      8)
+(def CONTINUOUS?  0)  ; 1 = age-based gradient, 0 = flat colors
+
+;; ============================================================
+;; Grid state is owned here in a defonce atom. JS reads via (tick!)
+;; and edits via (toggle! i) / (seed! kind). Re-evaluating this
+;; whole buffer doesn't touch (defonce …), so rule edits don't
+;; reset the simulation.
+;; ============================================================
+
+(def WIDTH  48)
+(def HEIGHT 48)
+
+(defn- empty-grid []
+  (vec (repeat (* WIDTH HEIGHT) 0)))
+
+;; Seeded LCG so a "random" fill is deterministic and reproducible
+;; (no rand in cljrs yet — and that's fine, it's reproducible too).
+(defn- lcg [s] (mod (+ (* s 1103515245) 12345) 2147483648))
+(defn- random-grid [seed thresh]
+  (loop [i 0 s seed out []]
+    (if (>= i (* WIDTH HEIGHT))
+      out
+      (let [s' (lcg s)]
+        (recur (inc i) s'
+               (conj out (if (< (mod s' 1000) thresh) 1 0)))))))
+
+(defonce grid (atom (random-grid 12345 250)))
+
+(defn cell [g x y]
+  (let [w WIDTH h HEIGHT
+        wrap? (= WRAP? 1)
+        ix (if wrap? (mod (+ x w) w) x)
+        iy (if wrap? (mod (+ y h) h) y)]
+    (if (and (>= ix 0) (< ix w) (>= iy 0) (< iy h))
+      (nth g (+ (* iy w) ix))
+      0)))
+
+(defn neighbors [g x y]
+  (if (= NEIGHBORHOOD 4)
+    (+ (cell g (- x 1) y) (cell g (+ x 1) y)
+       (cell g x (- y 1)) (cell g x (+ y 1)))
+    (+ (cell g (- x 1) (- y 1)) (cell g x (- y 1)) (cell g (+ x 1) (- y 1))
+       (cell g (- x 1) y)                          (cell g (+ x 1) y)
+       (cell g (- x 1) (+ y 1)) (cell g x (+ y 1)) (cell g (+ x 1) (+ y 1)))))
+
+;; Pure rule: (alive?, neighbor count) -> 0/1.
+(defn step-cell [alive n]
+  (if (= alive 1)
+    (if (contains? SURVIVE n) 1 0)
+    (if (contains? BIRTH   n) 1 0)))
+
+(defn- next-gen [g]
+  (loop [y 0 out []]
+    (if (>= y HEIGHT)
+      out
+      (recur (inc y)
+             (loop [x 0 row out]
+               (if (>= x WIDTH)
+                 row
+                 (recur (inc x)
+                        (conj row
+                              (step-cell (cell g x y)
+                                         (neighbors g x y))))))))))
+
+;; --- JS-callable surface ------------------------------------------------
+
+;; Advance one step and return the new grid as a flat vector.
+(defn tick! []
+  (swap! grid next-gen)
+  @grid)
+
+;; Snapshot the current grid (for redraws while paused).
+(defn snapshot [] @grid)
+
+(defn toggle! [i]
+  (swap! grid (fn [g]
+                (let [v (nth g i)]
+                  (assoc g i (if (= v 1) 0 1)))))
+  nil)
+
+(defn set-cell! [i v]
+  (swap! grid assoc i v) nil)
+
+(defn seed! [kind seed]
+  (cond
+    (= kind 0) (reset! grid (empty-grid))
+    (= kind 1) (reset! grid (random-grid (max 1 seed) 250))
+    (= kind 2) (do (reset! grid (empty-grid))
+                   (doseq [[x y] [[1 0] [2 1] [0 2] [1 2] [2 2]]]
+                     (swap! grid assoc (+ (* (+ y 4) WIDTH) (+ x 4)) 1)))
+    (= kind 3) (do (reset! grid (empty-grid))
+                   ;; pulsar (cross of triplets) at the center
+                   (let [cx (quot WIDTH 2) cy (quot HEIGHT 2)]
+                     (doseq [[dx dy] [[-4 -2] [-3 -2] [-2 -2] [2 -2] [3 -2] [4 -2]
+                                      [-2 -4] [-2 -3] [-4 -3] [-3 -4]
+                                      [2 -4] [3 -4] [4 -3] [2 -3]
+                                      [-4 2] [-3 2] [-2 2] [2 2] [3 2] [4 2]
+                                      [-2 4] [-2 3] [-4 3] [-3 4]
+                                      [2 4] [3 4] [4 3] [2 3]]]
+                       (swap! grid assoc
+                              (+ (* (+ cy dy) WIDTH) (+ cx dx)) 1))))
+    (= kind 4) (do (reset! grid (empty-grid))
+                   (let [cx (quot WIDTH 2) cy (quot HEIGHT 2)]
+                     (doseq [[dx dy] [[1 0] [3 1] [0 2] [1 2] [4 2] [5 2] [6 2]]]
+                       (swap! grid assoc
+                              (+ (* (+ cy dy) WIDTH) (+ cx dx)) 1)))))
+  nil)
+
+(defn dims [] [WIDTH HEIGHT])
+(defn params [] [AGE-OLD CONTINUOUS?])
+(defn theme  [] [COLOR-DEAD COLOR-ALIVE COLOR-BIRTH COLOR-OLD])
+`;
+
+    // --- elements --------------------------------------------------------
+    const canvas    = document.getElementById("lf-canvas");
+    const ctx       = canvas.getContext("2d");
+    const stage     = document.getElementById("lf-stage");
+    const status    = document.getElementById("lf-status");
+    const overlay   = document.getElementById("lf-overlay");
+    const fpsEl     = document.getElementById("lf-fps");
+    const popEl     = document.getElementById("lf-pop");
+    const pauseBtn  = document.getElementById("lf-pause");
+    const stepBtn   = document.getElementById("lf-step");
+    const seedSel   = document.getElementById("lf-seed");
+
+    // --- grid state -----------------------------------------------------
+    // The cljrs side owns the canonical grid (in a defonce atom, so source
+    // edits don't reset it). JS keeps a Uint8Array MIRROR pulled each frame
+    // for fast rendering, plus client-side age/prev for the palette.
+    let W = 48, H = 48;             // cells (read from cljrs (dims))
+    let CELL = 10;                  // px (canvas is 480x480)
+    let grid = new Uint8Array(W * H);
+    let age  = new Uint8Array(W * H);    // frames alive
+    let prev = new Uint8Array(W * H);    // last frame's grid (for "just-born")
+
+    // Palette (overwritten by (palette) on every source apply).
+    let palette = {
+      dead:  0x0b0d14,
+      alive: 0x7cd98a,
+      birth: 0xffcc60,
+      old:   0x3a8a4a,
+      ageOld: 8,
+      continuous: 0,
+    };
+
+    let repl = null;
+    let editor = null;
+    let paused = false;
+    let frame = 0;
+    let lastT = performance.now();
+    let emaFps = 30;
+    // throttle to ~30 fps regardless of rAF rate
+    const TARGET_MS = 1000 / 30;
+    let acc = 0;
+
+    function setStatus(msg, cls) {
+      status.className = cls ? `lf-status ${cls}` : "lf-status";
+      status.textContent = msg;
+    }
+
+    // Reset: ask cljrs to seed the canonical grid, then mirror.
+    const SEED_KIND = { clear: 0, random: 1, glider: 2, pulsar: 3, acorn: 4 };
+    function reset(kind) {
+      if (!repl) return;
+      const k = SEED_KIND[kind] ?? 1;
+      const seed = (Math.random() * 2147483647) | 0;
+      repl.call_ints("seed!", new Int32Array([k, seed]));
+      pullGrid();
+      age.fill(0); prev.fill(0);
+      for (let i = 0; i < grid.length; i++) age[i] = grid[i];
+      frame = 0;
+    }
+
+    // Mirror cljrs grid -> JS Uint8Array (for fast render + click hit-test).
+    function pullGrid() {
+      const out = repl.eval_floats("(snapshot)");
+      const n = Math.min(grid.length, out.length);
+      for (let i = 0; i < n; i++) grid[i] = out[i] >= 0.5 ? 1 : 0;
+    }
+
+    // --- source / palette wiring ---------------------------------------
+    function applySource(src) {
+      if (!repl) return false;
+      setStatus("…");
+      const result = repl.eval(src);
+      if (result.startsWith("read error") || result.startsWith("eval error")) {
+        setStatus(result, "err");
+        return false;
+      }
+      try {
+        const d = repl.eval_floats("(dims)");
+        if (d.length >= 2) {
+          const newW = d[0] | 0, newH = d[1] | 0;
+          if (newW !== W || newH !== H) {
+            W = newW; H = newH;
+            CELL = Math.max(1, Math.floor(canvas.width / W));
+            grid = new Uint8Array(W * H);
+            age  = new Uint8Array(W * H);
+            prev = new Uint8Array(W * H);
+            // Resize triggers a fresh seed in cljrs's atom too.
+            repl.call_ints("seed!", new Int32Array([1, ((Math.random() * 2147483647) | 0)]));
+            pullGrid();
+          }
+        }
+        const p = repl.eval_floats("(params)");
+        if (p.length >= 2) {
+          palette.ageOld     = Math.max(1, p[0] | 0);
+          palette.continuous = p[1] | 0;
+        }
+        const themeStr = repl.eval("(theme)");
+        const m = themeStr.match(/"([^"]*)"/g);
+        if (m && m.length >= 4) {
+          const hexToInt = (h) => {
+            const s = h.replace(/^"|"$/g, "").replace("#", "");
+            return parseInt(s, 16) | 0;
+          };
+          palette.dead  = hexToInt(m[0]);
+          palette.alive = hexToInt(m[1]);
+          palette.birth = hexToInt(m[2]);
+          palette.old   = hexToInt(m[3]);
+        }
+      } catch (e) { /* palette optional */ }
+      setStatus("applied.", "ok");
+      return true;
+    }
+
+    // --- click / drag to paint ------------------------------------------
+    let painting = false;
+    let paintVal = 1;
+    function cellAtEvent(e) {
+      const rect = canvas.getBoundingClientRect();
+      const x = Math.floor((e.clientX - rect.left) / (rect.width  / W));
+      const y = Math.floor((e.clientY - rect.top)  / (rect.height / H));
+      if (x < 0 || x >= W || y < 0 || y >= H) return null;
+      return y * W + x;
+    }
+    canvas.addEventListener("mousedown", (e) => {
+      if (!repl) return;
+      const i = cellAtEvent(e); if (i == null) return;
+      paintVal = grid[i] ? 0 : 1;
+      grid[i] = paintVal;
+      if (paintVal) age[i] = Math.max(age[i], 1); else age[i] = 0;
+      repl.call_ints("set-cell!", new Int32Array([i, paintVal]));
+      painting = true;
+      e.preventDefault();
+    });
+    window.addEventListener("mousemove", (e) => {
+      if (!painting || !repl) return;
+      const i = cellAtEvent(e); if (i == null) return;
+      if (grid[i] !== paintVal) {
+        grid[i] = paintVal;
+        if (paintVal) age[i] = Math.max(age[i], 1); else age[i] = 0;
+        repl.call_ints("set-cell!", new Int32Array([i, paintVal]));
+      }
+    });
+    window.addEventListener("mouseup", () => { painting = false; });
+
+    // --- rendering -------------------------------------------------------
+    const img = ctx.createImageData(canvas.width, canvas.height);
+    function packToRgb(c) {
+      return [(c >> 16) & 0xff, (c >> 8) & 0xff, c & 0xff];
+    }
+    function lerp(a, b, t) { return a + (b - a) * t; }
+    function colorFor(alive, justBorn, a) {
+      if (!alive) return packToRgb(palette.dead);
+      if (palette.continuous) {
+        const t = Math.min(1, a / palette.ageOld);
+        const [r1,g1,b1] = packToRgb(palette.birth);
+        const [r2,g2,b2] = packToRgb(palette.old);
+        return [lerp(r1,r2,t)|0, lerp(g1,g2,t)|0, lerp(b1,b2,t)|0];
+      }
+      if (justBorn) return packToRgb(palette.birth);
+      if (a >= palette.ageOld) return packToRgb(palette.old);
+      return packToRgb(palette.alive);
+    }
+    function draw() {
+      const data = img.data;
+      const cw = canvas.width;
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+          const i = y * W + x;
+          const justBorn = grid[i] === 1 && prev[i] === 0;
+          const [r,g,b] = colorFor(grid[i], justBorn, age[i]);
+          // fill CELL x CELL block
+          const px0 = x * CELL, py0 = y * CELL;
+          for (let dy = 0; dy < CELL; dy++) {
+            let off = ((py0 + dy) * cw + px0) * 4;
+            for (let dx = 0; dx < CELL; dx++) {
+              data[off++] = r;
+              data[off++] = g;
+              data[off++] = b;
+              data[off++] = 255;
+            }
+          }
+        }
+      }
+      ctx.putImageData(img, 0, 0);
+      // grid lines (subtle)
+      ctx.strokeStyle = "rgba(255,255,255,0.03)";
+      ctx.lineWidth = 1;
+    }
+
+    // --- one simulation step via cljrs ----------------------------------
+    function tickSim() {
+      if (!repl) return;
+      try {
+        const out = repl.call_ints("tick!", new Int32Array([]));
+        if (out.length >= W * H) {
+          prev.set(grid);
+          let pop = 0;
+          for (let i = 0; i < W * H; i++) {
+            const v = out[i] >= 0.5 ? 1 : 0;
+            if (v) {
+              age[i] = Math.min(255, (grid[i] ? age[i] + 1 : 1));
+              pop++;
+            } else {
+              age[i] = 0;
+            }
+            grid[i] = v;
+          }
+          frame++;
+          popEl.textContent = `pop ${pop}  gen ${frame}`;
+        }
+      } catch (e) {
+        setStatus(String(e), "err");
+        paused = true;
+        pauseBtn.textContent = "Resume";
+      }
+    }
+
+    // --- rAF loop --------------------------------------------------------
+    function loop(now) {
+      const dt = now - lastT; lastT = now;
+      if (dt > 0) emaFps = emaFps * 0.92 + (1000 / dt) * 0.08;
+      fpsEl.textContent = `${emaFps.toFixed(0)} fps`;
+      acc += dt;
+      if (!paused && acc >= TARGET_MS) {
+        // catch up at most a couple of steps so a slow tab doesn't spiral
+        let budget = 2;
+        while (acc >= TARGET_MS && budget-- > 0) {
+          tickSim();
+          acc -= TARGET_MS;
+        }
+        if (acc > TARGET_MS * 4) acc = 0;
+      }
+      draw();
+      overlay.textContent =
+        `${W}×${H}   gen ${frame}   ${paused ? "paused" : "running"}`;
+      requestAnimationFrame(loop);
+    }
+
+    // --- wiring ----------------------------------------------------------
+    pauseBtn.addEventListener("click", () => {
+      paused = !paused;
+      pauseBtn.textContent = paused ? "Resume" : "Pause";
+      stage.focus();
+    });
+    stepBtn.addEventListener("click", () => {
+      tickSim();
+    });
+    seedSel.addEventListener("change", () => {
+      reset(seedSel.value);
+    });
+
+    (async () => {
+      const mod = await loadWasm();
+      repl = new mod.Repl();
+      editor = await makeEditor(document.getElementById("lf-editor"), {
+        value: INITIAL_SOURCE,
+        onApply: applySource,
+        debounceMs: 350,
+        vimToggleEl: document.getElementById("lf-vim-toggle"),
+        vimStatusEl: document.getElementById("lf-vim-status"),
+        vimKey: "life",
+      });
+      const monaco = await loadMonaco();
+      attachAltDragScrub(editor, monaco);
+      attachShareLink(editor);
+      applySource(editor.getValue());
+      pullGrid();
+      // Initial age = current alive cells (so palette has something).
+      for (let i = 0; i < grid.length; i++) age[i] = grid[i];
+      requestAnimationFrame(loop);
+    })();
+  </script>
+</body>
+</html>
