@@ -1,10 +1,41 @@
+use std::cell::RefCell;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::env::Env;
 use crate::error::{Error, Result};
+use crate::reader::lookup_location;
 use crate::types::{PrimType, parse_type_name, unwrap_tagged};
 use crate::value::{Lambda, Value};
+
+thread_local! {
+    /// Current Clojure call stack (function names), most-recent last.
+    /// Pushed on lambda invocation, popped when the call returns. Snapshot
+    /// is attached to errors via `Error::at` so a failed deep call shows
+    /// the path that led there. Bounded to MAX_STACK_DEPTH frames in the
+    /// snapshot to avoid unbounded message growth on deep recursion.
+    static CALL_STACK: RefCell<Vec<Arc<str>>> = const { RefCell::new(Vec::new()) };
+}
+
+const MAX_STACK_DEPTH: usize = 16;
+
+fn push_frame(name: Arc<str>) {
+    CALL_STACK.with(|s| s.borrow_mut().push(name));
+}
+
+fn pop_frame() {
+    CALL_STACK.with(|s| {
+        s.borrow_mut().pop();
+    });
+}
+
+fn current_stack() -> Vec<Arc<str>> {
+    CALL_STACK.with(|s| {
+        let b = s.borrow();
+        let start = b.len().saturating_sub(MAX_STACK_DEPTH);
+        b[start..].to_vec()
+    })
+}
 
 /// Monotonically increasing counter for fresh symbol names created by
 /// destructuring and auto-gensym. Process-global; collisions with user
@@ -235,7 +266,19 @@ pub fn eval(form: &Value, env: &Env) -> Result<Value> {
             }
             Ok(Value::Set(out))
         }
-        Value::List(xs) => eval_list(xs, env),
+        Value::List(xs) => {
+            // Attach source location (if known) to any error originating
+            // here. `Recur` is left bare so the loop/fn frame can still
+            // pattern-match it as a control-flow signal.
+            let loc = lookup_location(xs);
+            match eval_list(xs, env) {
+                Ok(v) => Ok(v),
+                Err(e) => match loc {
+                    Some((line, col)) => Err(e.at(line, col, current_stack())),
+                    None => Err(e),
+                },
+            }
+        }
     }
 }
 
@@ -544,6 +587,23 @@ fn value_to_f32(v: &Value) -> Result<f32> {
 }
 
 fn invoke_lambda(lam: &Arc<Lambda>, args: &[Value]) -> Result<Value> {
+    // Push the fn's name onto the call stack for the duration of this
+    // invocation. Anonymous fns push "<anon>" so the stack stays
+    // contiguous and shows the call shape. Pop in all exit paths via
+    // the small RAII helper below.
+    let frame_name: Arc<str> = match &lam.name {
+        Some(n) => Arc::clone(n),
+        None => Arc::from("<anon>"),
+    };
+    push_frame(frame_name);
+    struct Guard;
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            pop_frame();
+        }
+    }
+    let _g = Guard;
+
     let mut current: Vec<Value> = args.to_vec();
     let n = lam.params.len();
     let capacity = n + lam.variadic.is_some() as usize + lam.name.is_some() as usize;
@@ -1573,14 +1633,20 @@ fn sf_try(args: &[Value], env: &Env) -> Result<Value> {
 
     if let Some(err) = thrown {
         // Only catch Thrown (user-raised); let Recur and others propagate.
-        let payload = match err {
+        // Peel any Located wrapper first so the match below sees the
+        // original kind. We pass the source location info on into the
+        // catch payload as a string when not a user throw.
+        let inner = err.clone().peel();
+        let payload = match inner {
             Error::Thrown(v) => v,
-            Error::Eval(s) | Error::Type(s) | Error::Read(s) => Value::Str(Arc::from(s.as_str())),
+            Error::Eval(s) | Error::Type(s) | Error::Read(s) => {
+                Value::Str(Arc::from(s.as_str()))
+            }
             Error::Unbound(s) => Value::Str(Arc::from(format!("unbound: {s}").as_str())),
             Error::Arity { expected, got } => Value::Str(Arc::from(
                 format!("arity: expected {expected}, got {got}").as_str(),
             )),
-            other => return Err(other),
+            _ => return Err(err),
         };
         if let Some((name, catch_body)) = catch {
             let catch_env = env.push_scope(vec![(name, payload)]);

@@ -190,6 +190,34 @@ impl Repl {
     }
 }
 
+/// Format an error from eval for display in the docs REPL. We keep the
+/// `eval error:` prefix the docs JS greps for, but if the error carries
+/// source location info we splice it in *before* the inner message, e.g.
+/// `eval error: 5:3: type error: expected number, got nil`.
+fn format_eval_error(e: &cljrs::error::Error) -> String {
+    use cljrs::error::Error;
+    if let Error::Located { inner, line, col, stack } = e {
+        // Inner Display includes its own "eval error:"/"type error:"/etc
+        // prefix; we keep those (they carry the kind) but slot the source
+        // location in front so the format is uniform across kinds.
+        let mut s = format!("eval error: {line}:{col}: {inner}");
+        if !stack.is_empty() {
+            s.push_str(" (in");
+            for (i, name) in stack.iter().enumerate() {
+                if i > 0 {
+                    s.push_str(" <-");
+                }
+                s.push(' ');
+                s.push_str(name);
+            }
+            s.push(')');
+        }
+        s
+    } else {
+        format!("eval error: {e}")
+    }
+}
+
 fn eval_in(env: &Env, src: &str) -> String {
     let forms = match reader::read_all(src) {
         Ok(f) => f,
@@ -199,7 +227,7 @@ fn eval_in(env: &Env, src: &str) -> String {
     for f in forms {
         match eval::eval(&f, env) {
             Ok(v) => last = v,
-            Err(e) => return format!("eval error: {e}"),
+            Err(e) => return format_eval_error(&e),
         }
     }
     last.to_pr_string()

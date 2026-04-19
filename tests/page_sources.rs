@@ -184,13 +184,16 @@ fn eval_source(label: &str, src: &str) -> Result<(), String> {
         for f in forms {
             match eval::eval(&f, &env) {
                 Ok(_) => {}
-                Err(cljrs::error::Error::Unbound(_)) => { /* fn not defined here */ }
-                Err(cljrs::error::Error::Arity { .. }) => { /* fn takes args */ }
-                Err(e) => {
-                    return Err(format!(
-                        "{label}: ({entry}) at runtime → {e}"
-                    ));
-                }
+                Err(e) => match e.peel_ref() {
+                    // fn not defined here, or fn takes args we don't supply.
+                    cljrs::error::Error::Unbound(_)
+                    | cljrs::error::Error::Arity { .. } => {}
+                    _ => {
+                        return Err(format!(
+                            "{label}: ({entry}) at runtime → {e}"
+                        ));
+                    }
+                },
             }
         }
     }

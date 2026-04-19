@@ -1,9 +1,50 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::error::{Error, Result};
 use crate::value::Value;
+
+thread_local! {
+    /// Side-table mapping List Arc identity (raw pointer as usize) to the
+    /// 1-based (line, col) at which its opening `(` was read. Populated
+    /// by the parser; consumed by `eval_list`. Lives for the lifetime of
+    /// the process — entries accumulate but each Arc::as_ptr key is
+    /// stable for the form's lifetime.
+    pub static FORM_LOCATIONS: RefCell<HashMap<usize, (u32, u32)>> =
+        RefCell::new(HashMap::new());
+}
+
+/// Look up the source location previously registered for this list form.
+/// Returns None if the form was synthesized (macroexpansion, gensym, etc).
+pub fn lookup_location(list: &Arc<Vec<Value>>) -> Option<(u32, u32)> {
+    let key = Arc::as_ptr(list) as usize;
+    FORM_LOCATIONS.with(|t| t.borrow().get(&key).copied())
+}
+
+fn register_location(list: &Arc<Vec<Value>>, line: u32, col: u32) {
+    let key = Arc::as_ptr(list) as usize;
+    FORM_LOCATIONS.with(|t| {
+        t.borrow_mut().insert(key, (line, col));
+    });
+}
+
+/// 1-based (line, col) of byte offset `pos` in `src`. Newlines bump line.
+fn line_col_at(src: &[u8], pos: usize) -> (u32, u32) {
+    let mut line: u32 = 1;
+    let mut col: u32 = 1;
+    let end = pos.min(src.len());
+    for &b in &src[..end] {
+        if b == b'\n' {
+            line += 1;
+            col = 1;
+        } else {
+            col += 1;
+        }
+    }
+    (line, col)
+}
 
 /// Process-wide counter for auto-gensym symbols created by syntax-quote
 /// forms (`foo#`). Each syntax-quoted form gets a fresh suffix so that
@@ -260,6 +301,14 @@ impl<'a> Parser<'a> {
         self.src.get(self.pos).copied()
     }
 
+    /// Compute 1-based (line, col) for the current byte offset by
+    /// scanning the source. O(pos) per call but only invoked when
+    /// registering a list form's location, so amortized cheap given
+    /// ordinary source sizes (thousands of forms in tens of KB).
+    fn line_col(&self) -> (u32, u32) {
+        line_col_at(self.src, self.pos)
+    }
+
     fn skip_ws(&mut self) {
         while let Some(c) = self.peek() {
             if c.is_ascii_whitespace() || c == b',' {
@@ -284,8 +333,12 @@ impl<'a> Parser<'a> {
             .ok_or_else(|| Error::Read("unexpected eof".into()))?;
         match c {
             b'(' => {
+                let (line, col) = self.line_col();
                 self.pos += 1;
-                self.read_seq(b')').map(|v| Value::List(Arc::new(v)))
+                let items = self.read_seq(b')')?;
+                let arc = Arc::new(items);
+                register_location(&arc, line, col);
+                Ok(Value::List(arc))
             }
             b'[' => {
                 self.pos += 1;
