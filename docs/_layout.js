@@ -20,6 +20,7 @@ const NAV = [
       { href: "./js-interop.html", label: "JS interop" },
       { href: "./physics.html",    label: "Physics" },
       { href: "./gpu-web.html",    label: "GPU" },
+      { href: "./clojo.html",      label: "Clojo" },
     ],
   },
   {
@@ -69,6 +70,7 @@ const NAV_PARENT = {
   "ml.html":         "./demos.html",
   "js-interop.html": "./demos.html",
   "ui-demo.html":    "./demos.html",
+  "clojo.html":      "./demos.html",
   "lib-core.html":   "./library.html",
   "lib-ui.html":     "./library.html",
   "lib-shader.html": "./library.html",

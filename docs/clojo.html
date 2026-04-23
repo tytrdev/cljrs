@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Clojo — live cljrs → Mojo transpiler</title>
+  <link rel="stylesheet" href="./style.css">
+  <style>
+    .clojo-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem; }
+    .clojo-col { display: flex; flex-direction: column; min-width: 0; }
+    .clojo-col h3 { margin: 0 0 0.4rem 0; font-size: 0.9rem; color: var(--fg-dim); }
+    .clojo-col .editor-host { border: 1px solid var(--border); border-radius: 6px; height: 560px; overflow: hidden; }
+    .clojo-toolbar { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+    .clojo-tier { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+    .clojo-tier button {
+      background: var(--bg-elev); color: var(--fg-dim);
+      border: none; padding: 0.35rem 0.9rem; font-size: 0.85rem;
+      cursor: pointer; font-family: inherit;
+    }
+    .clojo-tier button.active { background: var(--accent); color: #0b1015; font-weight: 500; }
+    .clojo-status { font-family: var(--mono); font-size: 0.8rem; color: var(--fg-dim); min-height: 1.4em; }
+    .clojo-status.err { color: var(--danger); }
+    @media (max-width: 900px) { .clojo-layout { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <main>
+    <h2>Clojo — live cljrs → Mojo transpiler</h2>
+    <p>
+      Write cljrs on the left, watch the Mojo output redraw on the right.
+      Three tiers trade readability for aggressiveness:
+      <strong>readable</strong> keeps names and structure close to the source,
+      <strong>optimized</strong> inlines and specializes,
+      <strong>max</strong> unlocks every pass the backend has.
+    </p>
+
+    <div class="clojo-toolbar">
+      <span class="clojo-tier" id="tier">
+        <button data-tier="readable" class="active">Readable</button>
+        <button data-tier="optimized">Optimized</button>
+        <button data-tier="max">Max</button>
+      </span>
+      <button id="copy">Copy Mojo</button>
+      <button data-share>Share link</button>
+      <label style="font-size:0.8rem;color:var(--fg-dim);display:inline-flex;align-items:center;gap:0.3rem;">
+        <input type="checkbox" id="vim-toggle"> vim
+      </label>
+      <span id="status" class="clojo-status"></span>
+    </div>
+
+    <div class="clojo-layout">
+      <div class="clojo-col">
+        <h3>cljrs source</h3>
+        <div id="src-editor" class="editor-host"></div>
+      </div>
+      <div class="clojo-col">
+        <h3>Mojo output</h3>
+        <div id="out-editor" class="editor-host"></div>
+      </div>
+    </div>
+  </main>
+
+  <script type="module">
+    import {
+      mountChrome, loadWasm, makeEditor, attachShareLink, loadMonaco,
+    } from "./_layout.js";
+    mountChrome();
+
+    const INITIAL_SOURCE = `;; Smoothstep — classic shader util.
+;; Edit and watch the Mojo update. Try each tier.
+(defn-mojo smoothstep ^f32
+  [^f32 edge0 ^f32 edge1 ^f32 x]
+  (let [t (max 0.0 (min 1.0 (/ (- x edge0) (- edge1 edge0))))]
+    (* t (* t (- 3.0 (* 2.0 t))))))
+`;
+
+    (async () => {
+      const mod = await loadWasm();
+      const repl = new mod.Repl();
+      const monaco = await loadMonaco();
+      let tier = "readable";
+
+      const srcEditor = await makeEditor(document.getElementById("src-editor"), {
+        value: INITIAL_SOURCE,
+        debounceMs: 300,
+        onApply: (src) => render(src),
+        vimToggleEl: document.getElementById("vim-toggle"),
+        vimKey: "clojo",
+      });
+
+      const outEditor = monaco.editor.create(document.getElementById("out-editor"), {
+        value: "", language: "python", theme: "vs-dark", fontSize: 13,
+        readOnly: true, minimap: { enabled: false },
+        scrollBeyondLastLine: false, automaticLayout: true, wordWrap: "on",
+      });
+
+      function render(src) {
+        if (typeof repl.emit_mojo !== "function") {
+          outEditor.setValue("# transpiler unavailable — rebuild wasm with cljrs-mojo");
+          setStatus("transpiler unavailable — rebuild wasm", "err");
+          return;
+        }
+        let result;
+        try {
+          result = repl.emit_mojo(src, tier);
+        } catch (e) {
+          setStatus(String(e), "err");
+          return;
+        }
+        if (typeof result === "string" && result.startsWith("error:")) {
+          setStatus(result, "err");
+          return;
+        }
+        setStatus(`tier=${tier}, ${result.length} chars`, "");
+        outEditor.setValue(result);
+      }
+
+      document.querySelectorAll("#tier button").forEach(b => {
+        b.addEventListener("click", () => {
+          document.querySelectorAll("#tier button").forEach(x => x.classList.remove("active"));
+          b.classList.add("active");
+          tier = b.dataset.tier;
+          render(srcEditor.getValue());
+        });
+      });
+
+      document.getElementById("copy").addEventListener("click", async () => {
+        await navigator.clipboard.writeText(outEditor.getValue());
+        setStatus("copied ✓", "ok");
+        setTimeout(() => setStatus("", ""), 1200);
+      });
+
+      attachShareLink(srcEditor);
+      render(srcEditor.getValue());
+    })();
+
+    function setStatus(msg, cls) {
+      const el = document.getElementById("status");
+      el.textContent = msg;
+      el.className = "clojo-status " + (cls || "");
+    }
+  </script>
+</body>
+</html>
