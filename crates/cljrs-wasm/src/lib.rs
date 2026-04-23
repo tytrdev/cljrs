@@ -179,6 +179,22 @@ impl Repl {
         out
     }
 
+    /// Transpile a cljrs source string to Mojo source. `tier` is
+    /// "readable" | "optimized" | "max". Errors come back as
+    /// `"error: ..."` strings so the JS side can display them inline.
+    pub fn emit_mojo(&self, src: &str, tier: &str) -> String {
+        let t = match tier {
+            "readable"  => cljrs_mojo::Tier::Readable,
+            "optimized" => cljrs_mojo::Tier::Optimized,
+            "max"       => cljrs_mojo::Tier::Max,
+            _           => return format!("error: unknown tier {tier}"),
+        };
+        match cljrs_mojo::emit(src, t) {
+            Ok(s) => s,
+            Err(e) => format!("error: {e}"),
+        }
+    }
+
     /// Reset to a fresh prelude-initialized env.
     pub fn reset(&mut self) {
         self.env = Env::new();

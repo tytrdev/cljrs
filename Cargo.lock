@@ -408,6 +408,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "cljrs-mojo"
+version = "0.1.0"
+dependencies = [
+ "cljrs",
+]
+
+[[package]]
 name = "cljrs-physics"
 version = "0.1.0"
 dependencies = [
@@ -423,6 +430,7 @@ version = "0.1.0"
 dependencies = [
  "cljrs",
  "cljrs-ml",
+ "cljrs-mojo",
  "cljrs-physics",
  "console_error_panic_hook",
  "js-sys",
