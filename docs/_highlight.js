@@ -202,12 +202,151 @@ function highlightWgsl(src) {
   return out;
 }
 
+const MOJO_KEYWORDS = new Set([
+  "fn", "def", "var", "let", "if", "elif", "else", "for", "while",
+  "break", "continue", "return", "pass", "raise", "try", "except",
+  "finally", "with", "async", "await", "yield", "import", "from",
+  "as", "in", "is", "not", "and", "or", "struct", "trait", "alias",
+  "type", "owned", "inout", "borrowed", "ref", "lifetime", "mut",
+  "True", "False", "None", "self", "Self",
+]);
+const MOJO_BUILTINS = new Set([
+  // types
+  "Int", "Int8", "Int16", "Int32", "Int64",
+  "UInt", "UInt8", "UInt16", "UInt32", "UInt64",
+  "Float16", "Float32", "Float64", "BFloat16",
+  "Bool", "String", "StringLiteral",
+  "List", "Dict", "Tuple", "Optional", "Variant",
+  "SIMD", "DType", "Scalar", "Tensor", "Buffer",
+  "InlinedFixedVector", "Pointer", "UnsafePointer", "AnyType",
+  // stdlib
+  "math", "print", "len", "range", "abs", "min", "max", "sum",
+  "sqrt", "sin", "cos", "tan", "exp", "log", "pow",
+  "floor", "ceil", "round", "isnan", "isinf",
+  "abort", "debug_assert",
+]);
+
+/// Highlight Mojo.
+function highlightMojo(src) {
+  let out = "";
+  let i = 0;
+  const n = src.length;
+  while (i < n) {
+    const c = src[i];
+    // line comment
+    if (c === "#") {
+      let j = i;
+      while (j < n && src[j] !== "\n") j++;
+      out += span("tok-comment", src.slice(i, j));
+      i = j;
+      continue;
+    }
+    // f-string prefix: f"..." or f'...'
+    if ((c === "f" || c === "F") && (src[i + 1] === '"' || src[i + 1] === "'")) {
+      const quote = src[i + 1];
+      // triple-quoted f-string
+      if (src[i + 2] === quote && src[i + 3] === quote) {
+        let j = i + 4;
+        while (j < n && !(src[j] === quote && src[j + 1] === quote && src[j + 2] === quote)) j++;
+        j = Math.min(n, j + 3);
+        out += span("tok-string", src.slice(i, j));
+        i = j;
+        continue;
+      }
+      let j = i + 2;
+      while (j < n) {
+        if (src[j] === "\\" && j + 1 < n) { j += 2; continue; }
+        if (src[j] === quote) { j++; break; }
+        if (src[j] === "\n") break;
+        j++;
+      }
+      out += span("tok-string", src.slice(i, j));
+      i = j;
+      continue;
+    }
+    // triple-quoted string
+    if ((c === '"' || c === "'") && src[i + 1] === c && src[i + 2] === c) {
+      const quote = c;
+      let j = i + 3;
+      while (j < n && !(src[j] === quote && src[j + 1] === quote && src[j + 2] === quote)) j++;
+      j = Math.min(n, j + 3);
+      out += span("tok-string", src.slice(i, j));
+      i = j;
+      continue;
+    }
+    // single/double string
+    if (c === '"' || c === "'") {
+      const quote = c;
+      let j = i + 1;
+      while (j < n) {
+        if (src[j] === "\\" && j + 1 < n) { j += 2; continue; }
+        if (src[j] === quote) { j++; break; }
+        if (src[j] === "\n") break;
+        j++;
+      }
+      out += span("tok-string", src.slice(i, j));
+      i = j;
+      continue;
+    }
+    // number: hex, binary, int, float, scientific, underscores
+    if (/[0-9]/.test(c)) {
+      let j = i + 1;
+      if (c === "0" && (src[j] === "x" || src[j] === "X")) {
+        j++;
+        while (j < n && /[0-9a-fA-F_]/.test(src[j])) j++;
+      } else if (c === "0" && (src[j] === "b" || src[j] === "B")) {
+        j++;
+        while (j < n && /[01_]/.test(src[j])) j++;
+      } else {
+        while (j < n && /[0-9_]/.test(src[j])) j++;
+        if (src[j] === ".") {
+          j++;
+          while (j < n && /[0-9_]/.test(src[j])) j++;
+        }
+        if (src[j] === "e" || src[j] === "E") {
+          j++;
+          if (src[j] === "+" || src[j] === "-") j++;
+          while (j < n && /[0-9_]/.test(src[j])) j++;
+        }
+      }
+      out += span("tok-number", src.slice(i, j));
+      i = j;
+      continue;
+    }
+    // decorator
+    if (c === "@") {
+      let j = i + 1;
+      while (j < n && /[A-Za-z0-9_]/.test(src[j])) j++;
+      out += span("tok-special", src.slice(i, j));
+      i = j;
+      continue;
+    }
+    // identifier
+    if (/[A-Za-z_]/.test(c)) {
+      let j = i + 1;
+      while (j < n && /[A-Za-z0-9_]/.test(src[j])) j++;
+      const tok = src.slice(i, j);
+      if (MOJO_KEYWORDS.has(tok)) out += span("tok-keyword", tok);
+      else if (MOJO_BUILTINS.has(tok)) out += span("tok-ident tok-builtin", tok);
+      else out += span("tok-ident", tok);
+      i = j;
+      continue;
+    }
+    out += esc(c);
+    i++;
+  }
+  return out;
+}
+
 export function highlight(src, lang) {
   if (lang === "clj" || lang === "clojure" || lang === "cljrs") {
     return highlightClj(src);
   }
   if (lang === "wgsl") {
     return highlightWgsl(src);
+  }
+  if (lang === "mojo") {
+    return highlightMojo(src);
   }
   return esc(src);
 }
