@@ -187,10 +187,8 @@ fn lower_expr_tail(
                     return Ok(());
                 }
                 "let" => {
-                    lower_let(ctx, list, out)?;
-                    // Fall through: the last form's value is the tail.
-                    // But lower_let already emitted bindings and the body
-                    // is emitted below. Actually, simpler: inline here.
+                    // lower_let_tail already emits bindings + tail body;
+                    // don't pre-emit bindings or they show up twice.
                     return lower_let_tail(ctx, list, out, mode);
                 }
                 "if" => {
