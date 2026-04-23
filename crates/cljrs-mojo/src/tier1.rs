@@ -87,16 +87,29 @@ fn lower_def(ctx: &Ctx, list: &[Value], form: &Value) -> Result<MItem, String> {
 }
 
 fn lower_defn(ctx: &Ctx, list: &[Value], form: &Value) -> Result<MItem, String> {
-    // (defn ^RetT name [^T arg ...] body...)
-    // Return type hint sits in front of the name.
+    // (defn name ^RetT [^T arg ...] body...)
+    //
+    // Clojure's reader attaches `^Tag` metadata to whatever follows it,
+    // so `(defn NAME ^RET [args] body)` reads as list[2] = (__tagged__
+    // RET [args]). list[1] is the bare name (with an optional tag of
+    // its own, which we also peel for permissiveness).
     if list.len() < 3 {
         return Err(format!("defn expects name, arg vec, body: {}", pr(form)));
     }
-    let (ret_ty, name_form) = peel_tag(&list[1]);
+    // Return-type tag can sit on either the name (`(defn ^RET name …)`)
+    // or on the arg vector (`(defn name ^RET […] …)`). Both are valid
+    // Clojure reader input; accept either.
+    let (name_tag, name_form) = peel_tag(&list[1]);
     let name = sym_str(name_form)
         .ok_or_else(|| format!("defn name must be a symbol: {}", pr(form)))?
         .to_string();
-    let params_vec = match &list[2] {
+    let (args_tag, args_form) = peel_tag(&list[2]);
+    let ret_ty = match (name_tag, args_tag) {
+        (MType::Infer, t) => t,
+        (t, MType::Infer) => t,
+        (a, _) => a, // both set: prefer the one on the name
+    };
+    let params_vec = match args_form {
         Value::Vector(v) => v,
         _ => return Err(format!("defn arg vector expected: {}", pr(form))),
     };
