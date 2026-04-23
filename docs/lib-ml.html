@@ -83,7 +83,8 @@
 
     <h4>Single matmul + relu</h4>
     <div class="run-example" data-stateful="1">
-      <textarea spellcheck="false" style="min-height:160px">(def x (ml/tensor [[1.0 2.0 3.0]
+      <textarea spellcheck="false" style="min-height:160px">(require (quote [cljrs.ml :as ml]))
+(def x (ml/tensor [[1.0 2.0 3.0]
                    [4.0 5.0 6.0]]))
 (def w (ml/tensor [[ 0.5 -0.5]
                    [ 1.0  0.0]
@@ -105,7 +106,8 @@
       few times and watch the loss fall.
     </p>
     <div class="run-example" data-stateful="1">
-      <textarea spellcheck="false" style="min-height:240px">(defonce w (ml/param [[0.0]]))
+      <textarea spellcheck="false" style="min-height:240px">(require (quote [cljrs.ml :as ml]))
+(defonce w (ml/param [[0.0]]))
 (defonce b (ml/param [[0.0]]))
 (defonce x (ml/tensor [[1.0] [2.0] [3.0] [4.0]]))
 (defonce t (ml/tensor [[3.0] [5.0] [7.0] [9.0]]))
@@ -126,7 +128,8 @@
 
     <h4>Two-layer MLP forward</h4>
     <div class="run-example" data-stateful="1">
-      <textarea spellcheck="false" style="min-height:200px">(def x  (ml/tensor [[0.5 -1.0 2.0]]))
+      <textarea spellcheck="false" style="min-height:200px">(require (quote [cljrs.ml :as ml]))
+(def x  (ml/tensor [[0.5 -1.0 2.0]]))
 (def w1 (ml/randn 3 4 0.3))
 (def b1 (ml/zeros 1 4))
 (def w2 (ml/randn 4 1 0.3))
@@ -155,7 +158,8 @@
       <code>argmax</code>, and <code>adam-step!</code> together.
     </p>
     <div class="run-example" data-stateful="1">
-      <textarea spellcheck="false" style="min-height:320px">(defonce X (ml/tensor [[ 1.0  0.0]
+      <textarea spellcheck="false" style="min-height:320px">(require (quote [cljrs.ml :as ml]))
+(defonce X (ml/tensor [[ 1.0  0.0]
                        [ 0.9  0.1]
                        [ 0.0  1.0]
                        [ 0.1  0.9]
@@ -191,7 +195,8 @@
       with the same <code>backward!</code> + <code>sgd-step!</code> pipeline.
     </p>
     <div class="run-example" data-stateful="1">
-      <textarea spellcheck="false" style="min-height:160px">(def signal (ml/tensor [[0.0 0.0 0.0 1.0 1.0 1.0 0.0 0.0]]))
+      <textarea spellcheck="false" style="min-height:160px">(require (quote [cljrs.ml :as ml]))
+(def signal (ml/tensor [[0.0 0.0 0.0 1.0 1.0 1.0 0.0 0.0]]))
 (def kernel (ml/tensor [[-1.0 0.0 1.0]]))
 (ml/tolist (ml/conv1d-valid signal kernel))
 ;; → [0 0 1 0 0 -1] — non-zero at the rising and falling edges.
