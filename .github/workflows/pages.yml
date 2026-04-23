@@ -4,9 +4,14 @@ on:
   push:
     branches: [main]
     paths:
+      # Any crate the wasm bundle depends on — cljrs-wasm transitively
+      # pulls cljrs-ml, cljrs-physics, cljrs-mojo, etc. so a path filter
+      # that only watches cljrs-wasm silently misses their fixes.
       - "docs/**"
-      - "crates/cljrs-wasm/**"
+      - "crates/**"
       - "src/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
