@@ -1,0 +1,2 @@
+fn lerp(a: Float32, b: Float32, t: Float32) -> Float32:
+    return a + t * (b - a)

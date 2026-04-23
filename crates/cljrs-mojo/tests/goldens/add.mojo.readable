@@ -1,0 +1,4 @@
+# cljrs: (defn-mojo add ^f32 [^f32 x ^f32 y] (+ x y))
+
+fn add(x: Float32, y: Float32) -> Float32:
+    return x + y

@@ -1,0 +1,4 @@
+# cljrs: (defn-mojo clamp ^f32 [^f32 x ^f32 lo ^f32 hi] (max lo (min hi x)))
+
+fn clamp(x: Float32, lo: Float32, hi: Float32) -> Float32:
+    return max(lo, min(hi, x))

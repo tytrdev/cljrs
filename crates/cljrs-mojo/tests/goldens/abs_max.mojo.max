@@ -1,0 +1,5 @@
+from math import abs
+
+@always_inline
+fn abs_max(a: Int32, b: Int32) -> Int32:
+    return max(abs(a), abs(b))

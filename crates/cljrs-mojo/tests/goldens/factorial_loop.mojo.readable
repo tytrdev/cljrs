@@ -1,0 +1,12 @@
+# cljrs: (defn-mojo factorial ^i64 [^i64 n] (loop [i 1 acc 1] (if (> i n) acc (recur (+ i 1) (* acc i)))))
+
+fn factorial(n: Int64) -> Int64:
+    var i: Int64 = 1
+    var acc: Int64 = 1
+    while True:
+        if i > n:
+            return acc
+        let next_i = i + 1
+        let next_acc = acc * i
+        i = next_i
+        acc = next_acc

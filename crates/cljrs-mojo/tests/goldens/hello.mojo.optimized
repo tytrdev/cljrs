@@ -1,0 +1,2 @@
+fn hello() -> Int32:
+    return 42

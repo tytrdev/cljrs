@@ -1,0 +1,5 @@
+# cljrs: (defn-mojo abs-max ^i32 [^i32 a ^i32 b] (max (abs a) (abs b)))
+from math import abs
+
+fn abs_max(a: Int32, b: Int32) -> Int32:
+    return max(abs(a), abs(b))

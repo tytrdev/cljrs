@@ -1,0 +1,3 @@
+@always_inline
+fn hello() -> Int32:
+    return 42
