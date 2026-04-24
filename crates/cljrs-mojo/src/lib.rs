@@ -82,6 +82,11 @@
 //!   `sum-sq-diff`) take two pointer inputs and fuse the elementwise
 //!   shape into one kernel pass. Combining op is `+` by default; a
 //!   `^mul`/`^min`/`^max` tag on the body selects product / min / max.
+//! - **Gather/scatter**: `(gather-mojo NAME [^T values ^I indices])` emits
+//!   `out[i] = values[Int(indices[i])]`; `(scatter-mojo NAME [^I indices
+//!   ^T values])` emits `out[Int(indices[i])] = values[i]`. Scalar loop
+//!   at every tier — SIMD-gather/scatter spellings in Mojo are still
+//!   API-uncertain so we leave that to future work.
 //! - **GPU kernels**: `(elementwise-gpu-mojo NAME [^T a ^T b] ^T body)`
 //!   emits a Mojo fn that computes its thread index from
 //!   `block_idx.x * block_dim.x + thread_idx.x` and writes one output
@@ -159,6 +164,14 @@ fn add_elementwise_imports(m: &mut MModule, tier: Tier) {
     let has_elem = m.items.iter().any(|i| matches!(i, MItem::Elementwise { .. }));
     let has_reduce = m.items.iter().any(|i| matches!(i, MItem::Reduce { .. }));
     let has_gpu = m.items.iter().any(|i| matches!(i, MItem::GpuElementwise { .. }));
+    let has_gather_scatter = m.items.iter().any(|i|
+        matches!(i, MItem::Gather { .. } | MItem::Scatter { .. }));
+    if has_gather_scatter {
+        let imp = "from memory import UnsafePointer";
+        if !m.imports.iter().any(|s| s == imp) {
+            m.imports.push(imp.to_string());
+        }
+    }
     let has_launch = m.items.iter().any(|i| matches!(i, MItem::GpuLaunch { .. }));
 
     if has_launch {
@@ -480,6 +493,12 @@ fn print_item(out: &mut String, item: &MItem, tier: Tier) {
         MItem::GpuLaunch { launcher_name, kernel_name, ptr_args, out_ty, block_dim, comment } => {
             print_gpu_launch(out, launcher_name, kernel_name, ptr_args, out_ty, *block_dim, comment.as_deref(), tier);
         }
+        MItem::Gather { name, values_name, values_ty, indices_name, indices_ty, out_ty, comment } => {
+            print_gather(out, name, values_name, values_ty, indices_name, indices_ty, out_ty, comment.as_deref(), tier);
+        }
+        MItem::Scatter { name, indices_name, indices_ty, values_name, values_ty, out_ty, comment } => {
+            print_scatter(out, name, indices_name, indices_ty, values_name, values_ty, out_ty, comment.as_deref(), tier);
+        }
         MItem::Var { name, ty, value, comment } => {
             if let Some(c) = comment {
                 if matches!(tier, Tier::Readable) {
@@ -763,6 +782,66 @@ fn print_reduce(
             out.push_str(&format!("    return acc.{reduce_method}()\n"));
         }
     }
+}
+
+fn print_gather(
+    out: &mut String,
+    name: &str,
+    values_name: &str,
+    values_ty: &MType,
+    indices_name: &str,
+    indices_ty: &MType,
+    out_ty: &MType,
+    comment: Option<&str>,
+    tier: Tier,
+) {
+    if let Some(c) = comment {
+        if matches!(tier, Tier::Readable | Tier::Optimized) {
+            out.push_str("# cljrs: ");
+            out.push_str(c);
+            out.push('\n');
+        }
+    }
+    let v = snake(values_name);
+    let idx = snake(indices_name);
+    out.push_str("fn ");
+    out.push_str(&snake(name));
+    out.push_str(&format!(
+        "({v}: UnsafePointer[{}], {idx}: UnsafePointer[{}], out: UnsafePointer[{}], n: Int):\n",
+        values_ty.as_str(), indices_ty.as_str(), out_ty.as_str()
+    ));
+    out.push_str("    for i in range(n):\n");
+    out.push_str(&format!("        out[i] = {v}[Int({idx}[i])]\n"));
+}
+
+fn print_scatter(
+    out: &mut String,
+    name: &str,
+    indices_name: &str,
+    indices_ty: &MType,
+    values_name: &str,
+    values_ty: &MType,
+    out_ty: &MType,
+    comment: Option<&str>,
+    tier: Tier,
+) {
+    if let Some(c) = comment {
+        if matches!(tier, Tier::Readable | Tier::Optimized) {
+            out.push_str("# cljrs: ");
+            out.push_str(c);
+            out.push('\n');
+        }
+    }
+    let v = snake(values_name);
+    let idx = snake(indices_name);
+    out.push_str("fn ");
+    out.push_str(&snake(name));
+    out.push_str(&format!(
+        "({idx}: UnsafePointer[{}], {v}: UnsafePointer[{}], out: UnsafePointer[{}], n: Int):\n",
+        indices_ty.as_str(), values_ty.as_str(), out_ty.as_str()
+    ));
+    out.push_str("    for i in range(n):\n");
+    out.push_str(&format!("        out[Int({idx}[i])] = {v}[i]\n"));
 }
 
 fn print_gpu_elementwise(
@@ -1460,6 +1539,47 @@ mod multi_output_tests {
         let src = "(elementwise-mojo bad [^i32 x] ^Tuple-i32-i32 (tuple x x x))";
         let err = emit(src, Tier::Readable).unwrap_err();
         assert!(err.contains("body tuple has 3 elements"), "got: {err}");
+    }
+}
+
+#[cfg(test)]
+mod gather_scatter_tests {
+    use super::{emit, Tier};
+
+    #[test]
+    fn gather_emits_indexed_load_loop() {
+        let src = "(gather-mojo gf32 [^f32 values ^i32 indices])";
+        for tier in [Tier::Readable, Tier::Optimized, Tier::Max] {
+            let out = emit(src, tier).unwrap();
+            assert!(out.contains("fn gf32("), "tier {:?}:\n{out}", tier);
+            assert!(out.contains("values: UnsafePointer[Float32]"), "tier {:?}:\n{out}", tier);
+            assert!(out.contains("indices: UnsafePointer[Int32]"), "tier {:?}:\n{out}", tier);
+            assert!(out.contains("out[i] = values[Int(indices[i])]"),
+                "tier {:?}:\n{out}", tier);
+        }
+    }
+
+    #[test]
+    fn gather_missing_annotation_errors() {
+        let src = "(gather-mojo bad [values ^i32 indices])";
+        assert!(emit(src, Tier::Readable).is_err());
+    }
+
+    #[test]
+    fn scatter_emits_indexed_store_loop() {
+        let src = "(scatter-mojo sf32 [^i32 indices ^f32 values])";
+        let out = emit(src, Tier::Readable).unwrap();
+        assert!(out.contains("fn sf32("), "got:\n{out}");
+        assert!(out.contains("out[Int(indices[i])] = values[i]"), "got:\n{out}");
+    }
+
+    #[test]
+    fn scatter_integer_dtype_works() {
+        let src = "(scatter-mojo si32 [^i32 indices ^i32 values])";
+        let out = emit(src, Tier::Max).unwrap();
+        assert!(out.contains("indices: UnsafePointer[Int32]"), "got:\n{out}");
+        assert!(out.contains("values: UnsafePointer[Int32]"), "got:\n{out}");
+        assert!(out.contains("out: UnsafePointer[Int32]"), "got:\n{out}");
     }
 }
 

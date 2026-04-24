@@ -116,6 +116,8 @@ fn lower_top(ctx: &Ctx, form: &Value) -> Result<Vec<MItem>, String> {
         "reduce-mojo" => lower_reduce(ctx, list, form).map(|i| vec![i]),
         "elementwise-gpu-mojo" => lower_gpu_elementwise(ctx, list, form).map(|i| vec![i]),
         "launch-gpu-mojo" => lower_launch_gpu(ctx, list, form).map(|i| vec![i]),
+        "gather-mojo" => lower_gather(list, form).map(|i| vec![i]),
+        "scatter-mojo" => lower_scatter(list, form).map(|i| vec![i]),
         other => Err(format!(
             "unsupported top-level form `{other}` in: {}",
             pr(form)
@@ -2639,6 +2641,94 @@ fn decorator_to_mojo(s: &str) -> String {
 
 /// Parse any user-facing type tag string into an MType. Recognises the
 /// runtime primitives, `List-T`, `Opt-T`, `Tuple-T1-T2`, and named types.
+/// `(gather-mojo NAME [^T values ^I indices])` — per-element
+/// `out[i] = values[indices[i]]`. Scalar loop at every tier. Output
+/// dtype = values dtype.
+fn lower_gather(list: &[Value], form: &Value) -> Result<MItem, String> {
+    if list.len() != 3 {
+        return Err(format!(
+            "gather-mojo expects (gather-mojo NAME [^T values ^I indices]): {}",
+            pr(form)
+        ));
+    }
+    let name = sym_str(&list[1])
+        .ok_or_else(|| format!("gather-mojo name must be a symbol: {}", pr(form)))?
+        .to_string();
+    let params_vec = match &list[2] {
+        Value::Vector(v) => v,
+        _ => return Err(format!("gather-mojo params must be a vector: {}", pr(form))),
+    };
+    if params_vec.len() != 2 {
+        return Err(format!(
+            "gather-mojo expects exactly two params [^T values ^I indices]: {}",
+            pr(form)
+        ));
+    }
+    let (vty, vn_form) = peel_tag(&params_vec[0]);
+    let (ity, in_form) = peel_tag(&params_vec[1]);
+    let values_name = sym_str(vn_form).ok_or_else(||
+        format!("gather-mojo values name must be symbol: {}", pr(form)))?.to_string();
+    let indices_name = sym_str(in_form).ok_or_else(||
+        format!("gather-mojo indices name must be symbol: {}", pr(form)))?.to_string();
+    if matches!(vty, MType::Infer) || matches!(ity, MType::Infer) {
+        return Err(format!("gather-mojo: both params require type annotations: {}", pr(form)));
+    }
+    let out_ty = vty.clone();
+    Ok(MItem::Gather {
+        name,
+        values_name,
+        values_ty: vty,
+        indices_name,
+        indices_ty: ity,
+        out_ty,
+        comment: Some(pr(form)),
+    })
+}
+
+/// `(scatter-mojo NAME [^I indices ^T values])` — per-element
+/// `out[indices[i]] = values[i]`. Scalar loop at every tier. Output
+/// dtype = values dtype.
+fn lower_scatter(list: &[Value], form: &Value) -> Result<MItem, String> {
+    if list.len() != 3 {
+        return Err(format!(
+            "scatter-mojo expects (scatter-mojo NAME [^I indices ^T values]): {}",
+            pr(form)
+        ));
+    }
+    let name = sym_str(&list[1])
+        .ok_or_else(|| format!("scatter-mojo name must be a symbol: {}", pr(form)))?
+        .to_string();
+    let params_vec = match &list[2] {
+        Value::Vector(v) => v,
+        _ => return Err(format!("scatter-mojo params must be a vector: {}", pr(form))),
+    };
+    if params_vec.len() != 2 {
+        return Err(format!(
+            "scatter-mojo expects exactly two params [^I indices ^T values]: {}",
+            pr(form)
+        ));
+    }
+    let (ity, in_form) = peel_tag(&params_vec[0]);
+    let (vty, vn_form) = peel_tag(&params_vec[1]);
+    let indices_name = sym_str(in_form).ok_or_else(||
+        format!("scatter-mojo indices name must be symbol: {}", pr(form)))?.to_string();
+    let values_name = sym_str(vn_form).ok_or_else(||
+        format!("scatter-mojo values name must be symbol: {}", pr(form)))?.to_string();
+    if matches!(vty, MType::Infer) || matches!(ity, MType::Infer) {
+        return Err(format!("scatter-mojo: both params require type annotations: {}", pr(form)));
+    }
+    let out_ty = vty.clone();
+    Ok(MItem::Scatter {
+        name,
+        indices_name,
+        indices_ty: ity,
+        values_name,
+        values_ty: vty,
+        out_ty,
+        comment: Some(pr(form)),
+    })
+}
+
 pub fn parse_type_tag(tag: &str) -> MType {
     if let Some(t) = runtime::type_hint(tag) {
         return t;

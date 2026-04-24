@@ -66,7 +66,9 @@ pub fn specialize(m: &mut MModule) {
             MItem::GpuElementwise { comment, .. } => {
                 *comment = None;
             }
-            MItem::GpuLaunch { comment, .. } => {
+            MItem::GpuLaunch { comment, .. }
+            | MItem::Gather { comment, .. }
+            | MItem::Scatter { comment, .. } => {
                 *comment = None;
             }
         }

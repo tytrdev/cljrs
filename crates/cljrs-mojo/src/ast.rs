@@ -185,6 +185,27 @@ pub enum MItem {
         body: MExpr,
         comment: Option<String>,
     },
+    /// Gather kernel: `out[i] = values[indices[i]]`. Scalar loop at all
+    /// tiers (SIMD gather spelling in Mojo is API-uncertain).
+    Gather {
+        name: String,
+        values_name: String,
+        values_ty: MType,
+        indices_name: String,
+        indices_ty: MType,
+        out_ty: MType,
+        comment: Option<String>,
+    },
+    /// Scatter kernel: `out[indices[i]] = values[i]`.
+    Scatter {
+        name: String,
+        indices_name: String,
+        indices_ty: MType,
+        values_name: String,
+        values_ty: MType,
+        out_ty: MType,
+        comment: Option<String>,
+    },
     /// Host-side launcher for a GPU kernel. `kernel_name` is the symbol
     /// of an `elementwise-gpu-mojo` fn declared elsewhere; `ptr_args` are
     /// its pointer argument names (a, b, out). Emits a `raises` fn that
