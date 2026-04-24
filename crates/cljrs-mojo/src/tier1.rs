@@ -8,7 +8,7 @@ use std::cell::RefCell;
 
 use cljrs::value::Value;
 
-use crate::ast::{MCatch, MExpr, MFn, MItem, MModule, MStmt, MTraitMethod, MType, ParamConv};
+use crate::ast::{MCatch, MExpr, MFn, MItem, MModule, MStmt, MTraitMethod, MType, ParamConv, ReduceOp};
 use crate::runtime;
 
 /// Lowering context. Tracks imports that get lazily added as we encounter
@@ -100,6 +100,7 @@ fn lower_top(ctx: &Ctx, form: &Value) -> Result<Vec<MItem>, String> {
         "alias-mojo" => lower_alias(ctx, list, form).map(|i| vec![i]),
         "defn-method-mojo" => lower_defn_method(ctx, list, form).map(|_| Vec::new()),
         "elementwise-mojo" => lower_elementwise(ctx, list, form).map(|i| vec![i]),
+        "reduce-mojo" => lower_reduce(ctx, list, form).map(|i| vec![i]),
         other => Err(format!(
             "unsupported top-level form `{other}` in: {}",
             pr(form)
@@ -733,6 +734,139 @@ fn check_elementwise_pure(body: &Value, names: &[String], form: &Value) -> Resul
         )),
     }
 }
+
+/// `(reduce-mojo NAME [^T a ^T b ...] ^T body init)` — sugar for a pure
+/// reduction over one or more per-element pointer inputs. `init` must be
+/// a numeric literal; the combining op is inferred from `body`'s head
+/// (see below).
+fn lower_reduce(ctx: &Ctx, list: &[Value], form: &Value) -> Result<MItem, String> {
+    if list.len() != 5 {
+        return Err(format!(
+            "reduce-mojo expects (reduce-mojo NAME [params] ^RetT body init): {}",
+            pr(form)
+        ));
+    }
+    let name = sym_str(&list[1])
+        .ok_or_else(|| format!("reduce-mojo name must be a symbol: {}", pr(form)))?
+        .to_string();
+    let params_vec = match &list[2] {
+        Value::Vector(v) => v,
+        _ => return Err(format!("reduce-mojo params must be a vector: {}", pr(form))),
+    };
+    if params_vec.is_empty() {
+        return Err(format!("reduce-mojo needs at least one input param: {}", pr(form)));
+    }
+    let (ret_ty, body_form) = peel_tag(&list[3]);
+    if matches!(ret_ty, MType::Infer) {
+        return Err(format!(
+            "reduce-mojo return type must be annotated (e.g. ^f32): {}",
+            pr(form)
+        ));
+    }
+    let init_form = &list[4];
+    let init = match init_form {
+        Value::Int(i) => MExpr::IntLit(*i),
+        Value::Float(f) => MExpr::FloatLit(*f),
+        Value::Bool(b) => MExpr::BoolLit(*b),
+        _ => return Err(format!(
+            "reduce-mojo init must be a numeric literal: {}", pr(form)
+        )),
+    };
+    let mut ptr_inputs: Vec<(String, MType)> = Vec::new();
+    for p in params_vec.iter() {
+        let (ty, is_scalar, pname) = peel_elementwise_param(p);
+        if is_scalar {
+            return Err(format!(
+                "reduce-mojo does not support ^scalar params (all inputs are per-element): {}",
+                pr(form)
+            ));
+        }
+        let n = sym_str(pname)
+            .ok_or_else(|| format!("reduce-mojo param name must be a symbol: {}", pr(form)))?
+            .to_string();
+        if matches!(ty, MType::Infer) {
+            return Err(format!(
+                "reduce-mojo param `{n}` must have a type annotation: {}",
+                pr(form)
+            ));
+        }
+        if !is_simd_lanewise_ty(&ty) {
+            return Err(format!(
+                "reduce-mojo param `{n}` type must be a primitive numeric: {}",
+                pr(form)
+            ));
+        }
+        ptr_inputs.push((n, ty));
+    }
+    let first_ty = ptr_inputs[0].1.clone();
+    for (n, t) in ptr_inputs.iter().skip(1) {
+        if t != &first_ty {
+            return Err(format!(
+                "reduce-mojo: per-element inputs must share dtype; `{n}` is {} but first is {}",
+                t.as_str(), first_ty.as_str()
+            ));
+        }
+    }
+    if ret_ty != first_ty {
+        return Err(format!(
+            "reduce-mojo: return type must match element dtype ({}): {}",
+            first_ty.as_str(), pr(form)
+        ));
+    }
+    // Infer combiner from the wrapping expression. Two idioms are supported:
+    //   (reduce-mojo sum-sq [^f32 x] ^f32 (* x x) 0.0)        ← implicit +
+    //   (reduce-mojo dot   [^f32 a ^f32 b] ^f32 (* a b) 0.0)  ← implicit +
+    // Explicit combiner sugar: a body like (+ a b), (* a b), (min a b), (max a b)
+    // pins the combiner AND becomes the per-element expression. But for the
+    // dot-product / sum-of-squares idiom users write the per-element math and
+    // the combiner is `+` by default. We keep a simple rule: default to `+`,
+    // upgrade to * / min / max when the *top-level* body is exactly that op
+    // applied to same-name inputs (a rare idiom). In practice users specify
+    // what they want via `init`: for `*` init=1.0, for `min`/`max` init=first.
+    // Here we read an optional `^reducer` tag on the body — e.g. `^mul` body.
+    // Look at the raw tag string — ReduceOp tags like `mul`/`min`/`max`
+    // are lowercase so `parse_type_tag` would resolve them to `MType::Infer`
+    // rather than `MType::Named`. Do a manual peel here.
+    let (combiner, body_form) = peel_reducer_tag(body_form);
+    let body_names: Vec<String> = ptr_inputs.iter().map(|(n, _)| n.clone()).collect();
+    check_elementwise_pure(body_form, &body_names, form)?;
+    let body = lower_expr(ctx, body_form)?;
+    Ok(MItem::Reduce {
+        name,
+        ptr_inputs,
+        out_ty: ret_ty,
+        body,
+        combiner,
+        init,
+        comment: Some(pr(form)),
+    })
+}
+
+/// Peel an optional `^sum`/`^add`/`^mul`/`^prod`/`^min`/`^max` tag from
+/// the reduction body, returning the resolved combiner and the inner form.
+/// Unknown tags fall through without peeling so they error later.
+fn peel_reducer_tag(v: &Value) -> (ReduceOp, &Value) {
+    if let Value::List(xs) = v {
+        if xs.len() == 3 {
+            if let (Value::Symbol(h), Value::Symbol(tag)) = (&xs[0], &xs[1]) {
+                if &**h == "__tagged__" {
+                    let op = match tag.as_ref() {
+                        "sum" | "add" | "plus" => Some(ReduceOp::Add),
+                        "mul" | "prod" | "product" | "times" => Some(ReduceOp::Mul),
+                        "min" => Some(ReduceOp::Min),
+                        "max" => Some(ReduceOp::Max),
+                        _ => None,
+                    };
+                    if let Some(op) = op {
+                        return (op, &xs[2]);
+                    }
+                }
+            }
+        }
+    }
+    (ReduceOp::Add, v)
+}
+
 
 /// Where does the tail expression's value go?
 #[derive(Clone)]

@@ -137,3 +137,97 @@ fn elementwise_math_body_all_tiers() {
     must(&max, "vectorize[__kernel, nelts_f32](n)");
 }
 
+
+// ---------------- Reductions ----------------
+
+#[test]
+fn reduce_sum_readable_is_scalar_loop() {
+    let src = r#"(reduce-mojo sum-sq [^f32 x] ^f32 (* x x) 0.0)"#;
+    let out = emit(src, Tier::Readable).unwrap();
+    must(&out, "fn sum_sq(x: UnsafePointer[Float32], n: Int) -> Float32:");
+    must(&out, "var acc: Float32 = 0.0");
+    must(&out, "for i in range(n):");
+    must(&out, "acc += (x[i] * x[i])");
+    must(&out, "return acc");
+    must_not(&out, "vectorize");
+    must_not(&out, "reduce_add");
+}
+
+#[test]
+fn reduce_sum_max_uses_simd_accumulator() {
+    let src = r#"(reduce-mojo sum-sq [^f32 x] ^f32 (* x x) 0.0)"#;
+    let out = emit(src, Tier::Max).unwrap();
+    must(&out, "alias nelts_f32 = simd_width_of[DType.float32]()");
+    must(&out, "fn sum_sq(x: UnsafePointer[Float32], n: Int) -> Float32:");
+    must(&out, "var acc = SIMD[DType.float32, nelts_f32](0.0)");
+    must(&out, "var xv = SIMD[DType.float32, w].load(x, i)");
+    must(&out, "reduce_add()");
+    must(&out, "vectorize[__kernel, nelts_f32](n)");
+    must(&out, "return acc.reduce_add()");
+}
+
+#[test]
+fn reduce_product() {
+    let src = r#"(reduce-mojo prod [^f32 x] ^f32 ^mul x 1.0)"#;
+    let readable = emit(src, Tier::Readable).unwrap();
+    must(&readable, "acc *= x[i]");
+    let max = emit(src, Tier::Max).unwrap();
+    must(&max, "reduce_mul()");
+}
+
+#[test]
+fn reduce_min_and_max() {
+    let src_min = r#"(reduce-mojo minv [^f32 x] ^f32 ^min x 1.0e30)"#;
+    let out = emit(src_min, Tier::Readable).unwrap();
+    must(&out, "acc = min(acc, x[i])");
+    let max_tier = emit(src_min, Tier::Max).unwrap();
+    must(&max_tier, "reduce_min()");
+
+    let src_max = r#"(reduce-mojo maxv [^f32 x] ^f32 ^max x -1.0e30)"#;
+    let out = emit(src_max, Tier::Readable).unwrap();
+    must(&out, "acc = max(acc, x[i])");
+}
+
+#[test]
+fn reduce_dot_product_two_inputs() {
+    let src = r#"(reduce-mojo dot [^f32 a ^f32 b] ^f32 (* a b) 0.0)"#;
+    let readable = emit(src, Tier::Readable).unwrap();
+    must(&readable, "fn dot(a: UnsafePointer[Float32], b: UnsafePointer[Float32], n: Int) -> Float32:");
+    must(&readable, "acc += (a[i] * b[i])");
+    let max = emit(src, Tier::Max).unwrap();
+    must(&max, "var av = SIMD[DType.float32, w].load(a, i)");
+    must(&max, "var bv = SIMD[DType.float32, w].load(b, i)");
+    must(&max, "(av * bv)");
+    must(&max, "reduce_add()");
+}
+
+#[test]
+fn reduce_readable_vs_max_diverge() {
+    let src = r#"(reduce-mojo s [^f32 x] ^f32 (* x x) 0.0)"#;
+    let readable = emit(src, Tier::Readable).unwrap();
+    let max = emit(src, Tier::Max).unwrap();
+    assert_ne!(readable, max);
+}
+
+#[test]
+fn reduce_rejects_bad_body() {
+    let src = r#"(reduce-mojo bad [^f32 x] ^f32 (mystery x) 0.0)"#;
+    let err = emit(src, Tier::Max).unwrap_err();
+    assert!(err.contains("unsupported op `mystery`"), "got: {err}");
+}
+
+#[test]
+fn reduce_and_elementwise_coexist_at_max() {
+    let src = r#"
+(elementwise-mojo vector-add [^f32 a ^f32 b] ^f32 (+ a b))
+(reduce-mojo sum-sq [^f32 x] ^f32 (* x x) 0.0)
+"#;
+    let out = emit(src, Tier::Max).unwrap();
+    must(&out, "fn vector_add(");
+    must(&out, "fn sum_sq(");
+    must(&out, "vectorize[__kernel, nelts_f32](n)");
+    // Alias should appear exactly once.
+    let count = out.matches("alias nelts_f32").count();
+    assert_eq!(count, 1, "expected one alias line, got {count}:\n{out}");
+}
+

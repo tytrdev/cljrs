@@ -53,6 +53,11 @@
 //!   exponentials (`exp expm1 log log1p log2 log10`), roots & rounding
 //!   (`sqrt cbrt floor ceil round trunc`), plus `pow`, `hypot`,
 //!   `copysign`, `abs`, `min`, `max`.
+//! - **Reductions**: `(reduce-mojo sum [^f32 x] ^f32 (* x x) 0.0)` emits
+//!   a scalar for-loop at Readable/Optimized and a SIMD-accumulator-plus-
+//!   `reduce_add` kernel at Max. Multi-input reductions (`dot`) take two
+//!   pointer inputs. Combining op is `+` by default; a `^mul`/`^min`/`^max`
+//!   tag on the body selects product / min / max reductions.
 //! - **Naming**: kebab-case identifiers (`vector-add`, `abs-max`) are
 //!   auto-rewritten to snake_case in the emitted Mojo. The original
 //!   source name is preserved in the `# cljrs:` tier-Readable comment.
@@ -78,7 +83,7 @@ pub mod tier1;
 pub mod tier2;
 pub mod tier3;
 
-use crate::ast::{MExpr, MFn, MItem, MModule, MStmt, MType};
+use crate::ast::{MExpr, MFn, MItem, MModule, MStmt, MType, ReduceOp};
 
 /// Tier selector. `Readable` preserves cljrs source as comments; `Optimized`
 /// runs const-fold / CSE / small-fn inlining; `Max` adds `@always_inline`
@@ -108,17 +113,22 @@ pub fn emit(src: &str, tier: Tier) -> Result<String, String> {
 /// emit scalar loops that need no extra imports.
 fn add_elementwise_imports(m: &mut MModule, tier: Tier) {
     let has_elem = m.items.iter().any(|i| matches!(i, MItem::Elementwise { .. }));
-    if !has_elem {
+    let has_reduce = m.items.iter().any(|i| matches!(i, MItem::Reduce { .. }));
+    if !(has_elem || has_reduce) {
         return;
     }
     if !matches!(tier, Tier::Max) {
         return;
     }
-    // Dedup dtypes used by elementwise kernels.
+    // Dedup dtypes used by SIMD-lifted kernels.
     let mut dtypes: Vec<String> = Vec::new();
     for it in &m.items {
-        if let MItem::Elementwise { out_ty, .. } = it {
-            let dt = mtype_dtype_field(out_ty);
+        let dt_opt = match it {
+            MItem::Elementwise { out_ty, .. } => Some(mtype_dtype_field(out_ty)),
+            MItem::Reduce { out_ty, .. } => Some(mtype_dtype_field(out_ty)),
+            _ => None,
+        };
+        if let Some(dt) = dt_opt {
             if !dtypes.iter().any(|d| d == &dt) {
                 dtypes.push(dt);
             }
@@ -351,6 +361,9 @@ fn print_item(out: &mut String, item: &MItem, tier: Tier) {
         MItem::Elementwise { name, ptr_inputs, scalar_inputs, out_ty, body, comment } => {
             print_elementwise(out, name, ptr_inputs, scalar_inputs, out_ty, body, comment.as_deref(), tier);
         }
+        MItem::Reduce { name, ptr_inputs, out_ty, body, combiner, init, comment } => {
+            print_reduce(out, name, ptr_inputs, out_ty, body, *combiner, init, comment.as_deref(), tier);
+        }
         MItem::Var { name, ty, value, comment } => {
             if let Some(c) = comment {
                 if matches!(tier, Tier::Readable) {
@@ -453,6 +466,124 @@ fn print_elementwise(
 /// Substitute references to ptr-input names in the body:
 ///   - Max (SIMD) tier: `a` → `av` (the loaded SIMD var)
 ///   - Scalar tier:    `a` → `a[i]` (UnsafePointer[T] indexing)
+fn print_reduce(
+    out: &mut String,
+    name: &str,
+    ptr_inputs: &[(String, MType)],
+    out_ty: &MType,
+    body: &MExpr,
+    combiner: ReduceOp,
+    init: &MExpr,
+    comment: Option<&str>,
+    tier: Tier,
+) {
+    if let Some(c) = comment {
+        if matches!(tier, Tier::Readable | Tier::Optimized) {
+            out.push_str("# cljrs: ");
+            out.push_str(c);
+            out.push('\n');
+        }
+    }
+    let ty_str = out_ty.as_str();
+    let dt = mtype_dtype_field(out_ty);
+    // Signature.
+    out.push_str("fn ");
+    out.push_str(&snake(name));
+    out.push('(');
+    for (i, (n, _)) in ptr_inputs.iter().enumerate() {
+        if i > 0 {
+            out.push_str(", ");
+        }
+        out.push_str(&snake(n));
+        out.push_str(&format!(": UnsafePointer[{ty_str}]"));
+    }
+    out.push_str(&format!(", n: Int) -> {ty_str}:\n"));
+
+    match tier {
+        Tier::Readable | Tier::Optimized => {
+            // Scalar loop.
+            out.push_str(&format!("    var acc: {ty_str} = "));
+            print_expr(out, init);
+            out.push('\n');
+            out.push_str("    for i in range(n):\n");
+            let ptr_names: Vec<String> = ptr_inputs.iter().map(|(n, _)| n.clone()).collect();
+            let subst_body = subst_ptr_loads(body, &ptr_names, /*max=*/ false, &dt);
+            match combiner {
+                ReduceOp::Add => {
+                    out.push_str("        acc += ");
+                    print_expr(out, &subst_body);
+                    out.push('\n');
+                }
+                ReduceOp::Mul => {
+                    out.push_str("        acc *= ");
+                    print_expr(out, &subst_body);
+                    out.push('\n');
+                }
+                ReduceOp::Min => {
+                    out.push_str("        acc = min(acc, ");
+                    print_expr(out, &subst_body);
+                    out.push_str(")\n");
+                }
+                ReduceOp::Max => {
+                    out.push_str("        acc = max(acc, ");
+                    print_expr(out, &subst_body);
+                    out.push_str(")\n");
+                }
+            }
+            out.push_str("    return acc\n");
+        }
+        Tier::Max => {
+            // SIMD-lifted accumulator using vectorize.
+            let short = dtype_short(&dt);
+            out.push_str(&format!(
+                "    var acc = SIMD[DType.{dt}, nelts_{short}](",
+            ));
+            print_expr(out, init);
+            out.push_str(")\n");
+            out.push_str("    @parameter\n");
+            out.push_str("    fn __kernel[w: Int](i: Int):\n");
+            for (n, _) in ptr_inputs {
+                let sn = snake(n);
+                out.push_str(&format!(
+                    "        var {sn}v = SIMD[DType.{dt}, w].load({sn}, i)\n"
+                ));
+            }
+            let ptr_names: Vec<String> = ptr_inputs.iter().map(|(n, _)| n.clone()).collect();
+            let subst_body = subst_ptr_loads(body, &ptr_names, /*max=*/ true, &dt);
+            // Per-iter SIMD combine into acc. The vectorize parameter `w` may
+            // differ from nelts_<short> on tail iterations, so we fold the
+            // iteration's SIMD value through its own reduce_* before combining
+            // into the outer nelts-wide accumulator's lane 0. This is the
+            // safest shape across tail widths.
+            let reduce_method = combiner.simd_reduce_method();
+            match combiner {
+                ReduceOp::Add => {
+                    out.push_str("        acc[0] += (");
+                    print_expr(out, &subst_body);
+                    out.push_str(&format!(").{reduce_method}()\n"));
+                }
+                ReduceOp::Mul => {
+                    out.push_str("        acc[0] *= (");
+                    print_expr(out, &subst_body);
+                    out.push_str(&format!(").{reduce_method}()\n"));
+                }
+                ReduceOp::Min => {
+                    out.push_str("        acc[0] = min(acc[0], (");
+                    print_expr(out, &subst_body);
+                    out.push_str(&format!(").{reduce_method}())\n"));
+                }
+                ReduceOp::Max => {
+                    out.push_str("        acc[0] = max(acc[0], (");
+                    print_expr(out, &subst_body);
+                    out.push_str(&format!(").{reduce_method}())\n"));
+                }
+            }
+            out.push_str(&format!("    vectorize[__kernel, nelts_{short}](n)\n"));
+            out.push_str(&format!("    return acc.{reduce_method}()\n"));
+        }
+    }
+}
+
 fn subst_ptr_loads(body: &MExpr, ptr_names: &[String], max: bool, _dt: &str) -> MExpr {
     match body {
         MExpr::IntLit(_) | MExpr::FloatLit(_) | MExpr::BoolLit(_) | MExpr::StrLit(_) => body.clone(),

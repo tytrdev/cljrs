@@ -60,6 +60,9 @@ pub fn specialize(m: &mut MModule) {
             MItem::Elementwise { comment, .. } => {
                 *comment = None;
             }
+            MItem::Reduce { comment, .. } => {
+                *comment = None;
+            }
         }
     }
 }

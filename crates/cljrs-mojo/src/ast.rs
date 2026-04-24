@@ -142,6 +142,49 @@ pub enum MItem {
         body: MExpr,
         comment: Option<String>,
     },
+    /// Reduction kernel (from `reduce-mojo`). Tier Readable/Optimized emit
+    /// a scalar `for i in range(n): acc op= body` loop; Tier Max lifts the
+    /// accumulator to SIMD and uses `.reduce_<op>()` to fold the final vector.
+    Reduce {
+        name: String,
+        ptr_inputs: Vec<(String, MType)>,
+        out_ty: MType,
+        /// Per-element body expression (same vocabulary as Elementwise).
+        body: MExpr,
+        /// Combining op: `+`, `*`, `min`, or `max`.
+        combiner: ReduceOp,
+        /// Literal init value. Must be an `MExpr::IntLit`/`FloatLit`/`BoolLit`.
+        init: MExpr,
+        comment: Option<String>,
+    },
+}
+
+/// Associative reduction operator for `reduce-mojo`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReduceOp {
+    Add,
+    Mul,
+    Min,
+    Max,
+}
+
+impl ReduceOp {
+    pub fn scalar_op(self) -> &'static str {
+        match self {
+            ReduceOp::Add => "+",
+            ReduceOp::Mul => "*",
+            ReduceOp::Min => "",   // handled as min(acc, x)
+            ReduceOp::Max => "",
+        }
+    }
+    pub fn simd_reduce_method(self) -> &'static str {
+        match self {
+            ReduceOp::Add => "reduce_add",
+            ReduceOp::Mul => "reduce_mul",
+            ReduceOp::Min => "reduce_min",
+            ReduceOp::Max => "reduce_max",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
