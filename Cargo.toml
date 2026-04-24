@@ -56,6 +56,11 @@ name = "bench"
 path = "src/bin/bench.rs"
 
 [[bin]]
+name = "bench-kernels"
+path = "src/bin/bench_kernels.rs"
+required-features = ["mlir"]
+
+[[bin]]
 name = "prerender"
 path = "src/bin/prerender.rs"
 

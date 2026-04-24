@@ -1,0 +1,68 @@
+{
+  "n": 1000000,
+  "iters": 20,
+  "numpy_version": "2.4.4",
+  "machine": {
+    "os": "Darwin",
+    "arch": "arm64",
+    "python": "3.13.3"
+  },
+  "kernels": [
+    {
+      "name": "vector_add",
+      "flops": 1000000,
+      "bytes": 24000000,
+      "cljrs_native_ns": 838917,
+      "rust_inline_ns": 575417,
+      "cljrs_native_gflops": 1.192,
+      "rust_inline_gflops": 1.738,
+      "cljrs_native_gibs": 28.608,
+      "rust_inline_gibs": 41.709,
+      "numpy_ns": 215666,
+      "numpy_gflops": 4.637,
+      "numpy_gibs": 111.283
+    },
+    {
+      "name": "saxpy",
+      "flops": 2000000,
+      "bytes": 24000000,
+      "cljrs_native_ns": 836209,
+      "rust_inline_ns": 651625,
+      "cljrs_native_gflops": 2.392,
+      "rust_inline_gflops": 3.069,
+      "cljrs_native_gibs": 28.701,
+      "rust_inline_gibs": 36.831,
+      "numpy_ns": 476542,
+      "numpy_gflops": 4.197,
+      "numpy_gibs": 50.363
+    },
+    {
+      "name": "dot",
+      "flops": 2000000,
+      "bytes": 16000000,
+      "cljrs_native_ns": 809750,
+      "rust_inline_ns": 689375,
+      "cljrs_native_gflops": 2.47,
+      "rust_inline_gflops": 2.901,
+      "cljrs_native_gibs": 19.759,
+      "rust_inline_gibs": 23.209,
+      "numpy_ns": 40583,
+      "numpy_gflops": 49.282,
+      "numpy_gibs": 394.254
+    },
+    {
+      "name": "sum_sq",
+      "flops": 2000000,
+      "bytes": 8000000,
+      "cljrs_native_ns": 743041,
+      "rust_inline_ns": 674250,
+      "cljrs_native_gflops": 2.692,
+      "rust_inline_gflops": 2.966,
+      "cljrs_native_gibs": 10.767,
+      "rust_inline_gibs": 11.865,
+      "numpy_ns": 264416,
+      "numpy_gflops": 7.564,
+      "numpy_gibs": 30.255
+    }
+  ]
+}

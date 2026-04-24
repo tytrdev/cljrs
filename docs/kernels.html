@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Numeric kernels — cljrs benchmarks</title>
+  <link rel="stylesheet" href="./style.css">
+  <style>
+    .kb-machine { font-family: var(--mono); font-size: 0.82rem; color: var(--fg-dim); margin-bottom: 1.2rem; }
+    .kb-table { font-family: var(--mono); font-size: 0.85rem; margin: 0.4rem 0 1.2rem 0; }
+    .kb-table th { text-align: right; padding: 0.3rem 0.8rem 0.3rem 0; font-weight: 500; color: var(--fg-dim); }
+    .kb-table td { text-align: right; padding: 0.3rem 0.8rem 0.3rem 0; }
+    .kb-table td.name { text-align: left; color: var(--fg); font-weight: 500; }
+    .kb-bar { display: inline-block; height: 8px; background: var(--accent); border-radius: 2px; vertical-align: middle; margin-right: 0.4rem; }
+    .kb-bar.slow { background: #c084fc; }
+    .kb-bar.rust { background: #86efac; }
+    .kb-bar.numpy { background: #fbbf24; }
+    .kb-two { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 0.6rem 0 1.4rem 0; }
+    @media (max-width: 900px) { .kb-two { grid-template-columns: 1fr; } }
+    .kb-two > div { border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: var(--bg-elev); }
+    .kb-two h4 { margin: 0; padding: 0.4rem 0.8rem; font-size: 0.8rem; color: var(--fg-dim); background: #12151b; border-bottom: 1px solid var(--border); font-weight: 500; }
+    .kb-two pre { margin: 0; padding: 0.7rem 0.9rem; font-size: 0.78rem; line-height: 1.45; overflow-x: auto; }
+    .kb-tier-picker { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; margin: 0.4rem 0 0.4rem 0.4rem; }
+    .kb-tier-picker button {
+      background: var(--bg-elev); color: var(--fg-dim);
+      border: none; padding: 0.3rem 0.8rem; font-size: 0.8rem;
+      cursor: pointer; font-family: inherit;
+    }
+    .kb-tier-picker button.active { background: var(--accent); color: #0b1015; font-weight: 500; }
+    .kb-legend { font-size: 0.78rem; color: var(--fg-dim); display: flex; gap: 1.2rem; flex-wrap: wrap; margin: 0.4rem 0 0.8rem 0; }
+    .kb-legend .sw { display: inline-block; width: 12px; height: 8px; border-radius: 2px; vertical-align: middle; margin-right: 0.25rem; }
+    .kb-callout { background: var(--bg-elev); border-left: 3px solid var(--accent); padding: 0.6rem 0.9rem; margin: 1rem 0; font-size: 0.88rem; border-radius: 0 6px 6px 0; }
+  </style>
+</head>
+<body>
+  <main>
+    <h2>Numeric kernels — measured</h2>
+    <p>
+      Four common kernels written once in cljrs, then measured across four
+      paths: the cljrs tree-walker calling MLIR-JIT'd per-element
+      <code>defn-native</code> code, a hand-written Rust inline version
+      doing exactly the same thing, NumPy via ufuncs + BLAS, and the
+      transpiled Mojo output from <code>cljrs-mojo</code>. Timings are the
+      median of 20 iterations on the same deterministic 1M-element f64
+      buffers.
+    </p>
+
+    <div class="kb-machine" id="kb-machine">loading…</div>
+
+    <h3>Results</h3>
+    <p class="kb-legend">
+      <span><span class="sw" style="background:#c084fc"></span>cljrs MLIR JIT</span>
+      <span><span class="sw" style="background:#86efac"></span>rust inline (rustc -O3)</span>
+      <span><span class="sw" style="background:#fbbf24"></span>numpy (ufuncs + Accelerate BLAS)</span>
+    </p>
+    <table class="kb-table" id="kb-table">
+      <thead>
+        <tr>
+          <th class="name" style="text-align:left">kernel</th>
+          <th>cljrs ns</th>
+          <th>rust ns</th>
+          <th>numpy ns</th>
+          <th>cljrs GFLOPs</th>
+          <th>rust GFLOPs</th>
+          <th>numpy GFLOPs</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <div class="kb-callout">
+      <b>Read the numbers honestly.</b> cljrs lands within 70–95% of a
+      <code>rustc -O3</code> loop on the three memory-bound kernels.
+      NumPy's <code>dot</code> is ~20× faster than both because it calls
+      into Apple Accelerate's BLAS — hand-tuned SIMD with blocking and
+      multi-threading. That's the gap cljrs-mojo is designed to close:
+      the same source, transpiled at tier Max, emits a
+      <code>vectorize[body, nelts](n)</code> SIMD kernel that targets
+      the same register file BLAS does. We can show the emitted code;
+      we can't compile it here without Modular's toolchain.
+    </div>
+
+    <h3>Source — cljrs (one kernel)</h3>
+    <p>The per-element kernel that gets JIT'd and driven by the Rust loop:</p>
+    <pre><code class="language-clj" id="kb-src-cljrs">loading…</code></pre>
+
+    <h3>The same kernel, transpiled to Mojo</h3>
+    <p>
+      Generated automatically by <code>cljrs-mojo</code>. Switch tiers to
+      see how the transpiler trades readability for SIMD in the same
+      source. Live-edit on
+      <a href="./clojo.html">the Clojo page</a>.
+    </p>
+    <div class="kb-tier-picker" id="kb-tier">
+      <button data-tier="readable" class="active">Readable</button>
+      <button data-tier="optimized">Optimized</button>
+      <button data-tier="max">Max (vectorized)</button>
+    </div>
+    <pre><code class="language-mojo" id="kb-src-mojo">loading…</code></pre>
+
+    <h3>How to reproduce</h3>
+    <pre><code class="language-bash">bench/kernels.sh 1000000 20
+# writes docs/bench-kernels/results.json
+</code></pre>
+    <p>
+      Run on any machine. The harness builds <code>cljrs</code> with the
+      <code>mlir</code> feature on (needed for <code>defn-native</code> JIT),
+      runs the Rust driver that transmutes the JIT'd function pointer and
+      invokes it per-element, then runs the NumPy script via <code>uv</code>
+      for comparable numbers.
+    </p>
+
+    <h3>What's being measured</h3>
+    <ul>
+      <li><b>cljrs MLIR JIT</b>: one <code>(defn-native vadd-elem ^f64 [^f64 a ^f64 b] (+ a b))</code> compiled once. The Rust driver extracts the code pointer, transmutes to <code>extern "C" fn(f64, f64) -&gt; f64</code>, calls it in a tight loop. Only the per-element op is measured; the loop is Rust's.</li>
+      <li><b>rust inline</b>: same loop, body written directly in Rust. This is the compiler's best effort for the same semantics without touching SIMD intrinsics or <code>iter().sum()</code> specialization.</li>
+      <li><b>numpy</b>: <code>np.add(a, b, out=out)</code> / <code>np.dot(a, b)</code> / etc. NumPy's ufuncs SIMD-vectorize; <code>dot</code> delegates to BLAS.</li>
+    </ul>
+  </main>
+  <script type="module">
+    import { mountChrome, highlightAll } from "./_layout.js";
+    mountChrome();
+
+    const tbody = document.querySelector("#kb-table tbody");
+    const machineEl = document.querySelector("#kb-machine");
+
+    const r = await fetch("./bench-kernels/results.json").then(r => r.json());
+    machineEl.textContent =
+      `N = ${r.n.toLocaleString()} · iters = ${r.iters} · ${r.machine.os} ${r.machine.arch} · numpy ${r.numpy_version || "n/a"}`;
+
+    // Find max per-col for bar scaling.
+    const maxGflops = Math.max(
+      ...r.kernels.flatMap(k =>
+        [k.cljrs_native_gflops, k.rust_inline_gflops, k.numpy_gflops].filter(Boolean)
+      )
+    );
+    const bar = (g, cls) => {
+      if (!g) return "";
+      const width = Math.max(4, Math.round((g / maxGflops) * 80));
+      return `<span class="kb-bar ${cls}" style="width:${width}px"></span>`;
+    };
+
+    for (const k of r.kernels) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td class="name">${k.name}</td>
+        <td>${k.cljrs_native_ns?.toLocaleString() ?? "—"}</td>
+        <td>${k.rust_inline_ns?.toLocaleString() ?? "—"}</td>
+        <td>${k.numpy_ns?.toLocaleString() ?? "—"}</td>
+        <td>${bar(k.cljrs_native_gflops, "slow")}${k.cljrs_native_gflops?.toFixed(2) ?? "—"}</td>
+        <td>${bar(k.rust_inline_gflops, "rust")}${k.rust_inline_gflops?.toFixed(2) ?? "—"}</td>
+        <td>${bar(k.numpy_gflops, "numpy")}${k.numpy_gflops?.toFixed(2) ?? "—"}</td>
+      `;
+      tbody.appendChild(tr);
+    }
+
+    // Load and display the cljrs source for vector_add as the example.
+    const cljrsSrc = await fetch("./bench-kernels/vector_add.clj").then(r => r.text());
+    document.querySelector("#kb-src-cljrs").textContent = cljrsSrc.trim();
+
+    // Mojo: load all three tiers, switch on click.
+    const [readable, optimized, max] = await Promise.all([
+      fetch("./bench-kernels/mojo.readable.mojo").then(r => r.text()),
+      fetch("./bench-kernels/mojo.optimized.mojo").then(r => r.text()),
+      fetch("./bench-kernels/mojo.max.mojo").then(r => r.text()),
+    ]);
+    const tiers = { readable, optimized, max };
+    const mojoEl = document.querySelector("#kb-src-mojo");
+    const setTier = (t) => {
+      mojoEl.textContent = tiers[t].trim();
+      document.querySelectorAll("#kb-tier button").forEach(b =>
+        b.classList.toggle("active", b.dataset.tier === t));
+      mojoEl.dataset.hl = ""; // allow re-highlight
+      highlightAll().catch(() => {});
+    };
+    document.querySelectorAll("#kb-tier button").forEach(b =>
+      b.addEventListener("click", () => setTier(b.dataset.tier)));
+    setTier("readable");
+  </script>
+</body>
+</html>

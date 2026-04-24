@@ -42,6 +42,7 @@ const NAV = [
     children: [
       { href: "./benchmarks.html", label: "CPU benchmarks" },
       { href: "./bench.html",      label: "Matmul bench" },
+      { href: "./kernels.html",    label: "Numeric kernels" },
     ],
   },
   {
@@ -79,6 +80,7 @@ const NAV_PARENT = {
   "lib-js.html":     "./library.html",
   "lib-rust.html":   "./library.html",
   "bench.html":      "./benchmarks.html",
+  "kernels.html":    "./benchmarks.html",
 };
 
 function basename(href) {
