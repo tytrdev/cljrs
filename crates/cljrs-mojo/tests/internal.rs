@@ -134,6 +134,41 @@ fn unsupported_higher_order_errors() {
 }
 
 #[test]
+fn cond_emits_elif_chain() {
+    let src = "(defn ^i32 cls [^i32 x]
+                 (cond (< x 0) -1
+                       (= x 0)  0
+                       (< x 10) 1
+                       :else    2))";
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("if (x < 0):"), "got:\n{out}");
+    assert!(out.contains("elif (x == 0):"), "got:\n{out}");
+    assert!(out.contains("elif (x < 10):"), "got:\n{out}");
+    assert!(out.contains("else:"), "got:\n{out}");
+    // No deeply nested `else: if`.
+    let nested = out.lines().filter(|l| l.trim_start().starts_with("if ")).count();
+    assert_eq!(nested, 1, "should be one top-level if, got:\n{out}");
+}
+
+#[test]
+fn elif_with_multi_stmt_else() {
+    let src = "(defn ^i32 demo [^i32 x]
+                 (cond (< x 0) (let [^i32 y (- 0 x)] y)
+                       :else   (let [^i32 z (* x 2)] z)))";
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("else:"), "got:\n{out}");
+    assert!(out.contains("var z: Int32 ="), "got:\n{out}");
+}
+
+#[test]
+fn nested_if_still_renders() {
+    let src = "(defn ^i32 sgn [^i32 x] (if (> x 0) 1 (if (< x 0) -1 0)))";
+    let out = emit(src, Tier::Readable).unwrap();
+    // Value-position if uses the ternary expr printer, not the elif chain.
+    assert!(out.contains("if "), "got:\n{out}");
+}
+
+#[test]
 fn for_range_simple_counter() {
     // Single counter walking 0..n with no other state → for-range.
     let src = "(defn-mojo countdown ^i64 [^i64 n]

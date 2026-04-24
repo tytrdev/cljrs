@@ -9,7 +9,8 @@
 //! - typed `def` / `defn` / `defn-mojo` with `^Tag` metadata
 //! - numeric primitives: `^i8 ^i16 ^i32 ^i64 ^u8 ^u16 ^u32 ^u64 ^f32 ^f64
 //!   ^bf16 ^bool`, plus `^str` → `String`
-//! - control flow: `if`, `cond`, `do`, `let`, `loop`/`recur`. Single-counter
+//! - control flow: `if`, `cond` (flat `if/elif/else`), `do`, `let`,
+//!   `loop`/`recur`. Single-counter
 //!   loops auto-emit `for i in range(lo, hi):` instead of a while/break
 //!   trampoline.
 //! - arithmetic, comparisons, booleans, math fns (`sin cos tan sqrt exp
@@ -184,12 +185,36 @@ fn print_stmt(out: &mut String, s: &MStmt, lvl: usize) {
                     print_stmt(out, s, lvl + 1);
                 }
             }
-            if !els.is_empty() {
+            // Flatten cond chains: `else: if X: ... else: ...` → `elif X: ... else: ...`
+            let mut tail = els;
+            loop {
+                if tail.is_empty() {
+                    break;
+                }
+                if tail.len() == 1 {
+                    if let MStmt::If { cond: ec, then: et, els: ee } = &tail[0] {
+                        indent(out, lvl);
+                        out.push_str("elif ");
+                        print_expr(out, ec);
+                        out.push_str(":\n");
+                        if et.is_empty() {
+                            indent(out, lvl + 1);
+                            out.push_str("pass\n");
+                        } else {
+                            for s in et {
+                                print_stmt(out, s, lvl + 1);
+                            }
+                        }
+                        tail = ee;
+                        continue;
+                    }
+                }
                 indent(out, lvl);
                 out.push_str("else:\n");
-                for s in els {
+                for s in tail {
                     print_stmt(out, s, lvl + 1);
                 }
+                break;
             }
         }
         MStmt::While { cond, body } => {
