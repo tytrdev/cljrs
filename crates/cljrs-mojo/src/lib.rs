@@ -120,6 +120,18 @@ fn add_elementwise_imports(m: &mut MModule, tier: Tier) {
     let has_elem = m.items.iter().any(|i| matches!(i, MItem::Elementwise { .. }));
     let has_reduce = m.items.iter().any(|i| matches!(i, MItem::Reduce { .. }));
     let has_gpu = m.items.iter().any(|i| matches!(i, MItem::GpuElementwise { .. }));
+    let has_parallel = m.items.iter().any(|i| matches!(i, MItem::Elementwise { parallel: true, .. }));
+
+    if has_parallel {
+        for imp in [
+            "from algorithm import parallelize",
+            "from memory import UnsafePointer",
+        ] {
+            if !m.imports.iter().any(|s| s == imp) {
+                m.imports.push(imp.to_string());
+            }
+        }
+    }
 
     // GPU imports are needed at every tier when a GPU kernel is present.
     if has_gpu {
@@ -383,8 +395,8 @@ fn print_item(out: &mut String, item: &MItem, tier: Tier) {
                 }
             }
         }
-        MItem::Elementwise { name, ptr_inputs, scalar_inputs, out_ty, body, comment } => {
-            print_elementwise(out, name, ptr_inputs, scalar_inputs, out_ty, body, comment.as_deref(), tier);
+        MItem::Elementwise { name, ptr_inputs, scalar_inputs, out_ty, body, parallel, comment } => {
+            print_elementwise(out, name, ptr_inputs, scalar_inputs, out_ty, body, *parallel, comment.as_deref(), tier);
         }
         MItem::Reduce { name, ptr_inputs, out_ty, body, combiner, init, comment } => {
             print_reduce(out, name, ptr_inputs, out_ty, body, *combiner, init, comment.as_deref(), tier);
@@ -420,6 +432,7 @@ fn print_elementwise(
     scalar_inputs: &[(String, MType)],
     out_ty: &MType,
     body: &MExpr,
+    parallel: bool,
     comment: Option<&str>,
     tier: Tier,
 ) {
@@ -452,6 +465,20 @@ fn print_elementwise(
     out.push_str(", out: UnsafePointer[");
     out.push_str(&ty_str);
     out.push_str("], n: Int):\n");
+    if parallel {
+        // Emit: a nested @parameter fn(i) that does one element, and a
+        // top-level `parallelize[__kernel](n)` dispatch. Workers default
+        // to the runtime scheduler's choice (no explicit num_workers).
+        out.push_str("    @parameter\n");
+        out.push_str("    fn __kernel(i: Int):\n");
+        let ptr_names: Vec<String> = ptr_inputs.iter().map(|(n, _)| n.clone()).collect();
+        let subst_body = subst_ptr_loads(body, &ptr_names, /*max=*/ false, &dt);
+        out.push_str("        out[i] = ");
+        print_expr(out, &subst_body);
+        out.push('\n');
+        out.push_str("    parallelize[__kernel](n)\n");
+        return;
+    }
     match tier {
         Tier::Readable | Tier::Optimized => {
             // Scalar loop:

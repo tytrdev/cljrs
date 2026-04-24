@@ -143,6 +143,10 @@ pub enum MItem {
         /// Elementwise body expression (references the per-element names
         /// directly). At Max tier we rewrite these to SIMD loads.
         body: MExpr,
+        /// If true, emit `parallelize[kernel](n, num_workers)` instead of
+        /// the scalar / SIMD vectorize path. The per-thread body is the
+        /// same scalar one; Mojo spreads indices across workers.
+        parallel: bool,
         comment: Option<String>,
     },
     /// Reduction kernel (from `reduce-mojo`). Tier Readable/Optimized emit

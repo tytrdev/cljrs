@@ -99,7 +99,8 @@ fn lower_top(ctx: &Ctx, form: &Value) -> Result<Vec<MItem>, String> {
         "deftrait-mojo" => lower_deftrait(list, form).map(|i| vec![i]),
         "alias-mojo" => lower_alias(ctx, list, form).map(|i| vec![i]),
         "defn-method-mojo" => lower_defn_method(ctx, list, form).map(|_| Vec::new()),
-        "elementwise-mojo" => lower_elementwise(ctx, list, form).map(|i| vec![i]),
+        "elementwise-mojo" => lower_elementwise(ctx, list, form, false).map(|i| vec![i]),
+        "parallel-mojo" => lower_elementwise(ctx, list, form, true).map(|i| vec![i]),
         "reduce-mojo" => lower_reduce(ctx, list, form).map(|i| vec![i]),
         "elementwise-gpu-mojo" => lower_gpu_elementwise(ctx, list, form).map(|i| vec![i]),
         other => Err(format!(
@@ -549,7 +550,7 @@ fn lower_defn_method(ctx: &Ctx, list: &[Value], form: &Value) -> Result<(), Stri
 /// sugar for a pure elementwise kernel. Each non-`^scalar` param is a
 /// per-element pointer input; `^scalar`-tagged params are broadcast args.
 /// The body is a single pure expression over per-element names.
-fn lower_elementwise(ctx: &Ctx, list: &[Value], form: &Value) -> Result<MItem, String> {
+fn lower_elementwise(ctx: &Ctx, list: &[Value], form: &Value, parallel: bool) -> Result<MItem, String> {
     if list.len() < 4 {
         return Err(format!(
             "elementwise-mojo expects (elementwise-mojo NAME [params] ^RetT body): {}",
@@ -650,6 +651,7 @@ fn lower_elementwise(ctx: &Ctx, list: &[Value], form: &Value) -> Result<MItem, S
         scalar_inputs,
         out_ty: ret_ty,
         body,
+        parallel,
         comment: Some(pr(form)),
     })
 }

@@ -403,6 +403,32 @@ fn rename_user_call_callee() {
     assert!(out.contains("helper_fn(y)"), "got:\n{out}");
 }
 
+// ---------------- Feature: parallel-mojo (parallelize) ----------------
+
+#[test]
+fn parallel_mojo_emits_parallelize_kernel() {
+    let src = "(parallel-mojo vector-add [^f32 a ^f32 b] ^f32 (+ a b))";
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("from algorithm import parallelize"), "got:\n{out}");
+    assert!(out.contains("fn vector_add(a: UnsafePointer[Float32], b: UnsafePointer[Float32]"), "got:\n{out}");
+    assert!(out.contains("@parameter"), "got:\n{out}");
+    assert!(out.contains("fn __kernel(i: Int):"), "got:\n{out}");
+    assert!(out.contains("out[i] = (a[i] + b[i])"), "got:\n{out}");
+    assert!(out.contains("parallelize[__kernel](n)"), "got:\n{out}");
+}
+
+#[test]
+fn parallel_mojo_identical_shape_across_tiers() {
+    let src = "(parallel-mojo scale [^f32 x ^scalar ^f32 k] ^f32 (* x k))";
+    let r = emit(src, Tier::Readable).unwrap();
+    let m = emit(src, Tier::Max).unwrap();
+    // Parallel kernels do not get a vectorize rewrite.
+    assert!(r.contains("parallelize[__kernel](n)"), "got:\n{r}");
+    assert!(m.contains("parallelize[__kernel](n)"), "got:\n{m}");
+    assert!(!r.contains("vectorize["), "should not vectorize in parallel mode: {r}");
+    assert!(!m.contains("vectorize["), "should not vectorize in parallel mode: {m}");
+}
+
 // ---------------- Feature: elementwise+reduce fusion ----------------
 
 #[test]
