@@ -78,6 +78,23 @@
   ^f32
   (+ a b))
 
+;; --- reduction kernel: sum of squares (SIMD-lifted at Max tier) ---
+;; Readable: scalar acc += x[i]*x[i]
+;; Max:     SIMD accumulator + reduce_add() per iter + final reduce_add()
+(reduce-mojo sum-sq
+  [^f32 x]
+  ^f32
+  (* x x)
+  0.0)
+
+;; --- GPU kernel: same `vector-add` math, thread-indexed ---
+;; All three tiers emit the same body — the fn IS the per-thread op.
+;; Caller dispatches via DeviceContext.enqueue_function.
+(elementwise-gpu-mojo vector-add-gpu
+  [^f32 a ^f32 b]
+  ^f32
+  (+ a b))
+
 ;; --- smoothstep (shader classic) ---
 (defn-mojo smoothstep ^f32
   [^f32 edge0 ^f32 edge1 ^f32 x]
@@ -88,8 +105,10 @@
 (defn-mojo mix-shape ^bf16 [^bf16 x ^u32 n]
   (+ x (tanh (atan2 x (log2 (+ 1.0 x))))))
 
-;; --- structs + field access ---
-(defstruct-mojo Vec3 [^f32 x ^f32 y ^f32 z])
+;; --- generic struct + field access ---
+;; Vec3 is parameterized over T; instantiate with `(Vec3 ^f32 ...)` to
+;; auto-specialize, or write `(Vec3 1.0 2.0 3.0)` and let Mojo infer.
+(defstruct-mojo Vec3 [T] [^T x ^T y ^T z])
 
 (defn-mojo length ^f32 [^Vec3 v]
   (sqrt (+ (* (. v x) (. v x))
