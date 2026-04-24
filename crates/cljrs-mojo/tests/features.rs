@@ -403,6 +403,28 @@ fn rename_user_call_callee() {
     assert!(out.contains("helper_fn(y)"), "got:\n{out}");
 }
 
+// ---------------- Feature: docstrings via ^{:doc "..."} ----------------
+
+#[test]
+fn docstring_emits_triple_quoted() {
+    let src = r#"(defn-mojo ^{:doc "add two floats"} add ^f32 [^f32 x ^f32 y] (+ x y))"#;
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("fn add("), "got:\n{out}");
+    assert!(out.contains("\"\"\"add two floats\"\"\""), "got:\n{out}");
+    // Docstring must appear before `return`.
+    let doc_i = out.find("\"\"\"add").unwrap();
+    let ret_i = out.find("return").unwrap();
+    assert!(doc_i < ret_i, "docstring must precede return:\n{out}");
+}
+
+#[test]
+fn docstring_multiline() {
+    let src = r#"(defn-mojo ^{:doc "first line\nsecond line"} foo ^i32 [] 0)"#;
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("\"\"\"first line\\nsecond line\"\"\"") || out.contains("\"\"\"first line"),
+            "got:\n{out}");
+}
+
 // ---------------- Feature: extra string ops ----------------
 
 #[test]
