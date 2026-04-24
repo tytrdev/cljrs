@@ -200,6 +200,39 @@
 ;; --- decorator stacking via ^{:decorators [...]} ---
 (defn-mojo ^{:decorators [:always-inline :parameter]} hot ^f32
   [^f32 x] (* x x))
+
+;; --- higher-order fns: fn-type tags + anonymous (fn ...) ---
+;; ^fn/f32->f32 is a fn-pointer taking a Float32, returning a Float32.
+;; Multi-arg fn types use | between params: ^fn/f32|f32->f32.
+(defn-mojo apply-twice ^f32 [^fn/f32->f32 f ^f32 x]
+  (f (f x)))
+
+;; Anonymous fns hoist to a __anon_fn<N> top-level helper; the call
+;; site gets a bare name reference.
+(defn-mojo bump-twice ^f32 [^f32 x]
+  (apply-twice (fn ^f32 [^f32 y] (+ y 1.0)) x))
+
+;; --- mixed-precision kernels: (cast-mojo ^T x) bridges dtypes ---
+;; Input is BFloat16, accumulator is Float32.
+(reduce-mojo sum-sq-bf16
+  [^bf16 x]
+  ^f32
+  (* (cast-mojo ^f32 x) (cast-mojo ^f32 x))
+  0.0)
+
+;; --- multi-output elementwise kernel ---
+;; ^Tuple-i32-i32 makes a 2-output kernel; body is (tuple e0 e1).
+;; Emits out0 and out1 pointers and two stores per element.
+(elementwise-mojo split-even-odd
+  [^i32 x]
+  ^Tuple-i32-i32
+  (tuple (* x 2) (+ (* x 2) 1)))
+
+;; --- gather: out[i] = values[indices[i]] ---
+(gather-mojo gf32 [^f32 values ^i32 indices])
+
+;; --- scatter: out[indices[i]] = values[i] ---
+(scatter-mojo sf32 [^i32 indices ^f32 values])
 `;
 
     (async () => {
