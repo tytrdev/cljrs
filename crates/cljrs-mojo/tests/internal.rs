@@ -134,6 +134,32 @@ fn unsupported_higher_order_errors() {
 }
 
 #[test]
+fn do_in_let_value_position() {
+    // (let [^i32 v (do 1 2 3)] v) — do should yield 3.
+    let src = "(defn ^i32 d [] (let [^i32 v (do 1 2 3)] v))";
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("var v: Int32 = 3"), "got:\n{out}");
+}
+
+#[test]
+fn nested_do_in_if_branch() {
+    let src = "(defn ^i32 g [^i32 x] (if (> x 0) (do 1 2 (+ x 1)) 0))";
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("return (x + 1)"), "got:\n{out}");
+}
+
+#[test]
+fn do_with_side_effect_then_value() {
+    // Side effects discarded in value position; only last expr survives.
+    let src = "(defn ^i32 s [] (do (sink 1) (sink 2) 7))";
+    let out = emit(src, Tier::Readable).unwrap();
+    // tail position should emit sink calls then return 7.
+    assert!(out.contains("return 7"), "got:\n{out}");
+    assert!(out.contains("sink(1)"), "got:\n{out}");
+    assert!(out.contains("sink(2)"), "got:\n{out}");
+}
+
+#[test]
 fn cond_emits_elif_chain() {
     let src = "(defn ^i32 cls [^i32 x]
                  (cond (< x 0) -1
