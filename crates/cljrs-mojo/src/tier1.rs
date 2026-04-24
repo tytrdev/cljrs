@@ -326,9 +326,9 @@ fn lower_defn(ctx: &Ctx, list: &[Value], form: &Value, extra_decorators: &[&str]
     // Return-type tag can sit on either the name (`(defn ^RET name …)`)
     // or on the arg vector (`(defn name ^RET […] …)`). Both are valid
     // Clojure reader input; accept either.
-    let (name_tag, name_form) = peel_tag(&list[1]);
-    // The name may carry map-meta `^{:doc "..."}`. Peel that too.
-    let (docstring, name_form) = peel_doc_meta(name_form);
+    // The name may carry interleaved symbol (type) and map (meta) tags.
+    // Walk all tag layers to collect both at once.
+    let (name_tag, meta_decorators, docstring, name_form) = peel_all_fn_name_tags(&list[1]);
     let name = sym_str(name_form)
         .ok_or_else(|| format!("defn name must be a symbol: {}", pr(form)))?
         .to_string();
@@ -375,7 +375,15 @@ fn lower_defn(ctx: &Ctx, list: &[Value], form: &Value, extra_decorators: &[&str]
         param_defaults,
         ret: ret_ty,
         body: stmts,
-        decorators: extra_decorators.iter().map(|s| s.to_string()).collect(),
+        decorators: {
+            let mut ds: Vec<String> = extra_decorators.iter().map(|s| s.to_string()).collect();
+            for d in &meta_decorators {
+                if !ds.iter().any(|x| x == d) {
+                    ds.push(d.clone());
+                }
+            }
+            ds
+        },
         comment: Some(pr(form)),
         cparams: Vec::new(),
         raises: false,
@@ -2309,6 +2317,53 @@ pub fn peel_doc_meta(v: &Value) -> (Option<String>, &Value) {
         }
     }
     (doc, cur)
+}
+
+/// Peel all interleaved type/meta tags off a fn name form in one pass.
+/// Returns (return_type_from_tag, decorators, docstring, inner_symbol).
+pub fn peel_all_fn_name_tags(v: &Value) -> (MType, Vec<String>, Option<String>, &Value) {
+    let mut ret_ty = MType::Infer;
+    let mut decorators: Vec<String> = Vec::new();
+    let mut doc: Option<String> = None;
+    let mut cur = v;
+    loop {
+        let Some((tag, inner)) = peel_one_tag(cur) else { break };
+        match tag {
+            Value::Symbol(s) => {
+                if matches!(ret_ty, MType::Infer) {
+                    ret_ty = parse_type_tag(s.as_ref());
+                }
+            }
+            Value::Map(m) => {
+                for (k, val) in m.iter() {
+                    if let Value::Keyword(kw) = k {
+                        match kw.as_ref() {
+                            "doc" => {
+                                if let Value::Str(s) = val {
+                                    doc = Some(s.to_string());
+                                }
+                            }
+                            "decorators" => {
+                                if let Value::Vector(vs) = val {
+                                    for d in vs.iter() {
+                                        if let Value::Keyword(k) = d {
+                                            decorators.push(decorator_to_mojo(k.as_ref()));
+                                        } else if let Value::Symbol(s) = d {
+                                            decorators.push(decorator_to_mojo(s.as_ref()));
+                                        }
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            _ => break,
+        }
+        cur = inner;
+    }
+    (ret_ty, decorators, doc, cur)
 }
 
 /// Extract `^{:decorators [:a :b]}` and `^{:doc "..."}` metadata off a

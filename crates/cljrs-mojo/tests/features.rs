@@ -403,6 +403,30 @@ fn rename_user_call_callee() {
     assert!(out.contains("helper_fn(y)"), "got:\n{out}");
 }
 
+// ---------------- Feature: decorator stacking on fns ----------------
+
+#[test]
+fn decorator_stack_always_inline_parameter() {
+    let src = r#"(defn-mojo ^{:decorators [:always-inline :parameter]} foo ^i32 [^i32 x] x)"#;
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("@always_inline"), "got:\n{out}");
+    assert!(out.contains("@parameter"), "got:\n{out}");
+    // Both must appear above `fn foo(`.
+    let fi = out.find("fn foo(").unwrap();
+    let ai = out.find("@always_inline").unwrap();
+    let pi = out.find("@parameter").unwrap();
+    assert!(ai < fi && pi < fi, "decorators must precede fn:\n{out}");
+}
+
+#[test]
+fn decorator_stack_register_passable_on_struct() {
+    let src = r#"(defstruct-mojo ^{:decorators [:register-passable]} Pod [^i32 x])"#;
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("@register_passable"), "got:\n{out}");
+    assert!(out.contains("@value"), "got:\n{out}");
+    assert!(out.contains("struct Pod:"), "got:\n{out}");
+}
+
 // ---------------- Feature: Tuple returns + (tuple a b c) ----------------
 
 #[test]
