@@ -26,6 +26,14 @@ pub enum MType {
     Named(String),
     /// SIMD[DType.Tdtype, N] — emitted whenever the user wrote `^SIMD[t n]`.
     Simd(String, usize),
+    /// `List[T]`.
+    List(Box<MType>),
+    /// `Optional[T]`.
+    Optional(Box<MType>),
+    /// `Tuple[T1, T2, ...]`.
+    Tuple(Vec<MType>),
+    /// `SIMD[DType.Tdtype, N]` where N is a compile-time parameter name.
+    SimdParam(String, String),
     /// Unannotated. Printer will usually omit the `: T` suffix.
     Infer,
 }
@@ -48,6 +56,13 @@ impl MType {
             MType::Str => "String".into(),
             MType::Named(s) => s.clone(),
             MType::Simd(dt, n) => format!("SIMD[DType.{dt}, {n}]"),
+            MType::SimdParam(dt, n) => format!("SIMD[DType.{dt}, {n}]"),
+            MType::List(t) => format!("List[{}]", t.as_str()),
+            MType::Optional(t) => format!("Optional[{}]", t.as_str()),
+            MType::Tuple(ts) => {
+                let parts: Vec<String> = ts.iter().map(|t| t.as_str()).collect();
+                format!("Tuple[{}]", parts.join(", "))
+            }
             MType::Infer => String::new(),
         }
     }
@@ -88,14 +103,37 @@ pub enum MItem {
     Struct {
         name: String,
         fields: Vec<(String, MType)>,
+        methods: Vec<MFn>,
+        /// Optional trait the struct implements: `struct Name(Trait):`.
+        trait_impl: Option<String>,
+        comment: Option<String>,
+    },
+    /// `alias NAME[: T] = VALUE` at top level.
+    Alias {
+        name: String,
+        ty: MType,
+        value: MExpr,
+        comment: Option<String>,
+    },
+    /// `trait NAME:` with required fn signatures.
+    Trait {
+        name: String,
+        methods: Vec<MTraitMethod>,
         comment: Option<String>,
     },
 }
 
 #[derive(Debug, Clone)]
+pub struct MTraitMethod {
+    pub name: String,
+    pub params: Vec<(String, MType, ParamConv)>,
+    pub ret: MType,
+}
+
+#[derive(Debug, Clone)]
 pub struct MFn {
     pub name: String,
-    pub params: Vec<(String, MType)>,
+    pub params: Vec<(String, MType, ParamConv)>,
     pub ret: MType,
     pub body: Vec<MStmt>,
     /// Decorators like `@always_inline` or `@parameter`. One per line,
@@ -103,6 +141,35 @@ pub struct MFn {
     pub decorators: Vec<String>,
     /// Optional `# cljrs: ...` source comment (tier 1/2).
     pub comment: Option<String>,
+    /// Compile-time parameters `fn foo[n: Int, T: AnyType](...)`.
+    pub cparams: Vec<(String, String)>,
+    /// `fn foo() raises -> T:` when true.
+    pub raises: bool,
+    /// `self` implicit first param for method defns inside a struct.
+    pub is_method: bool,
+}
+
+/// Mojo argument convention. Emitted as a keyword before the param name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ParamConv {
+    /// Default — no keyword.
+    Default,
+    Owned,
+    Borrowed,
+    Inout,
+    Ref,
+}
+
+impl ParamConv {
+    pub fn as_prefix(&self) -> &'static str {
+        match self {
+            ParamConv::Default => "",
+            ParamConv::Owned => "owned ",
+            ParamConv::Borrowed => "borrowed ",
+            ParamConv::Inout => "inout ",
+            ParamConv::Ref => "ref ",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -144,6 +211,33 @@ pub enum MStmt {
     Break,
     /// `continue` — skip to next iteration of the innermost loop.
     Continue,
+    /// `raise EXPR` — exception.
+    Raise(MExpr),
+    /// `raise` (bare) — re-raise in except handler.
+    ReRaise,
+    /// `try: body except T as n: handler ...`
+    Try {
+        body: Vec<MStmt>,
+        catches: Vec<MCatch>,
+    },
+    /// `@parameter\nif TEST: then\nelse: els`
+    ParameterIf {
+        cond: MExpr,
+        then: Vec<MStmt>,
+        els: Vec<MStmt>,
+    },
+    /// Verbatim text line (with current indentation). Used for decorators
+    /// nested inside fn bodies (e.g. `@parameter` on a nested fn).
+    Raw(String),
+}
+
+#[derive(Debug, Clone)]
+pub struct MCatch {
+    /// e.g. `Error`, `ValueError`. Empty → bare `except:`.
+    pub ty: String,
+    /// Optional `as NAME`.
+    pub name: Option<String>,
+    pub body: Vec<MStmt>,
 }
 
 #[derive(Debug, Clone)]

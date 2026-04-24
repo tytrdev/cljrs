@@ -8,7 +8,7 @@ use std::cell::RefCell;
 
 use cljrs::value::Value;
 
-use crate::ast::{MExpr, MFn, MItem, MModule, MStmt, MType};
+use crate::ast::{MCatch, MExpr, MFn, MItem, MModule, MStmt, MTraitMethod, MType, ParamConv};
 use crate::runtime;
 
 /// Lowering context. Tracks imports that get lazily added as we encounter
@@ -16,11 +16,22 @@ use crate::runtime;
 pub struct Ctx {
     imports: RefCell<Vec<String>>,
     gensym: RefCell<u32>,
+    /// Pending struct methods, keyed by struct name. Drained after the
+    /// initial pass and merged into the matching `MItem::Struct`.
+    pub methods: RefCell<Vec<(String, MFn)>>,
+    /// Whether we're currently lowering a parametric fn body (controls
+    /// `(parameter-if ...)` legality).
+    in_parametric: RefCell<bool>,
 }
 
 impl Ctx {
     pub fn new() -> Self {
-        Ctx { imports: RefCell::new(Vec::new()), gensym: RefCell::new(0) }
+        Ctx {
+            imports: RefCell::new(Vec::new()),
+            gensym: RefCell::new(0),
+            methods: RefCell::new(Vec::new()),
+            in_parametric: RefCell::new(false),
+        }
     }
     fn need_import(&self, line: &str) {
         let mut v = self.imports.borrow_mut();
@@ -46,6 +57,25 @@ pub fn lower_module(forms: &[Value]) -> Result<MModule, String> {
     for form in forms {
         items.extend(lower_top(&ctx, form)?);
     }
+    // Attach pending methods to their structs.
+    let pending = std::mem::take(&mut *ctx.methods.borrow_mut());
+    for (sname, m) in pending {
+        let mut placed = false;
+        for it in items.iter_mut() {
+            if let MItem::Struct { name, methods, .. } = it {
+                if name == &sname {
+                    methods.push(m.clone());
+                    placed = true;
+                    break;
+                }
+            }
+        }
+        if !placed {
+            return Err(format!(
+                "defn-method-mojo: no struct named `{sname}` defined before this method"
+            ));
+        }
+    }
     let imports = ctx.take_imports();
     Ok(MModule { imports, items })
 }
@@ -63,7 +93,12 @@ fn lower_top(ctx: &Ctx, form: &Value) -> Result<Vec<MItem>, String> {
         "defn" | "defn-mojo" => lower_defn_any(ctx, list, form, &[]),
         "parameter-fn-mojo" => lower_defn_any(ctx, list, form, &["@parameter"]),
         "always-inline-fn-mojo" => lower_defn_any(ctx, list, form, &["@always_inline"]),
-        "defstruct-mojo" => lower_defstruct(list, form).map(|i| vec![i]),
+        "raises-fn-mojo" => lower_raises_fn(ctx, list, form).map(|i| vec![i]),
+        "parametric-fn-mojo" => lower_parametric_fn(ctx, list, form).map(|i| vec![i]),
+        "defstruct-mojo" => lower_defstruct(ctx, list, form).map(|i| vec![i]),
+        "deftrait-mojo" => lower_deftrait(list, form).map(|i| vec![i]),
+        "alias-mojo" => lower_alias(ctx, list, form).map(|i| vec![i]),
+        "defn-method-mojo" => lower_defn_method(ctx, list, form).map(|_| Vec::new()),
         other => Err(format!(
             "unsupported top-level form `{other}` in: {}",
             pr(form)
@@ -160,18 +195,31 @@ fn mtype_to_tag_symbol(t: &MType) -> String {
         MType::Str => "str".into(),
         MType::Named(s) => s.clone(),
         MType::Simd(_, _) | MType::Infer => "Infer".into(),
+        MType::SimdParam(_, _) | MType::List(_) | MType::Optional(_) | MType::Tuple(_) => {
+            "Infer".into()
+        }
     }
 }
 
-fn lower_defstruct(list: &[Value], form: &Value) -> Result<MItem, String> {
+fn lower_defstruct(_ctx: &Ctx, list: &[Value], form: &Value) -> Result<MItem, String> {
     // (defstruct-mojo NAME [^T field ...])
-    if list.len() != 3 {
+    // Optional trait: (defstruct-mojo NAME :TraitName [^T field ...])
+    if list.len() < 3 {
         return Err(format!("defstruct-mojo expects (defstruct-mojo NAME [fields]): {}", pr(form)));
     }
     let name = sym_str(&list[1])
         .ok_or_else(|| format!("defstruct-mojo name must be symbol: {}", pr(form)))?
         .to_string();
-    let fields_vec = match &list[2] {
+    let mut idx = 2;
+    let mut trait_impl: Option<String> = None;
+    if let Value::Keyword(k) = &list[idx] {
+        trait_impl = Some(k.to_string());
+        idx += 1;
+    }
+    let fields_form = list.get(idx).ok_or_else(|| {
+        format!("defstruct-mojo missing fields vector: {}", pr(form))
+    })?;
+    let fields_vec = match fields_form {
         Value::Vector(v) => v,
         _ => return Err(format!("defstruct-mojo fields must be a vector: {}", pr(form))),
     };
@@ -186,6 +234,8 @@ fn lower_defstruct(list: &[Value], form: &Value) -> Result<MItem, String> {
     Ok(MItem::Struct {
         name,
         fields,
+        methods: Vec::new(),
+        trait_impl,
         comment: Some(pr(form)),
     })
 }
@@ -235,16 +285,16 @@ fn lower_defn(ctx: &Ctx, list: &[Value], form: &Value, extra_decorators: &[&str]
         Value::Vector(v) => v,
         _ => return Err(format!("defn arg vector expected: {}", pr(form))),
     };
-    let mut params: Vec<(String, MType)> = Vec::new();
+    let mut params: Vec<(String, MType, ParamConv)> = Vec::new();
     for p in params_vec.iter() {
-        let (pty, pname) = peel_tag(p);
+        let (pty, pconv, pname) = peel_param_tags(p);
         let s = sym_str(pname).ok_or_else(|| {
             format!("defn param must be a symbol: {}", pr(form))
         })?;
         if s.contains('&') {
             return Err(format!("variadic params not supported in cljrs-mojo v1: {}", pr(form)));
         }
-        params.push((s.to_string(), pty));
+        params.push((s.to_string(), pty, pconv));
     }
     // Body: all forms after the arg vec. Exactly one expression is the
     // typical case; if there are several, wrap in an implicit `do`.
@@ -267,7 +317,164 @@ fn lower_defn(ctx: &Ctx, list: &[Value], form: &Value, extra_decorators: &[&str]
         body: stmts,
         decorators: extra_decorators.iter().map(|s| s.to_string()).collect(),
         comment: Some(pr(form)),
+        cparams: Vec::new(),
+        raises: false,
+        is_method: false,
     }))
+}
+
+// ---------------- Feature 1/3/4/9/10: extra top-level forms ----------------
+
+/// `(raises-fn-mojo NAME ^RET [args] body...)` — emits `fn NAME(...) raises -> RET:`.
+fn lower_raises_fn(ctx: &Ctx, list: &[Value], form: &Value) -> Result<MItem, String> {
+    // Identical shape to defn-mojo. Reuse lower_defn then flip raises.
+    let mut synth = list.to_vec();
+    synth[0] = Value::Symbol("defn".into());
+    let synth_form = Value::List(std::sync::Arc::new(synth.clone()));
+    let item = lower_defn(ctx, &synth, &synth_form, &[])?;
+    if let MItem::Fn(mut f) = item {
+        f.raises = true;
+        f.comment = Some(pr(form));
+        return Ok(MItem::Fn(f));
+    }
+    unreachable!("lower_defn returns MItem::Fn")
+}
+
+/// `(parametric-fn-mojo NAME [cparam-name CParamType ...] ^RET [args] body...)`
+/// emits `fn NAME[n: Int, T: AnyType](args) -> RET:`. The cparam vector is
+/// pairs flattened: `[n Int T AnyType]`.
+fn lower_parametric_fn(ctx: &Ctx, list: &[Value], form: &Value) -> Result<MItem, String> {
+    if list.len() < 5 {
+        return Err(format!(
+            "parametric-fn-mojo expects (parametric-fn-mojo NAME [cparams] ^RET [args] body): {}",
+            pr(form)
+        ));
+    }
+    let name = sym_str(&list[1])
+        .ok_or_else(|| format!("parametric-fn-mojo name must be symbol: {}", pr(form)))?
+        .to_string();
+    let cparam_vec = match &list[2] {
+        Value::Vector(v) => v,
+        _ => {
+            return Err(format!(
+                "parametric-fn-mojo cparams must be a vector: {}",
+                pr(form)
+            ));
+        }
+    };
+    if cparam_vec.len() % 2 != 0 {
+        return Err(format!(
+            "parametric-fn-mojo cparams must have even length [name Type ...]: {}",
+            pr(form)
+        ));
+    }
+    let mut cparams: Vec<(String, String)> = Vec::new();
+    let mut i = 0;
+    while i < cparam_vec.len() {
+        let n = sym_str(&cparam_vec[i]).ok_or_else(|| {
+            format!("parametric cparam name must be a symbol: {}", pr(form))
+        })?;
+        let t = sym_str(&cparam_vec[i + 1]).ok_or_else(|| {
+            format!("parametric cparam type must be a symbol: {}", pr(form))
+        })?;
+        cparams.push((n.to_string(), t.to_string()));
+        i += 2;
+    }
+    // Build a synthetic defn for the args+body portion.
+    // Shape after consuming list[2] (cparams): list[3] = ^RET / args, ...
+    let mut synth: Vec<Value> = vec![
+        Value::Symbol("defn".into()),
+        Value::Symbol(name.clone().into()),
+    ];
+    synth.extend_from_slice(&list[3..]);
+    let synth_form = Value::List(std::sync::Arc::new(synth.clone()));
+    *ctx.in_parametric.borrow_mut() = true;
+    let item = lower_defn(ctx, &synth, &synth_form, &[]);
+    *ctx.in_parametric.borrow_mut() = false;
+    let mut f = match item? {
+        MItem::Fn(f) => f,
+        _ => unreachable!(),
+    };
+    f.cparams = cparams;
+    f.comment = Some(pr(form));
+    Ok(MItem::Fn(f))
+}
+
+/// `(deftrait-mojo NAME (METHOD ^RET [args]) ...)` → `trait NAME:` block.
+fn lower_deftrait(list: &[Value], form: &Value) -> Result<MItem, String> {
+    if list.len() < 2 {
+        return Err(format!("deftrait-mojo expects NAME and methods: {}", pr(form)));
+    }
+    let name = sym_str(&list[1])
+        .ok_or_else(|| format!("deftrait-mojo name must be a symbol: {}", pr(form)))?
+        .to_string();
+    let mut methods: Vec<MTraitMethod> = Vec::new();
+    for m in &list[2..] {
+        let ml = match as_list(m) {
+            Some(l) => l,
+            None => return Err(format!("deftrait method must be a list: {}", pr(m))),
+        };
+        if ml.len() < 2 {
+            return Err(format!("deftrait method needs name + args: {}", pr(m)));
+        }
+        let mname = sym_str(&ml[0])
+            .ok_or_else(|| format!("trait method name must be symbol: {}", pr(m)))?
+            .to_string();
+        // Optional ^RET tag on the args vec.
+        let (ret_ty, args_form) = peel_tag(&ml[1]);
+        let pv = match args_form {
+            Value::Vector(v) => v,
+            _ => return Err(format!("trait method args must be vector: {}", pr(m))),
+        };
+        let mut params: Vec<(String, MType, ParamConv)> = Vec::new();
+        for p in pv.iter() {
+            let (pty, pconv, pn) = peel_param_tags(p);
+            let pn = sym_str(pn)
+                .ok_or_else(|| format!("trait method param must be a symbol: {}", pr(m)))?
+                .to_string();
+            params.push((pn, pty, pconv));
+        }
+        methods.push(MTraitMethod { name: mname, params, ret: ret_ty });
+    }
+    Ok(MItem::Trait { name, methods, comment: Some(pr(form)) })
+}
+
+/// `(alias-mojo NAME VALUE)` or `(alias-mojo ^T NAME VALUE)`.
+fn lower_alias(ctx: &Ctx, list: &[Value], form: &Value) -> Result<MItem, String> {
+    if list.len() != 3 {
+        return Err(format!("alias-mojo expects (alias-mojo [^T] NAME VALUE): {}", pr(form)));
+    }
+    let (ty, name_form) = peel_tag(&list[1]);
+    let name = sym_str(name_form)
+        .ok_or_else(|| format!("alias-mojo name must be a symbol: {}", pr(form)))?
+        .to_string();
+    let value = lower_expr(ctx, &list[2])?;
+    Ok(MItem::Alias { name, ty, value, comment: Some(pr(form)) })
+}
+
+/// `(defn-method-mojo StructName method-name ^RET [args] body...)`. Stored
+/// in `ctx.methods` and merged into the named struct after the module pass.
+fn lower_defn_method(ctx: &Ctx, list: &[Value], form: &Value) -> Result<(), String> {
+    if list.len() < 4 {
+        return Err(format!(
+            "defn-method-mojo expects (defn-method-mojo StructName method-name [args] body): {}",
+            pr(form)
+        ));
+    }
+    let sname = sym_str(&list[1])
+        .ok_or_else(|| format!("defn-method-mojo struct name must be symbol: {}", pr(form)))?
+        .to_string();
+    // Synthesize a defn with the rest.
+    let mut synth: Vec<Value> = vec![Value::Symbol("defn".into())];
+    synth.extend_from_slice(&list[2..]);
+    let synth_form = Value::List(std::sync::Arc::new(synth.clone()));
+    let item = lower_defn(ctx, &synth, &synth_form, &[])?;
+    if let MItem::Fn(mut f) = item {
+        f.is_method = true;
+        f.comment = Some(pr(form));
+        ctx.methods.borrow_mut().push((sname, f));
+    }
+    Ok(())
 }
 
 /// Where does the tail expression's value go?
@@ -278,6 +485,62 @@ enum TailMode {
     /// `NAME = EXPR` (used inside a while-loop block for recur fallbacks).
     #[allow(dead_code)]
     Assign(String),
+}
+
+/// `(try BODY... (catch EX [as] NAME HANDLER...) (catch ...))`.
+/// `as` is a separator we accept but ignore: `(catch ValueError as e ...)`.
+/// Bare `(catch ExceptionType handler...)` is also allowed (no name binding).
+fn lower_try(ctx: &Ctx, list: &[Value], out: &mut Vec<MStmt>) -> Result<(), String> {
+    let mut body_forms: Vec<&Value> = Vec::new();
+    let mut catches: Vec<MCatch> = Vec::new();
+    for f in &list[1..] {
+        if let Some(l) = as_list(f) {
+            if sym_str(&l[0]) == Some("catch") {
+                let c = lower_catch(ctx, l, f)?;
+                catches.push(c);
+                continue;
+            }
+        }
+        body_forms.push(f);
+    }
+    let mut body: Vec<MStmt> = Vec::new();
+    for f in &body_forms {
+        lower_stmt(ctx, f, &mut body)?;
+    }
+    out.push(MStmt::Try { body, catches });
+    Ok(())
+}
+
+fn lower_catch(ctx: &Ctx, l: &[Value], form: &Value) -> Result<MCatch, String> {
+    if l.len() < 2 {
+        return Err(format!("catch expects (catch EXCEPTION-TYPE [as] [name] handler...): {}", pr(form)));
+    }
+    let ty = sym_str(&l[1])
+        .ok_or_else(|| format!("catch type must be symbol: {}", pr(form)))?
+        .to_string();
+    let mut idx = 2;
+    // Optional `as` separator.
+    if let Some(s) = l.get(idx).and_then(sym_str) {
+        if s == "as" {
+            idx += 1;
+        }
+    }
+    // Optional binding name (a bare symbol that isn't a list).
+    let mut name: Option<String> = None;
+    if let Some(v) = l.get(idx) {
+        if let Value::Symbol(s) = v {
+            // Heuristic: if there's a body after this, treat as name.
+            if l.len() > idx + 1 {
+                name = Some(s.to_string());
+                idx += 1;
+            }
+        }
+    }
+    let mut body: Vec<MStmt> = Vec::new();
+    for f in &l[idx..] {
+        lower_stmt(ctx, f, &mut body)?;
+    }
+    Ok(MCatch { ty, name, body })
 }
 
 /// Lower a tail-position expression into a stmt sequence. Control flow
@@ -342,6 +605,11 @@ fn lower_expr_tail(
                 }
                 "for-mojo" => {
                     return lower_for_mojo_tail(ctx, list, out, mode);
+                }
+                "raise" | "try" | "parameter-if" | "mojo-assert" => {
+                    // Statement-form-only at tail: emit, then no return value.
+                    lower_stmt(ctx, form, out)?;
+                    return Ok(());
                 }
                 _ => {}
             }
@@ -414,6 +682,57 @@ fn lower_stmt(ctx: &Ctx, form: &Value, out: &mut Vec<MStmt>) -> Result<(), Strin
                 }
                 "continue" => {
                     out.push(MStmt::Continue);
+                    return Ok(());
+                }
+                "raise" => {
+                    if list.len() == 1 {
+                        out.push(MStmt::ReRaise);
+                        return Ok(());
+                    }
+                    if list.len() != 2 {
+                        return Err(format!("raise expects 0 or 1 arg: {}", pr(form)));
+                    }
+                    let e = lower_expr(ctx, &list[1])?;
+                    out.push(MStmt::Raise(e));
+                    return Ok(());
+                }
+                "try" => {
+                    return lower_try(ctx, list, out);
+                }
+                "parameter-if" => {
+                    if !*ctx.in_parametric.borrow() {
+                        return Err(format!(
+                            "parameter-if only legal inside parametric-fn-mojo body: {}",
+                            pr(form)
+                        ));
+                    }
+                    if list.len() < 3 || list.len() > 4 {
+                        return Err(format!("parameter-if expects (test then [else]): {}", pr(form)));
+                    }
+                    let cond = lower_expr(ctx, &list[1])?;
+                    let mut then_s = Vec::new();
+                    lower_stmt(ctx, &list[2], &mut then_s)?;
+                    let mut els_s = Vec::new();
+                    if list.len() == 4 {
+                        lower_stmt(ctx, &list[3], &mut els_s)?;
+                    }
+                    out.push(MStmt::ParameterIf { cond, then: then_s, els: els_s });
+                    return Ok(());
+                }
+                "mojo-assert" => {
+                    if list.len() < 2 || list.len() > 3 {
+                        return Err(format!("mojo-assert expects (test [msg]): {}", pr(form)));
+                    }
+                    let mut args = vec![lower_expr(ctx, &list[1])?];
+                    if list.len() == 3 {
+                        args.push(lower_expr(ctx, &list[2])?);
+                    } else {
+                        args.push(MExpr::StrLit("assertion failed".into()));
+                    }
+                    out.push(MStmt::Expr(MExpr::Call {
+                        callee: "debug_assert".into(),
+                        args,
+                    }));
                     return Ok(());
                 }
                 "for-mojo" => return lower_for_mojo_tail(ctx, list, out, TailMode::Assign("__ignore".into()))
@@ -944,13 +1263,118 @@ fn lower_call(ctx: &Ctx, v: &[Value]) -> Result<MExpr, String> {
             .to_string();
         return Ok(MExpr::Field { obj: Box::new(obj), field });
     }
-    if head == "let" || head == "loop" || head == "cond" || head == "recur" || head == "for-mojo" {
+    if matches!(head, "let" | "loop" | "cond" | "recur" | "for-mojo"
+        | "try" | "raise" | "parameter-if" | "mojo-assert") {
         return Err(format!(
             "`{head}` only supported in tail position in cljrs-mojo v1: {}",
             pr_list(v)
         ));
     }
 
+    // ---- collection + option helpers ----
+    if head == "list" {
+        // (list [1 2 3]) or (list e1 e2 ...) → `List[T](e1, e2, ...)`.
+        let owned_elems: Vec<Value>;
+        let elems: &[Value] = if args.len() == 1 {
+            if let Value::Vector(vv) = &args[0] {
+                owned_elems = vv.iter().cloned().collect();
+                &owned_elems
+            } else {
+                args
+            }
+        } else {
+            args
+        };
+        let lowered: Result<Vec<_>, _> = elems.iter().map(|a| lower_expr(ctx, a)).collect();
+        let lowered = lowered?;
+        // Infer element type from first lit (Int → Int, Float → Float64, ...).
+        let ty_str = infer_list_ty(&lowered);
+        return Ok(MExpr::Call { callee: format!("List[{ty_str}]"), args: lowered });
+    }
+    if head == "nth" {
+        if args.len() != 2 {
+            return Err("nth expects 2 args".into());
+        }
+        let lst = lower_expr(ctx, &args[0])?;
+        let i = lower_expr(ctx, &args[1])?;
+        // Emit as a fake Call whose callee is "<expr>[". Use a special marker:
+        // just emit `lst[i]` via a Call convention. Use BinOp-like hack.
+        return Ok(MExpr::Call {
+            callee: "__index__".into(),
+            args: vec![lst, i],
+        });
+    }
+    if head == "len" {
+        if args.len() != 1 {
+            return Err("len expects 1 arg".into());
+        }
+        let a = lower_expr(ctx, &args[0])?;
+        return Ok(MExpr::Call { callee: "len".into(), args: vec![a] });
+    }
+    if head == "some" {
+        if args.len() != 1 {
+            return Err("some expects 1 arg".into());
+        }
+        let a = lower_expr(ctx, &args[0])?;
+        return Ok(MExpr::Call { callee: "Optional".into(), args: vec![a] });
+    }
+    if head == "none" {
+        return Ok(MExpr::Var("None".into()));
+    }
+    if head == "unwrap" {
+        if args.len() != 1 {
+            return Err("unwrap expects 1 arg".into());
+        }
+        let a = lower_expr(ctx, &args[0])?;
+        return Ok(MExpr::Call {
+            callee: "__method__value".into(),
+            args: vec![a],
+        });
+    }
+    // ---- string helpers ----
+    if head == "str-len" {
+        if args.len() != 1 {
+            return Err("str-len expects 1 arg".into());
+        }
+        let a = lower_expr(ctx, &args[0])?;
+        return Ok(MExpr::Call { callee: "len".into(), args: vec![a] });
+    }
+    if head == "str-slice" {
+        if args.len() != 3 {
+            return Err("str-slice expects 3 args (s, a, b)".into());
+        }
+        let s = lower_expr(ctx, &args[0])?;
+        let a = lower_expr(ctx, &args[1])?;
+        let b = lower_expr(ctx, &args[2])?;
+        return Ok(MExpr::Call {
+            callee: "__slice__".into(),
+            args: vec![s, a, b],
+        });
+    }
+    if head == "str-split" {
+        if args.len() != 2 {
+            return Err("str-split expects 2 args (s, sep)".into());
+        }
+        let s = lower_expr(ctx, &args[0])?;
+        let sep = lower_expr(ctx, &args[1])?;
+        return Ok(MExpr::Call {
+            callee: "__method__split".into(),
+            args: vec![s, sep],
+        });
+    }
+    if head == "isinstance-mojo" {
+        if args.len() != 2 {
+            return Err("isinstance-mojo expects 2 args (value, Type)".into());
+        }
+        let v = lower_expr(ctx, &args[0])?;
+        let ty = sym_str(&args[1])
+            .ok_or("isinstance-mojo: second arg must be a type symbol")?
+            .to_string();
+        return Ok(MExpr::Call {
+            callee: "isinstance".into(),
+            args: vec![v, MExpr::Var(ty)],
+        });
+    }
     // print / println — Mojo's `print` builtin.
     if head == "print" || head == "println" {
         let lowered: Result<Vec<_>, _> = args.iter().map(|a| lower_expr(ctx, a)).collect();
@@ -1026,6 +1450,22 @@ fn lower_call(ctx: &Ctx, v: &[Value]) -> Result<MExpr, String> {
     // Fallback: assume the symbol names a defined fn.
     let lowered: Result<Vec<_>, _> = args.iter().map(|a| lower_expr(ctx, a)).collect();
     Ok(MExpr::Call { callee: head.to_string(), args: lowered? })
+}
+
+/// Best-effort element-type inference for a `List(...)` constructor. Looks
+/// at the first element's literal shape; falls back to `Int` when empty
+/// or unable to decide.
+fn infer_list_ty(elems: &[MExpr]) -> &'static str {
+    if elems.is_empty() {
+        return "Int";
+    }
+    match &elems[0] {
+        MExpr::FloatLit(_) => "Float64",
+        MExpr::IntLit(_) => "Int",
+        MExpr::BoolLit(_) => "Bool",
+        MExpr::StrLit(_) => "String",
+        _ => "Int",
+    }
 }
 
 /// Build the concat expression for `(format "a={} b={}" x y)`. Splits on
@@ -1114,6 +1554,66 @@ pub fn sym_str(v: &Value) -> Option<&str> {
     }
 }
 
+/// Peel parameter tags including both type and convention. Recognized
+/// convention tags (`owned`, `borrowed`, `inout`, `ref`) bind to the
+/// argument convention slot rather than the type. Multiple `^tag` layers
+/// stack on the same form.
+pub fn peel_param_tags(v: &Value) -> (MType, ParamConv, &Value) {
+    let mut ty = MType::Infer;
+    let mut conv = ParamConv::Default;
+    let mut cur = v;
+    loop {
+        // peel one tag layer manually
+        let (tag_str, inner) = match cur {
+            Value::List(xs) if xs.len() == 3 => match (&xs[0], &xs[1]) {
+                (Value::Symbol(h), Value::Symbol(tag)) if &**h == "__tagged__" => {
+                    (Some(tag.to_string()), &xs[2])
+                }
+                _ => (None, cur),
+            },
+            _ => (None, cur),
+        };
+        let Some(tag) = tag_str else { break };
+        cur = inner;
+        match tag.as_str() {
+            "owned" => conv = ParamConv::Owned,
+            "borrowed" => conv = ParamConv::Borrowed,
+            "inout" => conv = ParamConv::Inout,
+            "ref" => conv = ParamConv::Ref,
+            other => {
+                // Treat as a type tag.
+                if matches!(ty, MType::Infer) {
+                    ty = parse_type_tag(other);
+                }
+            }
+        }
+    }
+    (ty, conv, cur)
+}
+
+/// Parse any user-facing type tag string into an MType. Recognises the
+/// runtime primitives, `List-T`, `Opt-T`, `Tuple-T1-T2`, and named types.
+pub fn parse_type_tag(tag: &str) -> MType {
+    if let Some(t) = runtime::type_hint(tag) {
+        return t;
+    }
+    if let Some(rest) = tag.strip_prefix("List-") {
+        return MType::List(Box::new(parse_type_tag(rest)));
+    }
+    if let Some(rest) = tag.strip_prefix("Opt-") {
+        return MType::Optional(Box::new(parse_type_tag(rest)));
+    }
+    if let Some(rest) = tag.strip_prefix("Tuple-") {
+        let parts: Vec<MType> = rest.split('-').map(parse_type_tag).collect();
+        return MType::Tuple(parts);
+    }
+    if tag.starts_with(|c: char| c.is_ascii_uppercase()) {
+        MType::Named(tag.to_string())
+    } else {
+        MType::Infer
+    }
+}
+
 /// Peel `(__tagged__ T form)` → (MType, form). Non-tagged returns (Infer, v).
 pub fn peel_tag(v: &Value) -> (MType, &Value) {
     if let Value::List(xs) = v {
@@ -1121,16 +1621,7 @@ pub fn peel_tag(v: &Value) -> (MType, &Value) {
             if let Value::Symbol(h) = &xs[0] {
                 if &**h == "__tagged__" {
                     let tag = sym_str(&xs[1]).unwrap_or("");
-                    let ty = runtime::type_hint(tag).unwrap_or_else(|| {
-                        // User-defined type: pass through if it looks like a
-                        // type name (starts with uppercase or contains '[').
-                        if tag.starts_with(|c: char| c.is_ascii_uppercase()) {
-                            MType::Named(tag.to_string())
-                        } else {
-                            MType::Infer
-                        }
-                    });
-                    return (ty, &xs[2]);
+                    return (parse_type_tag(tag), &xs[2]);
                 }
             }
         }

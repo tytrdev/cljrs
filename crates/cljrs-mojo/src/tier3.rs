@@ -12,6 +12,8 @@
 //! site when the bounds are compile-time.
 
 use crate::ast::{MExpr, MItem, MModule, MStmt, MType};
+#[allow(unused_imports)]
+use crate::ast::MCatch;
 
 pub fn specialize(m: &mut MModule) {
     // Run tier2 opts first.
@@ -24,7 +26,7 @@ pub fn specialize(m: &mut MModule) {
                 f.comment = None;
                 let sized = count_leaf_stmts(&f.body) <= 10;
                 let typed_sig =
-                    f.params.iter().all(|(_, t)| !matches!(t, MType::Infer))
+                    f.params.iter().all(|(_, t, _)| !matches!(t, MType::Infer))
                         && !matches!(f.ret, MType::Infer);
                 let depth_ok = max_control_depth(&f.body) <= 2;
                 let non_recursive = !body_calls(&f.body, &f.name);
@@ -49,6 +51,12 @@ pub fn specialize(m: &mut MModule) {
             MItem::Struct { comment, .. } => {
                 *comment = None;
             }
+            MItem::Alias { comment, .. } => {
+                *comment = None;
+            }
+            MItem::Trait { comment, .. } => {
+                *comment = None;
+            }
         }
     }
 }
@@ -66,6 +74,15 @@ fn count_leaf_stmts(body: &[MStmt]) -> usize {
             MStmt::ForRange { body, .. } => {
                 n += count_leaf_stmts(body);
             }
+            MStmt::Try { body, catches } => {
+                n += count_leaf_stmts(body);
+                for c in catches {
+                    n += count_leaf_stmts(&c.body);
+                }
+            }
+            MStmt::ParameterIf { then, els, .. } => {
+                n += count_leaf_stmts(then) + count_leaf_stmts(els);
+            }
             _ => n += 1,
         }
     }
@@ -78,6 +95,16 @@ fn max_control_depth(body: &[MStmt]) -> usize {
         let d = match s {
             MStmt::If { then, els, .. } => 1 + max_control_depth(then).max(max_control_depth(els)),
             MStmt::While { body, .. } | MStmt::ForRange { body, .. } => 1 + max_control_depth(body),
+            MStmt::Try { body, catches } => {
+                let mut d = 1 + max_control_depth(body);
+                for c in catches {
+                    d = d.max(1 + max_control_depth(&c.body));
+                }
+                d
+            }
+            MStmt::ParameterIf { then, els, .. } => {
+                1 + max_control_depth(then).max(max_control_depth(els))
+            }
             _ => 0,
         };
         if d > best { best = d; }
@@ -90,6 +117,10 @@ fn body_has_while(body: &[MStmt]) -> bool {
         MStmt::While { .. } => true,
         MStmt::If { then, els, .. } => body_has_while(then) || body_has_while(els),
         MStmt::ForRange { body, .. } => body_has_while(body),
+        MStmt::Try { body, catches } => {
+            body_has_while(body) || catches.iter().any(|c| body_has_while(&c.body))
+        }
+        MStmt::ParameterIf { then, els, .. } => body_has_while(then) || body_has_while(els),
         _ => false,
     })
 }
@@ -107,7 +138,14 @@ fn stmt_calls(s: &MStmt, name: &str) -> bool {
         MStmt::If { cond, then, els } => expr_calls(cond, name) || body_calls(then, name) || body_calls(els, name),
         MStmt::While { cond, body } => expr_calls(cond, name) || body_calls(body, name),
         MStmt::ForRange { lo, hi, body, .. } => expr_calls(lo, name) || expr_calls(hi, name) || body_calls(body, name),
-        MStmt::Break | MStmt::Continue => false,
+        MStmt::Break | MStmt::Continue | MStmt::ReRaise | MStmt::Raw(_) => false,
+        MStmt::Raise(e) => expr_calls(e, name),
+        MStmt::Try { body, catches } => {
+            body_calls(body, name) || catches.iter().any(|c| body_calls(&c.body, name))
+        }
+        MStmt::ParameterIf { cond, then, els } => {
+            expr_calls(cond, name) || body_calls(then, name) || body_calls(els, name)
+        }
     }
 }
 
@@ -124,7 +162,7 @@ fn expr_calls(e: &MExpr, name: &str) -> bool {
 
 fn is_simd_candidate(f: &crate::ast::MFn) -> bool {
     // Float32 throughout + contains a While (loop/recur) over the same.
-    let all_f32 = f.params.iter().all(|(_, t)| matches!(t, MType::Float32))
+    let all_f32 = f.params.iter().all(|(_, t, _)| matches!(t, MType::Float32))
         && matches!(f.ret, MType::Float32);
     if !all_f32 {
         return false;

@@ -108,6 +108,36 @@
 ;; --- compile-time decorator sugar ---
 (always-inline-fn-mojo sq ^f32 [^f32 x] (* x x))
 (parameter-fn-mojo specialized ^i32 [^i32 n] n)
+
+;; --- compile-time constants (alias) + parametric fn + parameter-if ---
+(alias-mojo ^i32 NLANES 4)
+
+(parametric-fn-mojo pick [n Int] ^i32 []
+  (parameter-if (= n 1) 42 99))
+
+;; --- exceptions: try/catch/raise + raises signature ---
+(raises-fn-mojo safe-div ^f32 [^f32 a ^f32 b]
+  (try (if (= b 0.0) (raise (ValueError "div by zero")) (/ a b))
+       (catch ValueError e (raise))))
+
+;; --- struct methods: Vec3.length() ---
+(defn-method-mojo Vec3 length-method ^f32 []
+  (sqrt (+ (* (. self x) (. self x))
+        (+ (* (. self y) (. self y))
+           (* (. self z) (. self z))))))
+
+;; --- trait + struct that implements it ---
+(deftrait-mojo Shape (area ^f32 []))
+(defstruct-mojo Square :Shape [^f32 side])
+
+;; --- argument conventions (owned/inout) ---
+(defn-mojo bump ^i32 [^inout ^i32 x] (+ x 1))
+
+;; --- list + Optional helpers ---
+(defn-mojo triple ^i32 [] (let [xs (list 10 20 30)] (nth xs 2)))
+
+(defn-mojo maybe-pos ^Opt-f32 [^f32 x]
+  (if (> x 0.0) (some x) (none)))
 `;
 
     (async () => {

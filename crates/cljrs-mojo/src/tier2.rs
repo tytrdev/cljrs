@@ -30,7 +30,9 @@ pub fn optimize(m: &mut MModule) {
                     *comment = Some(short_comment(c));
                 }
             }
-            MItem::Struct { comment, .. } => {
+            MItem::Struct { comment, .. }
+            | MItem::Alias { comment, .. }
+            | MItem::Trait { comment, .. } => {
                 if let Some(c) = comment {
                     *comment = Some(short_comment(c));
                 }
@@ -87,6 +89,24 @@ fn opt_stmt(s: MStmt, inlineable: &HashMap<String, InlineFn>) -> MStmt {
             hi: fold(inline_expr(hi, inlineable)),
             body: body.into_iter().map(|s| opt_stmt(s, inlineable)).collect(),
         },
+        MStmt::Raise(e) => MStmt::Raise(fold(inline_expr(e, inlineable))),
+        MStmt::ReRaise => MStmt::ReRaise,
+        MStmt::Try { body, catches } => MStmt::Try {
+            body: body.into_iter().map(|s| opt_stmt(s, inlineable)).collect(),
+            catches: catches
+                .into_iter()
+                .map(|mut c| {
+                    c.body = c.body.into_iter().map(|s| opt_stmt(s, inlineable)).collect();
+                    c
+                })
+                .collect(),
+        },
+        MStmt::ParameterIf { cond, then, els } => MStmt::ParameterIf {
+            cond: fold(inline_expr(cond, inlineable)),
+            then: then.into_iter().map(|s| opt_stmt(s, inlineable)).collect(),
+            els: els.into_iter().map(|s| opt_stmt(s, inlineable)).collect(),
+        },
+        MStmt::Raw(s) => MStmt::Raw(s),
     }
 }
 
@@ -231,11 +251,33 @@ fn rewrite_stmt_vars(s: &mut MStmt, map: &HashMap<String, String>) {
                 rewrite_stmt_vars(s, map);
             }
         }
-        MStmt::Break | MStmt::Continue => {}
+        MStmt::Break | MStmt::Continue | MStmt::ReRaise | MStmt::Raw(_) => {}
         MStmt::ForRange { lo, hi, body, .. } => {
             *lo = rewrite_vars(lo.clone(), map);
             *hi = rewrite_vars(hi.clone(), map);
             for s in body.iter_mut() {
+                rewrite_stmt_vars(s, map);
+            }
+        }
+        MStmt::Raise(e) => {
+            *e = rewrite_vars(e.clone(), map);
+        }
+        MStmt::Try { body, catches } => {
+            for s in body.iter_mut() {
+                rewrite_stmt_vars(s, map);
+            }
+            for c in catches.iter_mut() {
+                for s in c.body.iter_mut() {
+                    rewrite_stmt_vars(s, map);
+                }
+            }
+        }
+        MStmt::ParameterIf { cond, then, els } => {
+            *cond = rewrite_vars(cond.clone(), map);
+            for s in then.iter_mut() {
+                rewrite_stmt_vars(s, map);
+            }
+            for s in els.iter_mut() {
                 rewrite_stmt_vars(s, map);
             }
         }
@@ -314,7 +356,7 @@ fn collect_inlineable(m: &MModule) -> HashMap<String, InlineFn> {
                         out.insert(
                             f.name.clone(),
                             InlineFn {
-                                params: f.params.iter().map(|(n, _)| n.clone()).collect(),
+                                params: f.params.iter().map(|(n, _, _)| n.clone()).collect(),
                                 ret_expr: e.clone(),
                             },
                         );
@@ -403,7 +445,7 @@ fn substitute(e: MExpr, map: &HashMap<String, MExpr>) -> MExpr {
 #[allow(dead_code)]
 fn propagate_types(f: &mut MFn) {
     let mut env: HashMap<String, MType> = HashMap::new();
-    for (n, t) in &f.params {
+    for (n, t, _) in &f.params {
         env.insert(n.clone(), t.clone());
     }
     for s in &mut f.body {

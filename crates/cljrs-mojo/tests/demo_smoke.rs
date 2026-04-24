@@ -37,6 +37,30 @@ const TOUR: &str = r#"
 
 (always-inline-fn-mojo sq ^f32 [^f32 x] (* x x))
 (parameter-fn-mojo specialized ^i32 [^i32 n] n)
+
+(alias-mojo ^i32 NLANES 4)
+
+(parametric-fn-mojo pick [n Int] ^i32 []
+  (parameter-if (= n 1) 42 99))
+
+(raises-fn-mojo safe-div ^f32 [^f32 a ^f32 b]
+  (try (if (= b 0.0) (raise (ValueError "div by zero")) (/ a b))
+       (catch ValueError e (raise))))
+
+(defn-method-mojo Vec3 length-method ^f32 []
+  (sqrt (+ (* (. self x) (. self x))
+        (+ (* (. self y) (. self y))
+           (* (. self z) (. self z))))))
+
+(deftrait-mojo Shape (area ^f32 []))
+(defstruct-mojo Square :Shape [^f32 side])
+
+(defn-mojo bump ^i32 [^inout ^i32 x] (+ x 1))
+
+(defn-mojo triple ^i32 [] (let [xs (list 10 20 30)] (nth xs 2)))
+
+(defn-mojo maybe-pos ^Opt-f32 [^f32 x]
+  (if (> x 0.0) (some x) (none)))
 "#;
 
 #[test]
@@ -55,6 +79,18 @@ fn tour_readable() {
         "fn greet_2(",
         "@always_inline",
         "@parameter",
+        "alias NLANES",
+        "fn pick[n: Int]",
+        ") raises -> Float32",
+        "raise ValueError",
+        "try:",
+        "except ValueError as e",
+        "trait Shape:",
+        "struct Square(Shape)",
+        "inout x: Int32",
+        "List[Int](10, 20, 30)",
+        "Optional(x)",
+        "fn length-method(self)",
     ] {
         assert!(out.contains(needle), "missing {needle} in:\n{out}");
     }
