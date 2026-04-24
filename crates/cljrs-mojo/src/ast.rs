@@ -109,6 +109,9 @@ pub enum MItem {
         /// Optional compile-time generic parameters, e.g. `[T: AnyType, N: Int]`.
         /// Stored as (name, bound) pairs. Empty for non-generic structs.
         cparams: Vec<(String, String)>,
+        /// Extra struct decorators in addition to the default `@value`.
+        /// e.g. `@register_passable`. Printed one-per-line above `struct`.
+        decorators: Vec<String>,
         comment: Option<String>,
     },
     /// `alias NAME[: T] = VALUE` at top level.
@@ -209,6 +212,10 @@ pub struct MTraitMethod {
 pub struct MFn {
     pub name: String,
     pub params: Vec<(String, MType, ParamConv)>,
+    /// Per-param default values. Same length as `params`. `None` means
+    /// the param is required; `Some(e)` emits `name: T = e` in Mojo and
+    /// enables keyword-style call sites.
+    pub param_defaults: Vec<Option<MExpr>>,
     pub ret: MType,
     pub body: Vec<MStmt>,
     /// Decorators like `@always_inline` or `@parameter`. One per line,
@@ -222,6 +229,10 @@ pub struct MFn {
     pub raises: bool,
     /// `self` implicit first param for method defns inside a struct.
     pub is_method: bool,
+    /// Optional docstring — emitted as the first statement of the body
+    /// as a Mojo triple-quoted string literal. Drained from
+    /// `^{:doc "..."}` metadata on the fn name.
+    pub docstring: Option<String>,
 }
 
 /// Mojo argument convention. Emitted as a keyword before the param name.

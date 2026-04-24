@@ -402,3 +402,27 @@ fn rename_user_call_callee() {
     assert!(out.contains("fn use_helper("), "got:\n{out}");
     assert!(out.contains("helper_fn(y)"), "got:\n{out}");
 }
+
+// ---------------- Feature: default parameter values ----------------
+
+#[test]
+fn default_param_float() {
+    let src = r#"(defn-mojo add ^f32 [^f32 x ^{:default 1.0} ^f32 y] (+ x y))"#;
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("x: Float32, y: Float32 = 1.0"), "got:\n{out}");
+}
+
+#[test]
+fn default_param_int() {
+    let src = r#"(defn-mojo inc ^i32 [^i32 x ^{:default 1} ^i32 step] (+ x step))"#;
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("step: Int32 = 1"), "got:\n{out}");
+}
+
+#[test]
+fn default_param_multiple() {
+    let src = r#"(defn-mojo mk ^f32 [^{:default 0.0} ^f32 x ^{:default 1.0} ^f32 y] (+ x y))"#;
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("x: Float32 = 0.0"), "got:\n{out}");
+    assert!(out.contains("y: Float32 = 1.0"), "got:\n{out}");
+}

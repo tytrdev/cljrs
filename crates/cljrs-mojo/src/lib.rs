@@ -254,7 +254,7 @@ fn print_module(m: &MModule, tier: Tier) -> String {
 fn print_item(out: &mut String, item: &MItem, tier: Tier) {
     match item {
         MItem::Fn(f) => print_fn(out, f, tier),
-        MItem::Struct { name, fields, methods, trait_impl, cparams, comment } => {
+        MItem::Struct { name, fields, methods, trait_impl, cparams, decorators, comment } => {
             if let Some(c) = comment {
                 if matches!(tier, Tier::Readable) {
                     out.push_str("# cljrs: ");
@@ -262,7 +262,13 @@ fn print_item(out: &mut String, item: &MItem, tier: Tier) {
                     out.push('\n');
                 }
             }
-            out.push_str("@value\n");
+            for d in decorators {
+                out.push_str(d);
+                out.push('\n');
+            }
+            if !decorators.iter().any(|d| d == "@value") {
+                out.push_str("@value\n");
+            }
             out.push_str("struct ");
             out.push_str(&snake(name));
             if !cparams.is_empty() {
@@ -723,7 +729,7 @@ fn print_fn_indented(out: &mut String, f: &MFn, tier: Tier, base: usize) {
         out.push_str("self");
         idx = 1;
     }
-    for (n, t, c) in f.params.iter() {
+    for (i, (n, t, c)) in f.params.iter().enumerate() {
         if idx > 0 {
             out.push_str(", ");
         }
@@ -733,6 +739,10 @@ fn print_fn_indented(out: &mut String, f: &MFn, tier: Tier, base: usize) {
         if !matches!(t, MType::Infer) {
             out.push_str(": ");
             out.push_str(&t.as_str());
+        }
+        if let Some(Some(def)) = f.param_defaults.get(i) {
+            out.push_str(" = ");
+            print_expr(out, def);
         }
     }
     out.push(')');
@@ -744,9 +754,19 @@ fn print_fn_indented(out: &mut String, f: &MFn, tier: Tier, base: usize) {
         out.push_str(&f.ret.as_str());
     }
     out.push_str(":\n");
-    if f.body.is_empty() {
+    if let Some(doc) = &f.docstring {
         indent(out, base + 1);
-        out.push_str("pass\n");
+        out.push_str("\"\"\"");
+        // Triple-quoted docstrings: escape backslashes and triple-quotes.
+        let escaped = doc.replace('\\', "\\\\").replace("\"\"\"", "\\\"\\\"\\\"");
+        out.push_str(&escaped);
+        out.push_str("\"\"\"\n");
+    }
+    if f.body.is_empty() {
+        if f.docstring.is_none() {
+            indent(out, base + 1);
+            out.push_str("pass\n");
+        }
     } else {
         for s in &f.body {
             print_stmt(out, s, base + 1);

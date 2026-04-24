@@ -214,7 +214,9 @@ fn lower_defstruct(_ctx: &Ctx, list: &[Value], form: &Value) -> Result<MItem, St
     if list.len() < 3 {
         return Err(format!("defstruct-mojo expects (defstruct-mojo NAME [fields]): {}", pr(form)));
     }
-    let name = sym_str(&list[1])
+    // Struct name may carry `^{:decorators [:register-passable]}` meta.
+    let (struct_decorators, _doc, name_form) = peel_name_meta(&list[1]);
+    let name = sym_str(name_form)
         .ok_or_else(|| format!("defstruct-mojo name must be symbol: {}", pr(form)))?
         .to_string();
     let mut idx = 2;
@@ -284,6 +286,7 @@ fn lower_defstruct(_ctx: &Ctx, list: &[Value], form: &Value) -> Result<MItem, St
         methods: Vec::new(),
         trait_impl,
         cparams,
+        decorators: struct_decorators,
         comment: Some(pr(form)),
     })
 }
@@ -320,6 +323,8 @@ fn lower_defn(ctx: &Ctx, list: &[Value], form: &Value, extra_decorators: &[&str]
     // or on the arg vector (`(defn name ^RET […] …)`). Both are valid
     // Clojure reader input; accept either.
     let (name_tag, name_form) = peel_tag(&list[1]);
+    // The name may carry map-meta `^{:doc "..."}`. Peel that too.
+    let (docstring, name_form) = peel_doc_meta(name_form);
     let name = sym_str(name_form)
         .ok_or_else(|| format!("defn name must be a symbol: {}", pr(form)))?
         .to_string();
@@ -334,8 +339,9 @@ fn lower_defn(ctx: &Ctx, list: &[Value], form: &Value, extra_decorators: &[&str]
         _ => return Err(format!("defn arg vector expected: {}", pr(form))),
     };
     let mut params: Vec<(String, MType, ParamConv)> = Vec::new();
+    let mut param_defaults: Vec<Option<MExpr>> = Vec::new();
     for p in params_vec.iter() {
-        let (pty, pconv, pname) = peel_param_tags(p);
+        let (pty, pconv, pdefault, pname) = peel_param_tags_full(ctx, p)?;
         let s = sym_str(pname).ok_or_else(|| {
             format!("defn param must be a symbol: {}", pr(form))
         })?;
@@ -343,6 +349,7 @@ fn lower_defn(ctx: &Ctx, list: &[Value], form: &Value, extra_decorators: &[&str]
             return Err(format!("variadic params not supported in cljrs-mojo v1: {}", pr(form)));
         }
         params.push((s.to_string(), pty, pconv));
+        param_defaults.push(pdefault);
     }
     // Body: all forms after the arg vec. Exactly one expression is the
     // typical case; if there are several, wrap in an implicit `do`.
@@ -361,6 +368,7 @@ fn lower_defn(ctx: &Ctx, list: &[Value], form: &Value, extra_decorators: &[&str]
     Ok(MItem::Fn(MFn {
         name,
         params,
+        param_defaults,
         ret: ret_ty,
         body: stmts,
         decorators: extra_decorators.iter().map(|s| s.to_string()).collect(),
@@ -368,6 +376,7 @@ fn lower_defn(ctx: &Ctx, list: &[Value], form: &Value, extra_decorators: &[&str]
         cparams: Vec::new(),
         raises: false,
         is_method: false,
+        docstring,
     }))
 }
 
@@ -2067,6 +2076,147 @@ pub fn peel_param_tags(v: &Value) -> (MType, ParamConv, &Value) {
         }
     }
     (ty, conv, cur)
+}
+
+/// Variant of `peel_param_tags` that also extracts `{:default EXPR}` from
+/// a map-meta tag into an MExpr. Accepts type/convention symbol tags or
+/// one map-meta tag (or any stack of them). Returns
+/// `(ty, conv, default_expr, inner)`.
+pub fn peel_param_tags_full<'a>(
+    ctx: &Ctx,
+    v: &'a Value,
+) -> Result<(MType, ParamConv, Option<MExpr>, &'a Value), String> {
+    let mut ty = MType::Infer;
+    let mut conv = ParamConv::Default;
+    let mut default: Option<MExpr> = None;
+    let mut cur = v;
+    loop {
+        // `(__tagged__ <tag> <form>)` where `<tag>` is a Symbol (type/conv)
+        // or a Map (`{:default EXPR}` / `{:doc "..."}`).
+        let Some((tag_v, inner)) = peel_one_tag(cur) else {
+            break;
+        };
+        cur = inner;
+        match tag_v {
+            Value::Symbol(tag) => match tag.as_ref() {
+                "owned" => conv = ParamConv::Owned,
+                "borrowed" => conv = ParamConv::Borrowed,
+                "inout" => conv = ParamConv::Inout,
+                "ref" => conv = ParamConv::Ref,
+                other => {
+                    if matches!(ty, MType::Infer) {
+                        ty = parse_type_tag(other);
+                    }
+                }
+            },
+            Value::Map(m) => {
+                for (k, val) in m.iter() {
+                    if let Value::Keyword(kw) = k {
+                        if kw.as_ref() == "default" {
+                            default = Some(lower_expr(ctx, val)?);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok((ty, conv, default, cur))
+}
+
+/// Peel exactly one `(__tagged__ tag form)` layer. Returns the tag value
+/// (Symbol or Map) and the inner form. `None` means `v` isn't a tagged list.
+fn peel_one_tag(v: &Value) -> Option<(&Value, &Value)> {
+    match v {
+        Value::List(xs) if xs.len() == 3 => match &xs[0] {
+            Value::Symbol(h) if h.as_ref() == "__tagged__" => Some((&xs[1], &xs[2])),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Peel a `^{:doc "..."}` map-meta (and any other map meta like
+/// `^{:decorators [...]}`) off a symbol name. Returns the extracted
+/// docstring (if any) and the inner bare symbol. Non-map meta is passed
+/// through unchanged.
+pub fn peel_doc_meta(v: &Value) -> (Option<String>, &Value) {
+    let mut cur = v;
+    let mut doc: Option<String> = None;
+    loop {
+        let Some((tag, inner)) = peel_one_tag(cur) else { break };
+        match tag {
+            Value::Map(m) => {
+                for (k, val) in m.iter() {
+                    if let Value::Keyword(kw) = k {
+                        if kw.as_ref() == "doc" {
+                            if let Value::Str(s) = val {
+                                doc = Some(s.to_string());
+                            }
+                        }
+                    }
+                }
+                cur = inner;
+            }
+            _ => break,
+        }
+    }
+    (doc, cur)
+}
+
+/// Extract `^{:decorators [:a :b]}` and `^{:doc "..."}` metadata off a
+/// fn-name form. Returns (decorators, doc, inner_form). Decorators are
+/// returned as Mojo-style `@keyword` strings.
+pub fn peel_name_meta(v: &Value) -> (Vec<String>, Option<String>, &Value) {
+    let mut cur = v;
+    let mut decorators: Vec<String> = Vec::new();
+    let mut doc: Option<String> = None;
+    loop {
+        let Some((tag, inner)) = peel_one_tag(cur) else { break };
+        match tag {
+            Value::Map(m) => {
+                for (k, val) in m.iter() {
+                    if let Value::Keyword(kw) = k {
+                        match kw.as_ref() {
+                            "doc" => {
+                                if let Value::Str(s) = val {
+                                    doc = Some(s.to_string());
+                                }
+                            }
+                            "decorators" => {
+                                if let Value::Vector(vs) = val {
+                                    for d in vs.iter() {
+                                        if let Value::Keyword(k) = d {
+                                            decorators.push(decorator_to_mojo(k.as_ref()));
+                                        } else if let Value::Symbol(s) = d {
+                                            decorators.push(decorator_to_mojo(s.as_ref()));
+                                        }
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                cur = inner;
+            }
+            _ => break,
+        }
+    }
+    (decorators, doc, cur)
+}
+
+fn decorator_to_mojo(s: &str) -> String {
+    // Map kebab-case keywords to the idiomatic Mojo decorator strings.
+    match s {
+        "always-inline" | "always_inline" => "@always_inline".into(),
+        "parameter" => "@parameter".into(),
+        "register-passable" | "register_passable" => "@register_passable".into(),
+        "value" => "@value".into(),
+        "no-inline" | "no_inline" => "@no_inline".into(),
+        // Fallback: snake_case and prepend @.
+        other => format!("@{}", other.replace('-', "_")),
+    }
 }
 
 /// Parse any user-facing type tag string into an MType. Recognises the
