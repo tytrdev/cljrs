@@ -258,6 +258,29 @@ fn capitalized_type_hint_passes_through_as_named() {
 }
 
 #[test]
+fn parameter_fn_mojo_decorates() {
+    let src = "(parameter-fn-mojo special ^f32 [^f32 x] x)";
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("@parameter"), "got:\n{out}");
+    assert!(out.contains("fn special("), "got:\n{out}");
+}
+
+#[test]
+fn always_inline_fn_mojo_decorates() {
+    let src = "(always-inline-fn-mojo sq ^f32 [^f32 x] (* x x))";
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("@always_inline"), "got:\n{out}");
+    assert!(out.contains("fn sq("), "got:\n{out}");
+}
+
+#[test]
+fn parameter_fn_mojo_preserves_body() {
+    let src = "(parameter-fn-mojo add ^i32 [^i32 a ^i32 b] (+ a b))";
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("return (a + b)"), "got:\n{out}");
+}
+
+#[test]
 fn always_inline_applied_to_small_pure_fn() {
     let src = "(defn-mojo sq ^f32 [^f32 x] (* x x))";
     let out = emit(src, Tier::Max).unwrap();

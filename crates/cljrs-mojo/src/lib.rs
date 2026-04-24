@@ -19,6 +19,9 @@
 //!   asin acos atan atan2 sinh cosh tanh`), exponentials (`exp expm1
 //!   log log1p log2 log10`), roots & rounding (`sqrt cbrt floor ceil
 //!   round trunc`), plus `pow`, `hypot`, `copysign`, `abs`, `min`, `max`.
+//! - decorator sugars: `(parameter-fn-mojo …)` and
+//!   `(always-inline-fn-mojo …)` emit defn-mojo-equivalent fns
+//!   prefixed with `@parameter` / `@always_inline` respectively.
 //! - structs: `(defstruct-mojo Vec3 [^f32 x ^f32 y ^f32 z])` emits an
 //!   `@value` Mojo struct with explicit `__init__`. Field access via
 //!   `(. obj field)`. User-defined capitalized type names pass through

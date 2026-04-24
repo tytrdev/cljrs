@@ -60,7 +60,9 @@ fn lower_top(ctx: &Ctx, form: &Value) -> Result<MItem, String> {
     })?;
     match head {
         "def" => lower_def(ctx, list, form),
-        "defn" | "defn-mojo" => lower_defn(ctx, list, form),
+        "defn" | "defn-mojo" => lower_defn(ctx, list, form, &[]),
+        "parameter-fn-mojo" => lower_defn(ctx, list, form, &["@parameter"]),
+        "always-inline-fn-mojo" => lower_defn(ctx, list, form, &["@always_inline"]),
         "defstruct-mojo" => lower_defstruct(list, form),
         other => Err(format!(
             "unsupported top-level form `{other}` in: {}",
@@ -114,7 +116,7 @@ fn lower_def(ctx: &Ctx, list: &[Value], form: &Value) -> Result<MItem, String> {
     })
 }
 
-fn lower_defn(ctx: &Ctx, list: &[Value], form: &Value) -> Result<MItem, String> {
+fn lower_defn(ctx: &Ctx, list: &[Value], form: &Value, extra_decorators: &[&str]) -> Result<MItem, String> {
     // (defn name ^RetT [^T arg ...] body...)
     //
     // Clojure's reader attaches `^Tag` metadata to whatever follows it,
@@ -171,7 +173,7 @@ fn lower_defn(ctx: &Ctx, list: &[Value], form: &Value) -> Result<MItem, String> 
         params,
         ret: ret_ty,
         body: stmts,
-        decorators: Vec::new(),
+        decorators: extra_decorators.iter().map(|s| s.to_string()).collect(),
         comment: Some(pr(form)),
     }))
 }
