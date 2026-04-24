@@ -1,5 +1,17 @@
+# cljrs: (defn-mojo factorial (__tagged__ i64 [(__tagged__ i64 n)]) (...
 fn factorial(n: Int64) -> Int64:
-    var acc: Int64 = 1
-    for i in range(1, n + 1):
-        acc *= i
-    return acc
+    var i = 1
+    var acc = 1
+    var __done0: Bool = False
+    var __ret1 = 0
+    while (not __done0):
+        if (i > n):
+            __ret1 = i
+            __done0 = True
+            break
+        else:
+            var __rec0 = (i + 1)
+            var __rec1 = (i * i)
+            i = __rec0
+            acc = __rec1
+    return __ret1

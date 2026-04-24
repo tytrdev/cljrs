@@ -1,6 +1,8 @@
+# cljrs: (defn-mojo classify (__tagged__ i32 [(__tagged__ i32 x)]) (c...
 fn classify(x: Int32) -> Int32:
-    if x < 0:
+    if (x < 0):
         return -1
-    if x == 0:
+    elif (x == 0):
         return 0
-    return 1
+    else:
+        return 1

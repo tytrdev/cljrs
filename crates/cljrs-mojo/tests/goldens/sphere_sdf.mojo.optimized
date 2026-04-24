@@ -1,4 +1,5 @@
 from math import sqrt
 
+# cljrs: (defn-mojo sphere-sdf (__tagged__ f32 [(__tagged__ f32 px) (...
 fn sphere_sdf(px: Float32, py: Float32, pz: Float32, r: Float32) -> Float32:
-    return sqrt(px * px + py * py + pz * pz) - r
+    return (sqrt(((px * px) + ((py * py) + (pz * pz)))) - r)

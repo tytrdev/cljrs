@@ -1,4 +1,3 @@
-# cljrs: (defn-mojo hello ^i32 [] 42)
-
+# cljrs: (defn-mojo hello (__tagged__ i32 []) 42)
 fn hello() -> Int32:
     return 42

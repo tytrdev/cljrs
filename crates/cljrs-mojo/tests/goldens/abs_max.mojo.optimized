@@ -1,4 +1,3 @@
-from math import abs
-
+# cljrs: (defn-mojo abs-max (__tagged__ i32 [(__tagged__ i32 a) (__ta...
 fn abs_max(a: Int32, b: Int32) -> Int32:
     return max(abs(a), abs(b))

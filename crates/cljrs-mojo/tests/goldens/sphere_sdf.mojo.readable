@@ -1,5 +1,5 @@
-# cljrs: (defn-mojo sphere-sdf ^f32 [^f32 px ^f32 py ^f32 pz ^f32 r] (- (sqrt (+ (* px px) (+ (* py py) (* pz pz)))) r))
 from math import sqrt
 
+# cljrs: (defn-mojo sphere-sdf (__tagged__ f32 [(__tagged__ f32 px) (__tagged__ f32 py) (__tagged__ f32 pz) (__tagged__ f32 r)]) (- (sqrt (+ (* px px) (+ (* py py) (* pz pz)))) r))
 fn sphere_sdf(px: Float32, py: Float32, pz: Float32, r: Float32) -> Float32:
-    return sqrt((px * px) + ((py * py) + (pz * pz))) - r
+    return (sqrt(((px * px) + ((py * py) + (pz * pz)))) - r)
