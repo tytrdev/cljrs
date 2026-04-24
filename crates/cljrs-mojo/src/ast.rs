@@ -121,6 +121,24 @@ pub enum MItem {
         methods: Vec<MTraitMethod>,
         comment: Option<String>,
     },
+    /// Elementwise kernel (from `elementwise-mojo`). At tier=Readable /
+    /// Optimized we print a scalar `for i in range(n): out[i] = body(...)`
+    /// loop; at tier=Max we rewrite into Mojo's `vectorize[body, nelts](n)`
+    /// idiom with `SIMD[DType, w].load/store`.
+    Elementwise {
+        name: String,
+        /// Per-element pointer inputs (each becomes `UnsafePointer[T]`).
+        /// All must share the same DType for now (phase 1/3).
+        ptr_inputs: Vec<(String, MType)>,
+        /// Scalar (broadcast) inputs — passed as-is, not loaded.
+        scalar_inputs: Vec<(String, MType)>,
+        /// Per-element output type (emits `out: UnsafePointer[T]`).
+        out_ty: MType,
+        /// Elementwise body expression (references the per-element names
+        /// directly). At Max tier we rewrite these to SIMD loads.
+        body: MExpr,
+        comment: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone)]

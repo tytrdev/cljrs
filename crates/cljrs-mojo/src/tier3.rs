@@ -57,6 +57,9 @@ pub fn specialize(m: &mut MModule) {
             MItem::Trait { comment, .. } => {
                 *comment = None;
             }
+            MItem::Elementwise { comment, .. } => {
+                *comment = None;
+            }
         }
     }
 }

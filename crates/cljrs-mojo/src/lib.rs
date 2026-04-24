@@ -90,7 +90,95 @@ pub fn emit(src: &str, tier: Tier) -> Result<String, String> {
         Tier::Optimized => tier2::optimize(&mut module),
         Tier::Max => tier3::specialize(&mut module),
     }
+    add_elementwise_imports(&mut module, tier);
     Ok(print_module(&module, tier))
+}
+
+/// Inject imports and `alias nelts_* = simd_width_of[...]()` lines needed by
+/// elementwise kernels. Tier=Max pulls in `vectorize`; Readable/Optimized
+/// emit scalar loops that need no extra imports.
+fn add_elementwise_imports(m: &mut MModule, tier: Tier) {
+    let has_elem = m.items.iter().any(|i| matches!(i, MItem::Elementwise { .. }));
+    if !has_elem {
+        return;
+    }
+    if !matches!(tier, Tier::Max) {
+        return;
+    }
+    // Dedup dtypes used by elementwise kernels.
+    let mut dtypes: Vec<String> = Vec::new();
+    for it in &m.items {
+        if let MItem::Elementwise { out_ty, .. } = it {
+            let dt = mtype_dtype_field(out_ty);
+            if !dtypes.iter().any(|d| d == &dt) {
+                dtypes.push(dt);
+            }
+        }
+    }
+    let needed_imports = [
+        "from algorithm import vectorize",
+        "from memory import UnsafePointer",
+        "from sys import simd_width_of",
+    ];
+    for imp in needed_imports {
+        if !m.imports.iter().any(|s| s == imp) {
+            m.imports.push(imp.to_string());
+        }
+    }
+    // Emit alias lines at the top of items: `alias nelts_f32 = simd_width_of[DType.float32]()`.
+    // Inject as synthetic Alias items so the printer's spacing still works.
+    let mut alias_items: Vec<MItem> = Vec::new();
+    for dt in &dtypes {
+        let aname = format!("nelts_{}", dtype_short(dt));
+        alias_items.push(MItem::Alias {
+            name: aname,
+            ty: MType::Infer,
+            value: MExpr::Call {
+                callee: format!("simd_width_of[DType.{dt}]"),
+                args: vec![],
+            },
+            comment: None,
+        });
+    }
+    // Prepend aliases so they appear above the kernels.
+    let mut new_items = alias_items;
+    new_items.append(&mut m.items);
+    m.items = new_items;
+}
+
+/// Map an MType primitive to the `DType.<field>` name used in Mojo.
+fn mtype_dtype_field(t: &MType) -> String {
+    match t {
+        MType::Float32 => "float32".into(),
+        MType::Float64 => "float64".into(),
+        MType::BFloat16 => "bfloat16".into(),
+        MType::Int8 => "int8".into(),
+        MType::Int16 => "int16".into(),
+        MType::Int32 => "int32".into(),
+        MType::Int64 => "int64".into(),
+        MType::UInt8 => "uint8".into(),
+        MType::UInt16 => "uint16".into(),
+        MType::UInt32 => "uint32".into(),
+        MType::UInt64 => "uint64".into(),
+        _ => "float32".into(),
+    }
+}
+
+fn dtype_short(dt: &str) -> &str {
+    match dt {
+        "float32" => "f32",
+        "float64" => "f64",
+        "bfloat16" => "bf16",
+        "int8" => "i8",
+        "int16" => "i16",
+        "int32" => "i32",
+        "int64" => "i64",
+        "uint8" => "u8",
+        "uint16" => "u16",
+        "uint32" => "u32",
+        "uint64" => "u64",
+        _ => dt,
+    }
 }
 
 // ---------------- printer ----------------
@@ -226,6 +314,9 @@ fn print_item(out: &mut String, item: &MItem, tier: Tier) {
                 }
             }
         }
+        MItem::Elementwise { name, ptr_inputs, scalar_inputs, out_ty, body, comment } => {
+            print_elementwise(out, name, ptr_inputs, scalar_inputs, out_ty, body, comment.as_deref(), tier);
+        }
         MItem::Var { name, ty, value, comment } => {
             if let Some(c) = comment {
                 if matches!(tier, Tier::Readable) {
@@ -244,6 +335,128 @@ fn print_item(out: &mut String, item: &MItem, tier: Tier) {
             print_expr(out, value);
             out.push('\n');
         }
+    }
+}
+
+fn print_elementwise(
+    out: &mut String,
+    name: &str,
+    ptr_inputs: &[(String, MType)],
+    scalar_inputs: &[(String, MType)],
+    out_ty: &MType,
+    body: &MExpr,
+    comment: Option<&str>,
+    tier: Tier,
+) {
+    if let Some(c) = comment {
+        if matches!(tier, Tier::Readable | Tier::Optimized) {
+            out.push_str("# cljrs: ");
+            out.push_str(c);
+            out.push('\n');
+        }
+    }
+    let ty_str = out_ty.as_str();
+    let dt = mtype_dtype_field(out_ty);
+    // Signature.
+    out.push_str("fn ");
+    out.push_str(name);
+    out.push('(');
+    for (i, (n, _)) in ptr_inputs.iter().enumerate() {
+        if i > 0 {
+            out.push_str(", ");
+        }
+        out.push_str(n);
+        out.push_str(&format!(": UnsafePointer[{}]", ty_str));
+    }
+    for (n, t) in scalar_inputs {
+        out.push_str(", ");
+        out.push_str(n);
+        out.push_str(": ");
+        out.push_str(&t.as_str());
+    }
+    out.push_str(", out: UnsafePointer[");
+    out.push_str(&ty_str);
+    out.push_str("], n: Int):\n");
+    match tier {
+        Tier::Readable | Tier::Optimized => {
+            // Scalar loop:
+            //   for i in range(n):
+            //       out[i] = <body with a→a[i], b→b[i], ...>
+            out.push_str("    for i in range(n):\n");
+            let ptr_names: Vec<String> = ptr_inputs.iter().map(|(n, _)| n.clone()).collect();
+            let subst_body = subst_ptr_loads(body, &ptr_names, /*max=*/ false, &dt);
+            out.push_str("        out[i] = ");
+            print_expr(out, &subst_body);
+            out.push('\n');
+        }
+        Tier::Max => {
+            // Vectorized:
+            //   @parameter
+            //   fn __kernel[w: Int](i: Int):
+            //       var av = SIMD[DType.<dt>, w].load(a, i)
+            //       ...
+            //       (<body>).store(out, i)
+            //   vectorize[__kernel, nelts_<short>](n)
+            out.push_str("    @parameter\n");
+            out.push_str("    fn __kernel[w: Int](i: Int):\n");
+            for (n, _) in ptr_inputs {
+                out.push_str(&format!(
+                    "        var {n}v = SIMD[DType.{dt}, w].load({n}, i)\n"
+                ));
+            }
+            let ptr_names: Vec<String> = ptr_inputs.iter().map(|(n, _)| n.clone()).collect();
+            let subst_body = subst_ptr_loads(body, &ptr_names, /*max=*/ true, &dt);
+            out.push_str("        (");
+            print_expr(out, &subst_body);
+            out.push_str(").store(out, i)\n");
+            let short = dtype_short(&dt);
+            out.push_str(&format!("    vectorize[__kernel, nelts_{short}](n)\n"));
+        }
+    }
+}
+
+/// Substitute references to ptr-input names in the body:
+///   - Max (SIMD) tier: `a` → `av` (the loaded SIMD var)
+///   - Scalar tier:    `a` → `a[i]` (UnsafePointer[T] indexing)
+fn subst_ptr_loads(body: &MExpr, ptr_names: &[String], max: bool, _dt: &str) -> MExpr {
+    match body {
+        MExpr::IntLit(_) | MExpr::FloatLit(_) | MExpr::BoolLit(_) | MExpr::StrLit(_) => body.clone(),
+        MExpr::Var(n) => {
+            if ptr_names.iter().any(|p| p == n) {
+                if max {
+                    MExpr::Var(format!("{n}v"))
+                } else {
+                    MExpr::Call {
+                        callee: "__index__".into(),
+                        args: vec![MExpr::Var(n.clone()), MExpr::Var("i".into())],
+                    }
+                }
+            } else {
+                MExpr::Var(n.clone())
+            }
+        }
+        MExpr::BinOp { op, lhs, rhs } => MExpr::BinOp {
+            op: op.clone(),
+            lhs: Box::new(subst_ptr_loads(lhs, ptr_names, max, _dt)),
+            rhs: Box::new(subst_ptr_loads(rhs, ptr_names, max, _dt)),
+        },
+        MExpr::UnOp { op, rhs } => MExpr::UnOp {
+            op: op.clone(),
+            rhs: Box::new(subst_ptr_loads(rhs, ptr_names, max, _dt)),
+        },
+        MExpr::Call { callee, args } => MExpr::Call {
+            callee: callee.clone(),
+            args: args.iter().map(|a| subst_ptr_loads(a, ptr_names, max, _dt)).collect(),
+        },
+        MExpr::IfExpr { cond, then, els } => MExpr::IfExpr {
+            cond: Box::new(subst_ptr_loads(cond, ptr_names, max, _dt)),
+            then: Box::new(subst_ptr_loads(then, ptr_names, max, _dt)),
+            els: Box::new(subst_ptr_loads(els, ptr_names, max, _dt)),
+        },
+        MExpr::Field { obj, field } => MExpr::Field {
+            obj: Box::new(subst_ptr_loads(obj, ptr_names, max, _dt)),
+            field: field.clone(),
+        },
     }
 }
 

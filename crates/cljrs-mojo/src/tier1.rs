@@ -99,6 +99,7 @@ fn lower_top(ctx: &Ctx, form: &Value) -> Result<Vec<MItem>, String> {
         "deftrait-mojo" => lower_deftrait(list, form).map(|i| vec![i]),
         "alias-mojo" => lower_alias(ctx, list, form).map(|i| vec![i]),
         "defn-method-mojo" => lower_defn_method(ctx, list, form).map(|_| Vec::new()),
+        "elementwise-mojo" => lower_elementwise(ctx, list, form).map(|i| vec![i]),
         other => Err(format!(
             "unsupported top-level form `{other}` in: {}",
             pr(form)
@@ -475,6 +476,206 @@ fn lower_defn_method(ctx: &Ctx, list: &[Value], form: &Value) -> Result<(), Stri
         ctx.methods.borrow_mut().push((sname, f));
     }
     Ok(())
+}
+
+/// `(elementwise-mojo NAME [^T a ^T b ^scalar ^T k ...] ^T body)` —
+/// sugar for a pure elementwise kernel. Each non-`^scalar` param is a
+/// per-element pointer input; `^scalar`-tagged params are broadcast args.
+/// The body is a single pure expression over per-element names.
+fn lower_elementwise(ctx: &Ctx, list: &[Value], form: &Value) -> Result<MItem, String> {
+    if list.len() < 4 {
+        return Err(format!(
+            "elementwise-mojo expects (elementwise-mojo NAME [params] ^RetT body): {}",
+            pr(form)
+        ));
+    }
+    let name = sym_str(&list[1])
+        .ok_or_else(|| format!("elementwise-mojo name must be a symbol: {}", pr(form)))?
+        .to_string();
+    let params_vec = match &list[2] {
+        Value::Vector(v) => v,
+        _ => {
+            return Err(format!(
+                "elementwise-mojo params must be a vector: {}",
+                pr(form)
+            ));
+        }
+    };
+    if params_vec.is_empty() {
+        return Err(format!(
+            "elementwise-mojo needs at least one input param: {}",
+            pr(form)
+        ));
+    }
+    let (ret_ty, body_form) = peel_tag(&list[3]);
+    if matches!(ret_ty, MType::Infer) {
+        return Err(format!(
+            "elementwise-mojo return type must be annotated (e.g. ^f32): {}",
+            pr(form)
+        ));
+    }
+    // Trailing forms after the ^RET body must be empty — body is one expr.
+    if list.len() != 4 {
+        return Err(format!(
+            "elementwise-mojo body must be a single expression: {}",
+            pr(form)
+        ));
+    }
+    let mut ptr_inputs: Vec<(String, MType)> = Vec::new();
+    let mut scalar_inputs: Vec<(String, MType)> = Vec::new();
+    for p in params_vec.iter() {
+        let (ty, is_scalar, pname) = peel_elementwise_param(p);
+        let n = sym_str(pname)
+            .ok_or_else(|| format!("elementwise-mojo param name must be a symbol: {}", pr(form)))?
+            .to_string();
+        if matches!(ty, MType::Infer) {
+            return Err(format!(
+                "elementwise-mojo param `{n}` must have a type annotation: {}",
+                pr(form)
+            ));
+        }
+        if !is_simd_lanewise_ty(&ty) {
+            return Err(format!(
+                "elementwise-mojo param `{n}` type must be a primitive numeric (f32/f64/i32/..): {}",
+                pr(form)
+            ));
+        }
+        if is_scalar {
+            scalar_inputs.push((n, ty));
+        } else {
+            ptr_inputs.push((n, ty));
+        }
+    }
+    if ptr_inputs.is_empty() {
+        return Err(format!(
+            "elementwise-mojo needs at least one non-scalar (per-element) input: {}",
+            pr(form)
+        ));
+    }
+    // Validate that every ptr_input shares the element DType (phase 1/3).
+    let first_ty = ptr_inputs[0].1.clone();
+    for (n, t) in ptr_inputs.iter().skip(1) {
+        if t != &first_ty {
+            return Err(format!(
+                "elementwise-mojo: all per-element inputs must share the same dtype; \
+                 `{n}` is {} but first input is {} in: {}",
+                t.as_str(), first_ty.as_str(), pr(form)
+            ));
+        }
+    }
+    if ret_ty != first_ty {
+        return Err(format!(
+            "elementwise-mojo: return type must match per-element input dtype ({}): {}",
+            first_ty.as_str(), pr(form)
+        ));
+    }
+    // Lower the body under a purity check: only arithmetic, comparisons,
+    // math.*, builtin abs/min/max, `if`, and references to param names are
+    // allowed. Calls to unknown user fns are rejected (can't be vectorized
+    // safely).
+    let body_names: Vec<String> = ptr_inputs.iter().chain(scalar_inputs.iter())
+        .map(|(n, _)| n.clone()).collect();
+    check_elementwise_pure(body_form, &body_names, form)?;
+    let body = lower_expr(ctx, body_form)?;
+    Ok(MItem::Elementwise {
+        name,
+        ptr_inputs,
+        scalar_inputs,
+        out_ty: ret_ty,
+        body,
+        comment: Some(pr(form)),
+    })
+}
+
+/// Peel tags for an elementwise-mojo param: recognizes `^scalar` as a
+/// marker and a type tag. Returns (type, is_scalar, name-form).
+fn peel_elementwise_param(v: &Value) -> (MType, bool, &Value) {
+    let mut ty = MType::Infer;
+    let mut scalar = false;
+    let mut cur = v;
+    loop {
+        let (tag, inner) = match cur {
+            Value::List(xs) if xs.len() == 3 => match (&xs[0], &xs[1]) {
+                (Value::Symbol(h), Value::Symbol(t)) if &**h == "__tagged__" => {
+                    (Some(t.to_string()), &xs[2])
+                }
+                _ => (None, cur),
+            },
+            _ => (None, cur),
+        };
+        let Some(tag) = tag else { break };
+        cur = inner;
+        if tag == "scalar" {
+            scalar = true;
+        } else if matches!(ty, MType::Infer) {
+            ty = parse_type_tag(&tag);
+        }
+    }
+    (ty, scalar, cur)
+}
+
+/// Types we currently allow in elementwise kernels (primitive numeric).
+fn is_simd_lanewise_ty(t: &MType) -> bool {
+    matches!(
+        t,
+        MType::Float32 | MType::Float64 | MType::BFloat16
+            | MType::Int8 | MType::Int16 | MType::Int32 | MType::Int64
+            | MType::UInt8 | MType::UInt16 | MType::UInt32 | MType::UInt64
+    )
+}
+
+/// Ensure body only references declared per-element/scalar names and uses
+/// whitelisted ops (arithmetic, compare, math.*, builtins, if).
+fn check_elementwise_pure(body: &Value, names: &[String], form: &Value) -> Result<(), String> {
+    let (_, body) = peel_tag(body);
+    match body {
+        Value::Int(_) | Value::Float(_) | Value::Bool(_) => Ok(()),
+        Value::Symbol(s) => {
+            if names.iter().any(|n| n == s.as_ref()) {
+                Ok(())
+            } else {
+                Err(format!(
+                    "elementwise-mojo body references undeclared name `{s}` in: {}",
+                    pr(form)
+                ))
+            }
+        }
+        Value::List(xs) => {
+            let head = xs.first().and_then(sym_str).ok_or_else(|| {
+                format!("elementwise-mojo body call must start with a symbol: {}", pr(form))
+            })?;
+            // `if` is allowed (lowers to IfExpr).
+            if head == "if" {
+                if xs.len() < 3 || xs.len() > 4 {
+                    return Err(format!("elementwise-mojo: if needs 2 or 3 args: {}", pr(form)));
+                }
+                for a in &xs[1..] {
+                    check_elementwise_pure(a, names, form)?;
+                }
+                return Ok(());
+            }
+            let allowed = crate::runtime::binop(head).is_some()
+                || crate::runtime::unop(head).is_some()
+                || crate::runtime::math_fn(head).is_some()
+                || crate::runtime::builtin_fn(head).is_some()
+                || head == "and" || head == "or" || head == "not";
+            if !allowed {
+                return Err(format!(
+                    "elementwise-mojo body: unsupported op `{head}` (only arithmetic, \
+                     comparisons, math.*, min/max/abs, and `if` are allowed) in: {}",
+                    pr(form)
+                ));
+            }
+            for a in &xs[1..] {
+                check_elementwise_pure(a, names, form)?;
+            }
+            Ok(())
+        }
+        _ => Err(format!(
+            "elementwise-mojo body: unsupported literal in: {}",
+            pr(form)
+        )),
+    }
 }
 
 /// Where does the tail expression's value go?
