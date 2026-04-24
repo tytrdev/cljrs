@@ -134,6 +134,36 @@ fn unsupported_higher_order_errors() {
 }
 
 #[test]
+fn for_range_simple_counter() {
+    // Single counter walking 0..n with no other state → for-range.
+    let src = "(defn-mojo countdown ^i64 [^i64 n]
+                 (loop [^i64 i 0]
+                   (if (< i n) (do (sink i) (recur (+ i 1))) 0)))";
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("for i in range(0, n):"), "got:\n{out}");
+    assert!(!out.contains("while"), "should not emit while:\n{out}");
+}
+
+#[test]
+fn for_range_inclusive_bound() {
+    let src = "(defn-mojo go ^i32 [^i32 n]
+                 (loop [^i32 i 1] (if (<= i n) (do (work i) (recur (+ i 1))) 0)))";
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("for i in range(1, (n + 1)):"), "got:\n{out}");
+}
+
+#[test]
+fn for_range_falls_back_when_state_present() {
+    // 2 bindings → should NOT emit for-range; should still use while.
+    let src = "(defn ^i64 fact [^i64 n]
+                 (loop [^i64 i 1 ^i64 acc 1]
+                   (if (> i n) acc (recur (+ i 1) (* acc i)))))";
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("while"), "got:\n{out}");
+    assert!(!out.contains("for i in range"), "should not for-range:\n{out}");
+}
+
+#[test]
 fn extra_int_types_emit() {
     let src = "(defn-mojo widen ^i64 [^i8 a ^u16 b ^u32 c] (+ a (+ b c)))";
     let out = emit(src, Tier::Readable).unwrap();

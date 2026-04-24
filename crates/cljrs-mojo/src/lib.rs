@@ -9,7 +9,9 @@
 //! - typed `def` / `defn` / `defn-mojo` with `^Tag` metadata
 //! - numeric primitives: `^i8 ^i16 ^i32 ^i64 ^u8 ^u16 ^u32 ^u64 ^f32 ^f64
 //!   ^bf16 ^bool`, plus `^str` → `String`
-//! - control flow: `if`, `cond`, `do`, `let`, `loop`/`recur`
+//! - control flow: `if`, `cond`, `do`, `let`, `loop`/`recur`. Single-counter
+//!   loops auto-emit `for i in range(lo, hi):` instead of a while/break
+//!   trampoline.
 //! - arithmetic, comparisons, booleans, math fns (`sin cos tan sqrt exp
 //!   log floor ceil pow`, `abs min max`)
 //! - tier 2 const-fold + CSE + 1-stmt-fn inlining; tier 3 `@always_inline`
@@ -207,6 +209,28 @@ fn print_stmt(out: &mut String, s: &MStmt, lvl: usize) {
         MStmt::Break => {
             indent(out, lvl);
             out.push_str("break\n");
+        }
+        MStmt::Continue => {
+            indent(out, lvl);
+            out.push_str("continue\n");
+        }
+        MStmt::ForRange { name, ty: _, lo, hi, body } => {
+            indent(out, lvl);
+            out.push_str("for ");
+            out.push_str(name);
+            out.push_str(" in range(");
+            print_expr(out, lo);
+            out.push_str(", ");
+            print_expr(out, hi);
+            out.push_str("):\n");
+            if body.is_empty() {
+                indent(out, lvl + 1);
+                out.push_str("pass\n");
+            } else {
+                for s in body {
+                    print_stmt(out, s, lvl + 1);
+                }
+            }
         }
     }
 }

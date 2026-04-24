@@ -124,9 +124,20 @@ pub enum MStmt {
         cond: MExpr,
         body: Vec<MStmt>,
     },
+    /// `for NAME in range(LO, HI): body` — emitted when a `loop`/`recur`
+    /// reduces to a simple counter sweep.
+    ForRange {
+        name: String,
+        ty: MType,
+        lo: MExpr,
+        hi: MExpr,
+        body: Vec<MStmt>,
+    },
     /// `break` — terminates the innermost While. Paired with setting a
     /// `__ret` var just above.
     Break,
+    /// `continue` — skip to next iteration of the innermost loop.
+    Continue,
 }
 
 #[derive(Debug, Clone)]

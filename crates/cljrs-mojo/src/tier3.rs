@@ -51,6 +51,9 @@ fn count_leaf_stmts(body: &[MStmt]) -> usize {
             MStmt::While { body, .. } => {
                 n += count_leaf_stmts(body);
             }
+            MStmt::ForRange { body, .. } => {
+                n += count_leaf_stmts(body);
+            }
             _ => n += 1,
         }
     }
@@ -64,5 +67,5 @@ fn is_simd_candidate(f: &crate::ast::MFn) -> bool {
     if !all_f32 {
         return false;
     }
-    f.body.iter().any(|s| matches!(s, MStmt::While { .. }))
+    f.body.iter().any(|s| matches!(s, MStmt::While { .. } | MStmt::ForRange { .. }))
 }

@@ -326,6 +326,11 @@ fn lower_loop_tail(
     if bindings.len() % 2 != 0 {
         return Err("loop bindings must be even".into());
     }
+    // Try the for-range fast path: a single counter that walks lo..hi by +1.
+    let bindings_vec: Vec<Value> = bindings.iter().cloned().collect();
+    if let Some(()) = try_lower_for_range(ctx, list, &bindings_vec, out, &mode)? {
+        return Ok(());
+    }
     let mut names: Vec<String> = Vec::new();
     let mut tys: Vec<MType> = Vec::new();
     let mut i = 0;
@@ -367,6 +372,169 @@ fn lower_loop_tail(
     });
     out.push(finish(mode, MExpr::Var(ret_name)));
     Ok(())
+}
+
+/// Detect `(loop [^T i lo] (if (< i hi) (do BODY (recur (+ i 1))) TERM))`
+/// shapes (TERM optional / nil) and emit `for i in range(lo, hi): BODY`.
+/// Returns Some(()) if it took the fast path, None otherwise.
+fn try_lower_for_range(
+    ctx: &Ctx,
+    list: &[Value],
+    bindings: &[Value],
+    out: &mut Vec<MStmt>,
+    mode: &TailMode,
+) -> Result<Option<()>, String> {
+    if bindings.len() != 2 {
+        return Ok(None);
+    }
+    let (cty, name_form) = peel_tag(&bindings[0]);
+    let cname = match sym_str(name_form) {
+        Some(s) => s.to_string(),
+        None => return Ok(None),
+    };
+    // Body must be a single form for the fast path.
+    if list.len() != 3 {
+        return Ok(None);
+    }
+    let body_forms = &list[2..];
+    let body = &body_forms[0];
+    // Body shape: (if (< i HI) THEN ELSE?)
+    let if_list = match as_list(&peel_tag(body).1) {
+        Some(l) => l.to_vec(),
+        None => return Ok(None),
+    };
+    if if_list.len() < 3 || if_list.len() > 4 {
+        return Ok(None);
+    }
+    if sym_str(&if_list[0]) != Some("if") {
+        return Ok(None);
+    }
+    // Cond must be (< i HI) or (<= i HI).
+    let cond = match as_list(&peel_tag(&if_list[1]).1) {
+        Some(l) => l.to_vec(),
+        None => return Ok(None),
+    };
+    if cond.len() != 3 {
+        return Ok(None);
+    }
+    let cmp = match sym_str(&cond[0]) {
+        Some(s) => s,
+        None => return Ok(None),
+    };
+    if cmp != "<" && cmp != "<=" {
+        return Ok(None);
+    }
+    if sym_str(&peel_tag(&cond[1]).1) != Some(cname.as_str()) {
+        return Ok(None);
+    }
+    let hi_form = cond[2].clone();
+    // The loop-body branch must end with (recur (+ i 1)) (or (recur (inc i))).
+    let then_form = if_list[2].clone();
+    let (loop_body_forms, recur_args) = collect_loop_body_then_recur(&then_form)?;
+    let recur_args = match recur_args {
+        Some(a) => a,
+        None => return Ok(None),
+    };
+    if recur_args.len() != 1 {
+        return Ok(None);
+    }
+    if !is_increment_of(&recur_args[0], &cname) {
+        return Ok(None);
+    }
+    // We have a counting loop. The else branch is the loop's terminal value
+    // — supported when it's nil / 0 / a literal we can stash post-loop.
+    let term_expr = if if_list.len() == 4 {
+        Some(if_list[3].clone())
+    } else {
+        None
+    };
+
+    // Emit:
+    //   for i in range(lo, hi): body
+    //   <terminal stmt for tail mode>
+    let lo = lower_expr(ctx, &bindings[1])?;
+    // For `<=` we need range(lo, hi+1).
+    let hi = if cmp == "<=" {
+        MExpr::BinOp {
+            op: "+".into(),
+            lhs: Box::new(lower_expr(ctx, &hi_form)?),
+            rhs: Box::new(MExpr::IntLit(1)),
+        }
+    } else {
+        lower_expr(ctx, &hi_form)?
+    };
+    let mut for_body = Vec::new();
+    for f in &loop_body_forms {
+        let e = lower_expr(ctx, f)?;
+        for_body.push(MStmt::Expr(e));
+    }
+    out.push(MStmt::ForRange {
+        name: cname,
+        ty: cty,
+        lo,
+        hi,
+        body: for_body,
+    });
+    // Terminal value after the loop.
+    let term = match term_expr {
+        Some(t) => lower_expr(ctx, &t)?,
+        None => MExpr::IntLit(0),
+    };
+    out.push(finish(mode.clone(), term));
+    Ok(Some(()))
+}
+
+/// Walk a (do ...) form (or single form) and split off the trailing
+/// (recur ...) call. Returns (preceding-body-forms, Some(recur-args)) if
+/// found, else (forms, None).
+fn collect_loop_body_then_recur(form: &Value) -> Result<(Vec<Value>, Option<Vec<Value>>), String> {
+    let (_, form) = peel_tag(form);
+    // bare (recur ...)
+    if let Some(l) = as_list(form) {
+        if sym_str(&l[0]) == Some("recur") {
+            return Ok((Vec::new(), Some(l[1..].to_vec())));
+        }
+        if sym_str(&l[0]) == Some("do") {
+            let parts = &l[1..];
+            if parts.is_empty() {
+                return Ok((Vec::new(), None));
+            }
+            let last = parts.last().unwrap();
+            if let Some(ll) = as_list(&peel_tag(last).1) {
+                if sym_str(&ll[0]) == Some("recur") {
+                    return Ok((parts[..parts.len() - 1].to_vec(), Some(ll[1..].to_vec())));
+                }
+            }
+            return Ok((parts.to_vec(), None));
+        }
+    }
+    Ok((vec![form.clone()], None))
+}
+
+/// True if `form` is `(+ i 1)`, `(+ 1 i)`, or `(inc i)` for the named counter.
+fn is_increment_of(form: &Value, counter: &str) -> bool {
+    let (_, form) = peel_tag(form);
+    let l = match as_list(form) {
+        Some(l) => l,
+        None => return false,
+    };
+    let head = match sym_str(&l[0]) {
+        Some(s) => s,
+        None => return false,
+    };
+    if head == "inc" && l.len() == 2 {
+        return sym_str(&peel_tag(&l[1]).1) == Some(counter);
+    }
+    if head == "+" && l.len() == 3 {
+        let a = &peel_tag(&l[1]).1;
+        let b = &peel_tag(&l[2]).1;
+        let one_a = matches!(a, Value::Int(1));
+        let one_b = matches!(b, Value::Int(1));
+        let i_a = sym_str(a) == Some(counter);
+        let i_b = sym_str(b) == Some(counter);
+        return (i_a && one_b) || (i_b && one_a);
+    }
+    false
 }
 
 fn lower_loop_body(
