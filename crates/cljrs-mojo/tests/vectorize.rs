@@ -231,3 +231,34 @@ fn reduce_and_elementwise_coexist_at_max() {
     assert_eq!(count, 1, "expected one alias line, got {count}:\n{out}");
 }
 
+
+// ---------------- GPU kernels ----------------
+
+#[test]
+fn gpu_elementwise_vector_add_emits_kernel_shape() {
+    let src = r#"(elementwise-gpu-mojo vector-add [^f32 a ^f32 b] ^f32 (+ a b))"#;
+    let out = emit(src, Tier::Readable).unwrap();
+    must(&out, "from gpu import thread_idx, block_idx, block_dim");
+    must(&out, "from memory import UnsafePointer");
+    must(&out, "fn vector_add(a: UnsafePointer[Float32], b: UnsafePointer[Float32], out: UnsafePointer[Float32], n: Int):");
+    must(&out, "var i = block_idx.x * block_dim.x + thread_idx.x");
+    must(&out, "if i < n:");
+    must(&out, "out[i] = (a[i] + b[i])");
+}
+
+#[test]
+fn gpu_elementwise_all_tiers_emit_kernel() {
+    let src = r#"(elementwise-gpu-mojo scale [^f32 x] ^f32 (* x x))"#;
+    for tier in [Tier::Readable, Tier::Optimized, Tier::Max] {
+        let out = emit(src, tier).unwrap();
+        must(&out, "fn scale(x: UnsafePointer[Float32], out: UnsafePointer[Float32], n: Int):");
+        must(&out, "var i = block_idx.x * block_dim.x + thread_idx.x");
+    }
+}
+
+#[test]
+fn gpu_elementwise_rejects_bad_body() {
+    let src = r#"(elementwise-gpu-mojo bad [^f32 a] ^f32 (mystery a))"#;
+    let err = emit(src, Tier::Readable).unwrap_err();
+    assert!(err.contains("unsupported op `mystery`"), "got: {err}");
+}

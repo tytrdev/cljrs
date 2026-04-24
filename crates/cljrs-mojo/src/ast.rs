@@ -157,6 +157,17 @@ pub enum MItem {
         init: MExpr,
         comment: Option<String>,
     },
+    /// GPU kernel (from `elementwise-gpu-mojo`). Emits a Mojo fn that
+    /// reads `thread_idx.x + block_idx.x * block_dim.x` and writes one
+    /// output element per thread. All three tiers emit the same body —
+    /// the kernel is already the per-thread op.
+    GpuElementwise {
+        name: String,
+        ptr_inputs: Vec<(String, MType)>,
+        out_ty: MType,
+        body: MExpr,
+        comment: Option<String>,
+    },
 }
 
 /// Associative reduction operator for `reduce-mojo`.

@@ -58,6 +58,11 @@
 //!   `reduce_add` kernel at Max. Multi-input reductions (`dot`) take two
 //!   pointer inputs. Combining op is `+` by default; a `^mul`/`^min`/`^max`
 //!   tag on the body selects product / min / max reductions.
+//! - **GPU kernels**: `(elementwise-gpu-mojo NAME [^T a ^T b] ^T body)`
+//!   emits a Mojo fn that computes its thread index from
+//!   `block_idx.x * block_dim.x + thread_idx.x` and writes one output
+//!   element per thread (same body across all tiers). Caller drives
+//!   dispatch via `DeviceContext.enqueue_function`.
 //! - **Naming**: kebab-case identifiers (`vector-add`, `abs-max`) are
 //!   auto-rewritten to snake_case in the emitted Mojo. The original
 //!   source name is preserved in the `# cljrs:` tier-Readable comment.
@@ -114,6 +119,20 @@ pub fn emit(src: &str, tier: Tier) -> Result<String, String> {
 fn add_elementwise_imports(m: &mut MModule, tier: Tier) {
     let has_elem = m.items.iter().any(|i| matches!(i, MItem::Elementwise { .. }));
     let has_reduce = m.items.iter().any(|i| matches!(i, MItem::Reduce { .. }));
+    let has_gpu = m.items.iter().any(|i| matches!(i, MItem::GpuElementwise { .. }));
+
+    // GPU imports are needed at every tier when a GPU kernel is present.
+    if has_gpu {
+        for imp in [
+            "from gpu import thread_idx, block_idx, block_dim",
+            "from memory import UnsafePointer",
+        ] {
+            if !m.imports.iter().any(|s| s == imp) {
+                m.imports.push(imp.to_string());
+            }
+        }
+    }
+
     if !(has_elem || has_reduce) {
         return;
     }
@@ -364,6 +383,9 @@ fn print_item(out: &mut String, item: &MItem, tier: Tier) {
         MItem::Reduce { name, ptr_inputs, out_ty, body, combiner, init, comment } => {
             print_reduce(out, name, ptr_inputs, out_ty, body, *combiner, init, comment.as_deref(), tier);
         }
+        MItem::GpuElementwise { name, ptr_inputs, out_ty, body, comment } => {
+            print_gpu_elementwise(out, name, ptr_inputs, out_ty, body, comment.as_deref(), tier);
+        }
         MItem::Var { name, ty, value, comment } => {
             if let Some(c) = comment {
                 if matches!(tier, Tier::Readable) {
@@ -582,6 +604,42 @@ fn print_reduce(
             out.push_str(&format!("    return acc.{reduce_method}()\n"));
         }
     }
+}
+
+fn print_gpu_elementwise(
+    out: &mut String,
+    name: &str,
+    ptr_inputs: &[(String, MType)],
+    out_ty: &MType,
+    body: &MExpr,
+    comment: Option<&str>,
+    tier: Tier,
+) {
+    if let Some(c) = comment {
+        if matches!(tier, Tier::Readable | Tier::Optimized) {
+            out.push_str("# cljrs: ");
+            out.push_str(c);
+            out.push('\n');
+        }
+    }
+    let ty_str = out_ty.as_str();
+    // All three tiers share the kernel body — the function IS the per-thread
+    // op, so vectorization and @always_inline wouldn't change semantics.
+    out.push_str("fn ");
+    out.push_str(&snake(name));
+    out.push('(');
+    for (n, _) in ptr_inputs {
+        out.push_str(&snake(n));
+        out.push_str(&format!(": UnsafePointer[{ty_str}], "));
+    }
+    out.push_str(&format!("out: UnsafePointer[{ty_str}], n: Int):\n"));
+    out.push_str("    var i = block_idx.x * block_dim.x + thread_idx.x\n");
+    out.push_str("    if i < n:\n");
+    let ptr_names: Vec<String> = ptr_inputs.iter().map(|(n, _)| n.clone()).collect();
+    let subst_body = subst_ptr_loads(body, &ptr_names, /*max=*/ false, &mtype_dtype_field(out_ty));
+    out.push_str("        out[i] = ");
+    print_expr(out, &subst_body);
+    out.push('\n');
 }
 
 fn subst_ptr_loads(body: &MExpr, ptr_names: &[String], max: bool, _dt: &str) -> MExpr {

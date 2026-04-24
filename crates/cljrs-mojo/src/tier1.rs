@@ -101,6 +101,7 @@ fn lower_top(ctx: &Ctx, form: &Value) -> Result<Vec<MItem>, String> {
         "defn-method-mojo" => lower_defn_method(ctx, list, form).map(|_| Vec::new()),
         "elementwise-mojo" => lower_elementwise(ctx, list, form).map(|i| vec![i]),
         "reduce-mojo" => lower_reduce(ctx, list, form).map(|i| vec![i]),
+        "elementwise-gpu-mojo" => lower_gpu_elementwise(ctx, list, form).map(|i| vec![i]),
         other => Err(format!(
             "unsupported top-level form `{other}` in: {}",
             pr(form)
@@ -867,6 +868,81 @@ fn peel_reducer_tag(v: &Value) -> (ReduceOp, &Value) {
     (ReduceOp::Add, v)
 }
 
+
+/// `(elementwise-gpu-mojo NAME [^T a ^T b ...] ^T body)` — Mojo GPU kernel.
+/// Same purity contract as `elementwise-mojo`; emits a fn that reads its
+/// index from `block_idx.x * block_dim.x + thread_idx.x` and writes one
+/// output element per thread.
+fn lower_gpu_elementwise(ctx: &Ctx, list: &[Value], form: &Value) -> Result<MItem, String> {
+    if list.len() != 4 {
+        return Err(format!(
+            "elementwise-gpu-mojo expects (elementwise-gpu-mojo NAME [params] ^RetT body): {}",
+            pr(form)
+        ));
+    }
+    let name = sym_str(&list[1])
+        .ok_or_else(|| format!("elementwise-gpu-mojo name must be symbol: {}", pr(form)))?
+        .to_string();
+    let params_vec = match &list[2] {
+        Value::Vector(v) => v,
+        _ => return Err(format!(
+            "elementwise-gpu-mojo params must be a vector: {}", pr(form)
+        )),
+    };
+    if params_vec.is_empty() {
+        return Err(format!("elementwise-gpu-mojo needs at least one input: {}", pr(form)));
+    }
+    let (ret_ty, body_form) = peel_tag(&list[3]);
+    if matches!(ret_ty, MType::Infer) {
+        return Err(format!(
+            "elementwise-gpu-mojo return type must be annotated: {}", pr(form)
+        ));
+    }
+    let mut ptr_inputs: Vec<(String, MType)> = Vec::new();
+    for p in params_vec.iter() {
+        let (ty, is_scalar, pname) = peel_elementwise_param(p);
+        if is_scalar {
+            return Err(format!(
+                "elementwise-gpu-mojo does not support ^scalar params in v1: {}", pr(form)
+            ));
+        }
+        let n = sym_str(pname)
+            .ok_or_else(|| format!("elementwise-gpu-mojo param name must be symbol: {}", pr(form)))?
+            .to_string();
+        if !is_simd_lanewise_ty(&ty) {
+            return Err(format!(
+                "elementwise-gpu-mojo param `{n}` type must be a primitive numeric: {}",
+                pr(form)
+            ));
+        }
+        ptr_inputs.push((n, ty));
+    }
+    let first_ty = ptr_inputs[0].1.clone();
+    for (n, t) in ptr_inputs.iter().skip(1) {
+        if t != &first_ty {
+            return Err(format!(
+                "elementwise-gpu-mojo: per-element inputs must share dtype; `{n}` is {} but first is {}",
+                t.as_str(), first_ty.as_str()
+            ));
+        }
+    }
+    if ret_ty != first_ty {
+        return Err(format!(
+            "elementwise-gpu-mojo: return type must match element dtype ({}): {}",
+            first_ty.as_str(), pr(form)
+        ));
+    }
+    let body_names: Vec<String> = ptr_inputs.iter().map(|(n, _)| n.clone()).collect();
+    check_elementwise_pure(body_form, &body_names, form)?;
+    let body = lower_expr(ctx, body_form)?;
+    Ok(MItem::GpuElementwise {
+        name,
+        ptr_inputs,
+        out_ty: ret_ty,
+        body,
+        comment: Some(pr(form)),
+    })
+}
 
 /// Where does the tail expression's value go?
 #[derive(Clone)]

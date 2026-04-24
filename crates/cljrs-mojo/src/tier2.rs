@@ -49,6 +49,12 @@ pub fn optimize(m: &mut MModule) {
                     *comment = Some(short_comment(c));
                 }
             }
+            MItem::GpuElementwise { body, comment, .. } => {
+                *body = fold(body.clone());
+                if let Some(c) = comment {
+                    *comment = Some(short_comment(c));
+                }
+            }
         }
     }
 }
