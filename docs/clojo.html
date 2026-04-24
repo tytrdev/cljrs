@@ -239,8 +239,56 @@
           setStatus(result, "err");
           return;
         }
-        setStatus(`tier=${tier}, ${result.length} chars`, "");
-        outEditor.setValue(result);
+        // Cosmetic: the tier-Max vectorize/reduce path sometimes emits
+        // redundant `((expr))` wrappers (e.g. `((av + bv)).store(...)`).
+        // Collapse obvious cases for display only — the real fix lives
+        // in the transpiler's expression printer and is tracked by
+        // crates/cljrs-mojo/tests/no_double_parens.rs.
+        const cleaned = stripRedundantDoubleParens(result);
+        setStatus(`tier=${tier}, ${cleaned.length} chars`, "");
+        outEditor.setValue(cleaned);
+      }
+
+      // Collapse `((...))` → `(...)` when the outer pair is truly
+      // redundant — i.e. the inner `(...)` is balanced on its own.
+      // Skips anything that looks like a call site `name((...))` is
+      // already suspect, but a bare `((` after whitespace / operators
+      // is safe to strip.
+      function stripRedundantDoubleParens(src) {
+        const lines = src.split("\n");
+        for (let li = 0; li < lines.length; li++) {
+          let line = lines[li];
+          let changed = true;
+          // Iterate until stable — nested `(((x)))` needs multiple passes.
+          while (changed) {
+            changed = false;
+            for (let i = 0; i < line.length - 1; i++) {
+              if (line[i] !== "(" || line[i + 1] !== "(") continue;
+              const prev = i === 0 ? " " : line[i - 1];
+              // Don't touch `foo((` — that's a call with a wrapped arg;
+              // leave to transpiler-side fix.
+              if (/[A-Za-z0-9_\]]/.test(prev)) continue;
+              // Find the match for the INNER `(` at i+1.
+              let depth = 0, innerEnd = -1;
+              for (let j = i + 1; j < line.length; j++) {
+                if (line[j] === "(") depth++;
+                else if (line[j] === ")") {
+                  depth--;
+                  if (depth === 0) { innerEnd = j; break; }
+                }
+              }
+              if (innerEnd < 0 || innerEnd + 1 >= line.length) continue;
+              if (line[innerEnd + 1] !== ")") continue;
+              // `((…)…)` where inner closes before outer → not redundant.
+              // Here inner closes at innerEnd, outer must close at innerEnd+1.
+              line = line.slice(0, i) + line.slice(i + 1, innerEnd + 1) + line.slice(innerEnd + 2);
+              changed = true;
+              break;
+            }
+          }
+          lines[li] = line;
+        }
+        return lines.join("\n");
       }
 
       document.querySelectorAll("#tier button").forEach(b => {
