@@ -258,6 +258,29 @@ fn capitalized_type_hint_passes_through_as_named() {
 }
 
 #[test]
+fn simd_type_in_signature() {
+    let src = "(defn-mojo dot ^SIMDf32x4 [^SIMDf32x4 a ^SIMDf32x4 b] (* a b))";
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("a: SIMD[DType.float32, 4]"), "got:\n{out}");
+    assert!(out.contains("-> SIMD[DType.float32, 4]"), "got:\n{out}");
+}
+
+#[test]
+fn simd_int_vector() {
+    let src = "(defn-mojo go ^SIMDi64x8 [^SIMDi64x8 v] v)";
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("SIMD[DType.int64, 8]"), "got:\n{out}");
+}
+
+#[test]
+fn simd_bad_tag_falls_back() {
+    // `SIMDfoo` not a valid dtype; falls back to Named (capitalized).
+    let src = "(defn-mojo p ^i32 [^SIMDxyz x] 0)";
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("SIMDxyz"), "got:\n{out}");
+}
+
+#[test]
 fn defstruct_basic_vec3() {
     let src = r#"
 (defstruct-mojo Vec3 [^f32 x ^f32 y ^f32 z])

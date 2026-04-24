@@ -21,8 +21,35 @@ pub fn type_hint(sym: &str) -> Option<MType> {
         "bf16" | "BFloat16" => MType::BFloat16,
         "bool" | "Bool" => MType::Bool,
         "str"  | "String" => MType::Str,
+        // `^SIMDf32x4` style: dtype + 'x' + lane count.
+        s if s.starts_with("SIMD") => return parse_simd_tag(&s[4..]),
         _ => return None,
     })
+}
+
+/// Parse the trailing portion of a `SIMD<dtype>x<n>` tag, e.g. `f32x4`,
+/// `i64x8`, `bf16x16`. Returns Some(MType::Simd) or None.
+fn parse_simd_tag(rest: &str) -> Option<MType> {
+    let (dt_alias, n_str) = rest.split_once('x')?;
+    let n: usize = n_str.parse().ok()?;
+    // Map alias → Mojo DType field name.
+    let dtype = match dt_alias {
+        "i8" => "int8",
+        "i16" => "int16",
+        "i32" => "int32",
+        "i64" => "int64",
+        "u8" => "uint8",
+        "u16" => "uint16",
+        "u32" => "uint32",
+        "u64" => "uint64",
+        "f16" => "float16",
+        "f32" => "float32",
+        "f64" => "float64",
+        "bf16" => "bfloat16",
+        "bool" => "bool",
+        _ => return None,
+    };
+    Some(MType::Simd(dtype.to_string(), n))
 }
 
 /// If `sym` is an infix arithmetic/comparison operator in both cljrs and

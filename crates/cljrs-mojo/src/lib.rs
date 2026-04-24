@@ -19,6 +19,8 @@
 //!   `@value` Mojo struct with explicit `__init__`. Field access via
 //!   `(. obj field)`. User-defined capitalized type names pass through
 //!   as named types in fn signatures.
+//! - SIMD types: `^SIMDf32x4` / `^SIMDi64x8` / `^SIMDbf16x16` →
+//!   `SIMD[DType.float32, 4]` etc.
 //! - string literals (`"hi"`) and `^str` → `String`
 //! - tier 2 const-fold + CSE + 1-stmt-fn inlining; tier 3 `@always_inline`
 //!   on small all-primitive fns
