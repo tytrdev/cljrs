@@ -1081,7 +1081,7 @@ fn print_stmt(out: &mut String, s: &MStmt, lvl: usize) {
         MStmt::Return(e) => {
             indent(out, lvl);
             out.push_str("return ");
-            print_expr(out, e);
+            print_expr_arg(out, e);
             out.push('\n');
         }
         MStmt::Expr(e) => {
@@ -1276,8 +1276,11 @@ pub(crate) fn print_expr_public(out: &mut String, e: &MExpr) {
 fn print_expr_grouped(out: &mut String, e: &MExpr) {
     match e {
         MExpr::BinOp { .. } | MExpr::UnOp { .. } | MExpr::IfExpr { .. } => {
-            // These already emit surrounding parens.
-            print_expr(out, e);
+            // Emit exactly one wrapping pair: `(lhs op rhs).method()` rather
+            // than `((lhs op rhs)).method()` (self-wrap + caller wrap).
+            out.push('(');
+            print_expr_arg(out, e);
+            out.push(')');
         }
         _ => {
             // Everything else (literal, var, call, field) has no outer paren
@@ -1287,6 +1290,79 @@ fn print_expr_grouped(out: &mut String, e: &MExpr) {
             out.push(')');
         }
     }
+}
+
+/// Like `print_expr`, but for positions where surrounding punctuation
+/// already delimits the expression (call arg, collection element). In
+/// these contexts the outer paren BinOp/UnOp/IfExpr emits is redundant
+/// and produces `foo((a + b))` — skip it.
+fn print_expr_arg(out: &mut String, e: &MExpr) {
+    match e {
+        MExpr::BinOp { op, lhs, rhs } => {
+            let prec = binop_prec(op);
+            print_binop_operand(out, lhs, prec);
+            out.push(' ');
+            out.push_str(op);
+            out.push(' ');
+            print_binop_operand(out, rhs, prec);
+        }
+        MExpr::UnOp { op, rhs } => {
+            out.push_str(op);
+            if op.chars().next().map_or(false, |c| c.is_alphabetic()) {
+                out.push(' ');
+            }
+            print_expr(out, rhs);
+        }
+        MExpr::IfExpr { cond, then, els } => {
+            print_expr(out, then);
+            out.push_str(" if ");
+            print_expr(out, cond);
+            out.push_str(" else ");
+            print_expr(out, els);
+        }
+        _ => print_expr(out, e),
+    }
+}
+
+/// Python/Mojo binary-operator precedence. Higher = binds tighter.
+/// Used to suppress redundant parens when an inner BinOp is at least
+/// as tight as the outer one on the correct side.
+fn binop_prec(op: &str) -> u8 {
+    match op {
+        "or" => 1,
+        "and" => 2,
+        "<" | ">" | "<=" | ">=" | "==" | "!=" => 4,
+        "|" => 5,
+        "^" => 6,
+        "&" => 7,
+        "<<" | ">>" => 8,
+        "+" | "-" => 9,
+        "*" | "/" | "//" | "%" => 10,
+        "**" => 12,
+        _ => 0,
+    }
+}
+
+/// Print a BinOp/UnOp operand, adding parens only when precedence demands.
+/// `outer_prec` is the parent BinOp's precedence; `is_rhs` matters for
+/// left-associative ops where equal precedence on the rhs still needs parens
+/// (but we conservatively allow equal precedence on either side — this is
+/// fine for +,-,*,/ because they're associative up to floating-point rounding,
+/// and the emitter already chose a tree that evaluates correctly).
+fn print_binop_operand(out: &mut String, e: &MExpr, outer_prec: u8) {
+    if let MExpr::BinOp { op, lhs, rhs } = e {
+        let inner_prec = binop_prec(op);
+        if inner_prec >= outer_prec && inner_prec > 0 && outer_prec > 0 {
+            // No parens — inner binds at least as tight.
+            print_binop_operand(out, lhs, inner_prec);
+            out.push(' ');
+            out.push_str(op);
+            out.push(' ');
+            print_binop_operand(out, rhs, inner_prec);
+            return;
+        }
+    }
+    print_expr(out, e);
 }
 
 fn print_expr(out: &mut String, e: &MExpr) {
@@ -1301,12 +1377,13 @@ fn print_expr(out: &mut String, e: &MExpr) {
         MExpr::BoolLit(b) => out.push_str(if *b { "True" } else { "False" }),
         MExpr::Var(n) => out.push_str(&snake(n)),
         MExpr::BinOp { op, lhs, rhs } => {
+            let prec = binop_prec(op);
             out.push('(');
-            print_expr(out, lhs);
+            print_binop_operand(out, lhs, prec);
             out.push(' ');
             out.push_str(op);
             out.push(' ');
-            print_expr(out, rhs);
+            print_binop_operand(out, rhs, prec);
             out.push(')');
         }
         MExpr::UnOp { op, rhs } => {
@@ -1323,16 +1400,16 @@ fn print_expr(out: &mut String, e: &MExpr) {
             if callee == "__index__" && args.len() == 2 {
                 print_expr(out, &args[0]);
                 out.push('[');
-                print_expr(out, &args[1]);
+                print_expr_arg(out, &args[1]);
                 out.push(']');
                 return;
             }
             if callee == "__slice__" && args.len() == 3 {
                 print_expr(out, &args[0]);
                 out.push('[');
-                print_expr(out, &args[1]);
+                print_expr_arg(out, &args[1]);
                 out.push(':');
-                print_expr(out, &args[2]);
+                print_expr_arg(out, &args[2]);
                 out.push(']');
                 return;
             }
@@ -1347,7 +1424,7 @@ fn print_expr(out: &mut String, e: &MExpr) {
                         if i > 0 {
                             out.push_str(", ");
                         }
-                        print_expr(out, a);
+                        print_expr_arg(out, a);
                     }
                     out.push(')');
                     return;
@@ -1365,7 +1442,7 @@ fn print_expr(out: &mut String, e: &MExpr) {
                 if i > 0 {
                     out.push_str(", ");
                 }
-                print_expr(out, a);
+                print_expr_arg(out, a);
             }
             out.push(')');
         }

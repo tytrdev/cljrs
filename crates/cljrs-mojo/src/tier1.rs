@@ -2790,8 +2790,34 @@ pub fn peel_tag(v: &Value) -> (MType, &Value) {
     (MType::Infer, v)
 }
 
+/// Pretty-print a Value for the `# cljrs:` trace comment. Re-sugars the
+/// reader's `(__tagged__ T form)` sentinel back to `^T form` so the
+/// trace reflects what the user actually wrote.
 pub fn pr(v: &Value) -> String {
-    v.to_pr_string()
+    match v {
+        Value::List(xs) => {
+            if xs.len() == 3 {
+                if let Value::Symbol(h) = &xs[0] {
+                    if &**h == "__tagged__" {
+                        return format!("^{} {}", pr(&xs[1]), pr(&xs[2]));
+                    }
+                }
+            }
+            pr_list(xs)
+        }
+        Value::Vector(xs) => {
+            let mut s = String::from("[");
+            for (i, x) in xs.iter().enumerate() {
+                if i > 0 {
+                    s.push(' ');
+                }
+                s.push_str(&pr(x));
+            }
+            s.push(']');
+            s
+        }
+        _ => v.to_pr_string(),
+    }
 }
 
 fn pr_list(v: &[Value]) -> String {

@@ -235,14 +235,14 @@ fn struct_method_attached() {
 fn mojo_assert_one_arg() {
     let src = "(defn-mojo check ^i32 [^i32 x] (mojo-assert (> x 0)) x)";
     let out = emit(src, Tier::Readable).unwrap();
-    assert!(out.contains("debug_assert((x > 0), \"assertion failed\")"), "got:\n{out}");
+    assert!(out.contains("debug_assert(x > 0, \"assertion failed\")"), "got:\n{out}");
 }
 
 #[test]
 fn mojo_assert_with_message() {
     let src = r#"(defn-mojo check ^i32 [^i32 x] (mojo-assert (> x 0) "x must be positive") x)"#;
     let out = emit(src, Tier::Readable).unwrap();
-    assert!(out.contains(r#"debug_assert((x > 0), "x must be positive")"#), "got:\n{out}");
+    assert!(out.contains(r#"debug_assert(x > 0, "x must be positive")"#), "got:\n{out}");
 }
 
 // ---------------- Feature 13: string helpers ----------------

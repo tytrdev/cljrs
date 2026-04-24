@@ -72,7 +72,9 @@ fn elementwise_multi_input_axpy_max() {
     must(&out, "var xv = SIMD[DType.float32, w].load(x, i)");
     must(&out, "var yv = SIMD[DType.float32, w].load(y, i)");
     // Body substitutes a/x/y with SIMD-loaded versions.
-    must(&out, "((av * xv) + yv)");
+    // Precedence-aware printer drops the redundant `(av * xv)` wrap
+    // since `*` binds tighter than `+`.
+    must(&out, "(av * xv + yv)");
 }
 
 // --- Phase 3: scalar param (^scalar ^f32 k) does not become a pointer ---

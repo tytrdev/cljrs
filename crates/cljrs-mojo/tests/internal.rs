@@ -26,7 +26,7 @@ fn hello_def() {
 fn add_fn() {
     let src = "(defn ^f32 add [^f32 x ^f32 y] (+ x y))";
     let out = emit(src, Tier::Readable).unwrap();
-    assert!(has_all(&out, &["fn add(", "x: Float32", "y: Float32", "-> Float32", "(x + y)"]),
+    assert!(has_all(&out, &["fn add(", "x: Float32", "y: Float32", "-> Float32", "x + y"]),
         "got:\n{out}");
 }
 
@@ -145,7 +145,7 @@ fn do_in_let_value_position() {
 fn nested_do_in_if_branch() {
     let src = "(defn ^i32 g [^i32 x] (if (> x 0) (do 1 2 (+ x 1)) 0))";
     let out = emit(src, Tier::Readable).unwrap();
-    assert!(out.contains("return (x + 1)"), "got:\n{out}");
+    assert!(out.contains("return x + 1"), "got:\n{out}");
 }
 
 #[test]
@@ -304,7 +304,7 @@ fn always_inline_fn_mojo_decorates() {
 fn parameter_fn_mojo_preserves_body() {
     let src = "(parameter-fn-mojo add ^i32 [^i32 a ^i32 b] (+ a b))";
     let out = emit(src, Tier::Readable).unwrap();
-    assert!(out.contains("return (a + b)"), "got:\n{out}");
+    assert!(out.contains("return a + b"), "got:\n{out}");
 }
 
 #[test]
