@@ -4,10 +4,18 @@
 //! `cljrs::reader::read_all`, lowers to a small Mojo-ish AST, runs
 //! tier-specific passes, and pretty-prints Mojo source.
 //!
-//! The v1 scope is a numeric-kernel subset: typed `def`/`defn`, `let`,
-//! `if`/`cond`/`do`, arithmetic, comparisons, math fns, booleans,
-//! `loop`/`recur`, anonymous `fn`, and `defn-mojo`. Collections, strings,
-//! and higher-order args are rejected with errors that quote the form.
+//! ## Coverage (running tally)
+//!
+//! - typed `def` / `defn` / `defn-mojo` with `^Tag` metadata
+//! - numeric primitives: `^i8 ^i16 ^i32 ^i64 ^u8 ^u16 ^u32 ^u64 ^f32 ^f64
+//!   ^bf16 ^bool`, plus `^str` → `String`
+//! - control flow: `if`, `cond`, `do`, `let`, `loop`/`recur`
+//! - arithmetic, comparisons, booleans, math fns (`sin cos tan sqrt exp
+//!   log floor ceil pow`, `abs min max`)
+//! - tier 2 const-fold + CSE + 1-stmt-fn inlining; tier 3 `@always_inline`
+//!   on small all-primitive fns
+//!
+//! Forms outside this set produce errors that quote the offending form.
 
 pub mod ast;
 pub mod runtime;
@@ -74,7 +82,7 @@ fn print_item(out: &mut String, item: &MItem, tier: Tier) {
             out.push_str(name);
             if !matches!(ty, MType::Infer) {
                 out.push_str(": ");
-                out.push_str(ty.as_str());
+                out.push_str(&ty.as_str());
             }
             out.push_str(" = ");
             print_expr(out, value);
@@ -105,13 +113,13 @@ fn print_fn(out: &mut String, f: &MFn, tier: Tier) {
         out.push_str(n);
         if !matches!(t, MType::Infer) {
             out.push_str(": ");
-            out.push_str(t.as_str());
+            out.push_str(&t.as_str());
         }
     }
     out.push(')');
     if !matches!(f.ret, MType::Infer) {
         out.push_str(" -> ");
-        out.push_str(f.ret.as_str());
+        out.push_str(&f.ret.as_str());
     }
     out.push_str(":\n");
     if f.body.is_empty() {
@@ -137,7 +145,7 @@ fn print_stmt(out: &mut String, s: &MStmt, lvl: usize) {
             out.push_str(name);
             if !matches!(ty, MType::Infer) {
                 out.push_str(": ");
-                out.push_str(ty.as_str());
+                out.push_str(&ty.as_str());
             }
             out.push_str(" = ");
             print_expr(out, value);

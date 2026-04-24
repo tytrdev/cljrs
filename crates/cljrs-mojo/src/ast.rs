@@ -8,34 +8,57 @@ use std::fmt;
 /// to Mojo's inference or (for top-level defs) default to Float64.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MType {
+    Int8,
+    Int16,
     Int32,
     Int64,
+    UInt8,
+    UInt16,
+    UInt32,
+    UInt64,
     Float32,
     Float64,
+    BFloat16,
     Bool,
+    /// `String` (Mojo's owned utf-8 string).
+    Str,
+    /// User-defined struct or otherwise opaque type passed through verbatim.
+    Named(&'static str),
+    /// SIMD[DType.Tdtype, N] — emitted whenever the user wrote `^SIMD[t n]`.
+    Simd(&'static str, usize),
     /// Unannotated. Printer will usually omit the `: T` suffix.
     Infer,
 }
 
 impl MType {
-    pub fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> String {
         match self {
-            MType::Int32 => "Int32",
-            MType::Int64 => "Int64",
-            MType::Float32 => "Float32",
-            MType::Float64 => "Float64",
-            MType::Bool => "Bool",
-            MType::Infer => "",
+            MType::Int8 => "Int8".into(),
+            MType::Int16 => "Int16".into(),
+            MType::Int32 => "Int32".into(),
+            MType::Int64 => "Int64".into(),
+            MType::UInt8 => "UInt8".into(),
+            MType::UInt16 => "UInt16".into(),
+            MType::UInt32 => "UInt32".into(),
+            MType::UInt64 => "UInt64".into(),
+            MType::Float32 => "Float32".into(),
+            MType::Float64 => "Float64".into(),
+            MType::BFloat16 => "BFloat16".into(),
+            MType::Bool => "Bool".into(),
+            MType::Str => "String".into(),
+            MType::Named(s) => (*s).to_string(),
+            MType::Simd(dt, n) => format!("SIMD[DType.{dt}, {n}]"),
+            MType::Infer => String::new(),
         }
     }
     pub fn is_float(&self) -> bool {
-        matches!(self, MType::Float32 | MType::Float64)
+        matches!(self, MType::Float32 | MType::Float64 | MType::BFloat16)
     }
 }
 
 impl fmt::Display for MType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
+        f.write_str(&self.as_str())
     }
 }
 

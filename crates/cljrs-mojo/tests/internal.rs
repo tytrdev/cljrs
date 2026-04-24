@@ -134,6 +134,31 @@ fn unsupported_higher_order_errors() {
 }
 
 #[test]
+fn extra_int_types_emit() {
+    let src = "(defn-mojo widen ^i64 [^i8 a ^u16 b ^u32 c] (+ a (+ b c)))";
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(has_all(&out, &["a: Int8", "b: UInt16", "c: UInt32", "-> Int64"]),
+        "got:\n{out}");
+}
+
+#[test]
+fn bfloat16_and_uint64_round_trip() {
+    let src = "(defn-mojo go ^bf16 [^bf16 x ^u64 n] x)";
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("x: BFloat16"), "got:\n{out}");
+    assert!(out.contains("n: UInt64"), "got:\n{out}");
+    assert!(out.contains("-> BFloat16"), "got:\n{out}");
+}
+
+#[test]
+fn unknown_type_hint_falls_back_to_infer() {
+    // Unknown ^Whatever just becomes inferred (no annotation), shouldn't fail.
+    let src = "(defn-mojo p ^i32 [^Wibble x] 0)";
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("fn p(x)"), "got:\n{out}");
+}
+
+#[test]
 fn defn_mojo_alias_works() {
     let src = "(defn-mojo ^f32 id [^f32 x] x)";
     let out = emit(src, Tier::Readable).unwrap();

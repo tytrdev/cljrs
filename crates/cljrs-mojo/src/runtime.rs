@@ -8,11 +8,19 @@ use crate::ast::MType;
 /// either pass it through (`Infer`) or error, depending on context.
 pub fn type_hint(sym: &str) -> Option<MType> {
     Some(match sym {
+        "i8"  | "Int8"  => MType::Int8,
+        "i16" | "Int16" => MType::Int16,
         "i32" | "Int32" => MType::Int32,
         "i64" | "long" | "Int64" => MType::Int64,
+        "u8"  | "UInt8"  => MType::UInt8,
+        "u16" | "UInt16" => MType::UInt16,
+        "u32" | "UInt32" => MType::UInt32,
+        "u64" | "UInt64" => MType::UInt64,
         "f32" | "Float32" => MType::Float32,
         "f64" | "double" | "Float64" => MType::Float64,
+        "bf16" | "BFloat16" => MType::BFloat16,
         "bool" | "Bool" => MType::Bool,
+        "str"  | "String" => MType::Str,
         _ => return None,
     })
 }
