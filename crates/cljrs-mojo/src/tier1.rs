@@ -56,10 +56,23 @@ impl Ctx {
 
 /// Lower a whole file of cljrs forms into an `MModule`.
 pub fn lower_module(forms: &[Value]) -> Result<MModule, String> {
+    lower_module_annotated(forms).map_err(|(_form, msg)| msg)
+}
+
+/// Like [`lower_module`], but on error also returns the offending
+/// top-level form so the caller can attribute a source location.
+/// Returns `None` for the form when the error is detected after the
+/// per-form loop (method attachment, finalization).
+pub fn lower_module_annotated(
+    forms: &[Value],
+) -> std::result::Result<MModule, (Option<&Value>, String)> {
     let ctx = Ctx::new();
     let mut items = Vec::new();
     for form in forms {
-        let mut produced = lower_top(&ctx, form)?;
+        let mut produced = match lower_top(&ctx, form) {
+            Ok(v) => v,
+            Err(e) => return Err((Some(form), e)),
+        };
         // Flush anonymous fns hoisted out of this top form's bodies. They
         // appear BEFORE the item that referenced them so the Mojo compiler
         // sees the helper before its use.
@@ -83,8 +96,12 @@ pub fn lower_module(forms: &[Value]) -> Result<MModule, String> {
             }
         }
         if !placed {
-            return Err(format!(
-                "defn-method-mojo: no struct named `{sname}` defined before this method"
+            return Err((
+                None,
+                format!(
+                    "defn-method-mojo: no struct named `{sname}` \
+                     defined before this method"
+                ),
             ));
         }
     }

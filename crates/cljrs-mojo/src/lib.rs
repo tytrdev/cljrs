@@ -147,7 +147,8 @@ pub enum Tier {
 /// Transpile a cljrs source string to Mojo source at the requested tier.
 pub fn emit(src: &str, tier: Tier) -> Result<String, String> {
     let forms = cljrs::reader::read_all(src).map_err(|e| format!("read error: {e}"))?;
-    let mut module = tier1::lower_module(&forms)?;
+    let mut module = tier1::lower_module_annotated(&forms)
+        .map_err(|(form, msg)| annotate_error(form, msg))?;
     match tier {
         Tier::Readable => {}
         Tier::Optimized => tier2::optimize(&mut module),
@@ -155,6 +156,19 @@ pub fn emit(src: &str, tier: Tier) -> Result<String, String> {
     }
     add_elementwise_imports(&mut module, tier);
     Ok(print_module(&module, tier))
+}
+
+/// Prepend `line N col M: ` to `msg` when the offending top-level
+/// form has a known reader-recorded source position. Synthesized or
+/// non-list forms pass through unchanged.
+fn annotate_error(form: Option<&cljrs::value::Value>, msg: String) -> String {
+    let Some(form) = form else { return msg };
+    if let cljrs::value::Value::List(list) = form {
+        if let Some((line, col)) = cljrs::reader::lookup_location(list) {
+            return format!("line {line} col {col}: {msg}");
+        }
+    }
+    msg
 }
 
 /// Inject imports and `alias nelts_* = simd_width_of[...]()` lines needed by

@@ -13,7 +13,6 @@
 use cljrs_mojo::{emit, Tier};
 
 #[test]
-#[ignore = "drives follow-up: apply tools/mojo-check/error_locations.patch"]
 fn error_on_bad_defn_carries_line_col() {
     // Leading blank + comment so the error form is definitively on line 3.
     let src = "\n;; intentionally bad\n(defn-mojo)";
@@ -26,7 +25,6 @@ fn error_on_bad_defn_carries_line_col() {
 }
 
 #[test]
-#[ignore = "drives follow-up: apply tools/mojo-check/error_locations.patch"]
 fn error_on_second_form_has_correct_line() {
     let src = "\
 (defn-mojo ok ^i32 [^i32 x] x)
@@ -42,7 +40,6 @@ fn error_on_second_form_has_correct_line() {
 }
 
 #[test]
-#[ignore = "drives follow-up: apply tools/mojo-check/error_locations.patch"]
 fn unknown_top_level_form_carries_location() {
     let src = "\n\n(not-a-real-mojo-form foo)";
     let r = emit(src, Tier::Readable);
