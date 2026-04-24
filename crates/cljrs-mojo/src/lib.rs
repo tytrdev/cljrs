@@ -15,8 +15,10 @@
 //!   trampoline. Sugar `(for-mojo [i lo hi] body...)` skips the loop/recur
 //!   ceremony entirely. `(break)` and `(continue)` lower verbatim inside
 //!   loop bodies.
-//! - arithmetic, comparisons, booleans, math fns (`sin cos tan sqrt exp
-//!   log floor ceil pow`, `abs min max`)
+//! - arithmetic, comparisons, booleans, math fns. Trig (`sin cos tan
+//!   asin acos atan atan2 sinh cosh tanh`), exponentials (`exp expm1
+//!   log log1p log2 log10`), roots & rounding (`sqrt cbrt floor ceil
+//!   round trunc`), plus `pow`, `hypot`, `copysign`, `abs`, `min`, `max`.
 //! - structs: `(defstruct-mojo Vec3 [^f32 x ^f32 y ^f32 z])` emits an
 //!   `@value` Mojo struct with explicit `__init__`. Field access via
 //!   `(. obj field)`. User-defined capitalized type names pass through

@@ -258,6 +258,36 @@ fn capitalized_type_hint_passes_through_as_named() {
 }
 
 #[test]
+fn extended_math_fns() {
+    let src = "(defn-mojo m ^f32 [^f32 x ^f32 y]
+                 (+ (tanh x) (+ (atan2 y x) (+ (log2 x) (hypot x y)))))";
+    let out = emit(src, Tier::Readable).unwrap();
+    for needle in ["from math import tanh", "from math import atan2",
+                   "from math import log2", "from math import hypot",
+                   "tanh(x)", "atan2(y, x)", "log2(x)", "hypot(x, y)"] {
+        assert!(out.contains(needle), "missing {needle}:\n{out}");
+    }
+}
+
+#[test]
+fn round_trunc_cbrt_expm1() {
+    let src = "(defn-mojo g ^f32 [^f32 x] (+ (round x) (+ (trunc x) (+ (cbrt x) (expm1 x)))))";
+    let out = emit(src, Tier::Readable).unwrap();
+    for needle in ["round(x)", "trunc(x)", "cbrt(x)", "expm1(x)"] {
+        assert!(out.contains(needle), "missing {needle}:\n{out}");
+    }
+}
+
+#[test]
+fn unknown_math_fn_falls_back_to_call() {
+    // `wobble` is not in the math table → generic call, no import.
+    let src = "(defn-mojo f ^f32 [^f32 x] (wobble x))";
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("wobble(x)"), "got:\n{out}");
+    assert!(!out.contains("from math import wobble"), "got:\n{out}");
+}
+
+#[test]
 fn break_in_for_mojo_loop() {
     let src = "(defn-mojo find ^i32 [^i32 n] (for-mojo [i 0 n] (if (hit? i) (break))) 0)";
     let out = emit(src, Tier::Readable).unwrap();
