@@ -175,6 +175,22 @@ pub enum MItem {
         body: MExpr,
         comment: Option<String>,
     },
+    /// Host-side launcher for a GPU kernel. `kernel_name` is the symbol
+    /// of an `elementwise-gpu-mojo` fn declared elsewhere; `ptr_args` are
+    /// its pointer argument names (a, b, out). Emits a `raises` fn that
+    /// takes a `DeviceContext`, those pointers, and `n: Int`, and calls
+    /// `ctx.enqueue_function[KERNEL](..., grid_dim=..., block_dim=256)`.
+    GpuLaunch {
+        launcher_name: String,
+        kernel_name: String,
+        /// Ordered pointer arg names. Each is typed as
+        /// `UnsafePointer[<out_ty>]`. Last element conventionally is `out`.
+        ptr_args: Vec<String>,
+        out_ty: MType,
+        /// Threads per block. Default 256.
+        block_dim: usize,
+        comment: Option<String>,
+    },
 }
 
 /// Associative reduction operator for `reduce-mojo`.

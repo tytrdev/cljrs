@@ -403,6 +403,38 @@ fn rename_user_call_callee() {
     assert!(out.contains("helper_fn(y)"), "got:\n{out}");
 }
 
+// ---------------- Feature: launch-gpu-mojo (host launcher) ----------------
+
+#[test]
+fn launch_gpu_mojo_default_float32() {
+    let src = r#"
+(elementwise-gpu-mojo vector-add-kernel [^f32 a ^f32 b] ^f32 (+ a b))
+(launch-gpu-mojo vector-add-kernel [a b out])
+"#;
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("from gpu.host import DeviceContext"), "got:\n{out}");
+    assert!(out.contains("fn launch_vector_add_kernel(ctx: DeviceContext"), "got:\n{out}");
+    assert!(out.contains("a: UnsafePointer[Float32]"), "got:\n{out}");
+    assert!(out.contains("b: UnsafePointer[Float32]"), "got:\n{out}");
+    assert!(out.contains("out: UnsafePointer[Float32]"), "got:\n{out}");
+    assert!(out.contains(", n: Int) raises:"), "got:\n{out}");
+    assert!(
+        out.contains("ctx.enqueue_function[vector_add_kernel](a, b, out, n, grid_dim=(n + 256 - 1) // 256, block_dim=256)"),
+        "got:\n{out}"
+    );
+}
+
+#[test]
+fn launch_gpu_mojo_dtype_tag() {
+    let src = r#"
+(elementwise-gpu-mojo scale-kernel [^f64 x] ^f64 (* x 2.0))
+(launch-gpu-mojo ^f64 scale-kernel [x out])
+"#;
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("x: UnsafePointer[Float64]"), "got:\n{out}");
+    assert!(out.contains("out: UnsafePointer[Float64]"), "got:\n{out}");
+}
+
 // ---------------- Feature: parallel-mojo (parallelize) ----------------
 
 #[test]

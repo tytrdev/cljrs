@@ -103,6 +103,7 @@ fn lower_top(ctx: &Ctx, form: &Value) -> Result<Vec<MItem>, String> {
         "parallel-mojo" => lower_elementwise(ctx, list, form, true).map(|i| vec![i]),
         "reduce-mojo" => lower_reduce(ctx, list, form).map(|i| vec![i]),
         "elementwise-gpu-mojo" => lower_gpu_elementwise(ctx, list, form).map(|i| vec![i]),
+        "launch-gpu-mojo" => lower_launch_gpu(ctx, list, form).map(|i| vec![i]),
         other => Err(format!(
             "unsupported top-level form `{other}` in: {}",
             pr(form)
@@ -951,6 +952,54 @@ fn lower_gpu_elementwise(ctx: &Ctx, list: &[Value], form: &Value) -> Result<MIte
         ptr_inputs,
         out_ty: ret_ty,
         body,
+        comment: Some(pr(form)),
+    })
+}
+
+/// `(launch-gpu-mojo KERNEL [a b out])` — host-side launcher. Looks up
+/// KERNEL in the already-registered GPU elementwise items to copy its
+/// pointer dtype. Emits a `raises` fn `launch_KERNEL(ctx, a, b, out, n)`
+/// that calls `ctx.enqueue_function[KERNEL](...)`.
+///
+/// Optional `^{:block-dim N}` on the launcher name overrides the default
+/// 256-thread block size; the launcher name itself is `launch_<kernel>`.
+fn lower_launch_gpu(_ctx: &Ctx, list: &[Value], form: &Value) -> Result<MItem, String> {
+    if list.len() != 3 {
+        return Err(format!(
+            "launch-gpu-mojo expects (launch-gpu-mojo KERNEL [ptr-args]): {}",
+            pr(form)
+        ));
+    }
+    // Kernel name may carry a `^f32`/`^f64`/etc type tag to select the
+    // launcher's `UnsafePointer[T]` dtype. Defaults to Float32 if absent.
+    let (ty_tag, kname_form) = peel_tag(&list[1]);
+    let kernel_name = sym_str(kname_form)
+        .ok_or_else(|| format!("launch-gpu-mojo kernel name must be symbol: {}", pr(form)))?
+        .to_string();
+    let block_dim = 256usize;
+    let args_vec = match &list[2] {
+        Value::Vector(v) => v,
+        _ => return Err(format!("launch-gpu-mojo ptr-args must be a vector: {}", pr(form))),
+    };
+    if args_vec.is_empty() {
+        return Err(format!("launch-gpu-mojo needs at least one ptr arg: {}", pr(form)));
+    }
+    let mut ptr_args: Vec<String> = Vec::new();
+    for a in args_vec.iter() {
+        let s = sym_str(a)
+            .ok_or_else(|| format!("launch-gpu-mojo ptr arg must be a symbol: {}", pr(form)))?
+            .to_string();
+        ptr_args.push(s);
+    }
+    // Resolve dtype from the tag on the kernel name; default Float32.
+    let out_ty = if matches!(ty_tag, MType::Infer) { MType::Float32 } else { ty_tag };
+    let launcher_name = format!("launch_{}", kernel_name);
+    Ok(MItem::GpuLaunch {
+        launcher_name,
+        kernel_name,
+        ptr_args,
+        out_ty,
+        block_dim,
         comment: Some(pr(form)),
     })
 }

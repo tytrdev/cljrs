@@ -120,6 +120,18 @@ fn add_elementwise_imports(m: &mut MModule, tier: Tier) {
     let has_elem = m.items.iter().any(|i| matches!(i, MItem::Elementwise { .. }));
     let has_reduce = m.items.iter().any(|i| matches!(i, MItem::Reduce { .. }));
     let has_gpu = m.items.iter().any(|i| matches!(i, MItem::GpuElementwise { .. }));
+    let has_launch = m.items.iter().any(|i| matches!(i, MItem::GpuLaunch { .. }));
+
+    if has_launch {
+        for imp in [
+            "from gpu.host import DeviceContext",
+            "from memory import UnsafePointer",
+        ] {
+            if !m.imports.iter().any(|s| s == imp) {
+                m.imports.push(imp.to_string());
+            }
+        }
+    }
     let has_parallel = m.items.iter().any(|i| matches!(i, MItem::Elementwise { parallel: true, .. }));
 
     if has_parallel {
@@ -404,6 +416,9 @@ fn print_item(out: &mut String, item: &MItem, tier: Tier) {
         MItem::GpuElementwise { name, ptr_inputs, out_ty, body, comment } => {
             print_gpu_elementwise(out, name, ptr_inputs, out_ty, body, comment.as_deref(), tier);
         }
+        MItem::GpuLaunch { launcher_name, kernel_name, ptr_args, out_ty, block_dim, comment } => {
+            print_gpu_launch(out, launcher_name, kernel_name, ptr_args, out_ty, *block_dim, comment.as_deref(), tier);
+        }
         MItem::Var { name, ty, value, comment } => {
             if let Some(c) = comment {
                 if matches!(tier, Tier::Readable) {
@@ -673,6 +688,51 @@ fn print_gpu_elementwise(
     out.push_str("        out[i] = ");
     print_expr(out, &subst_body);
     out.push('\n');
+}
+
+/// Emit a host-side `raises` launcher that calls `ctx.enqueue_function[KERNEL](...)`.
+fn print_gpu_launch(
+    out: &mut String,
+    launcher_name: &str,
+    kernel_name: &str,
+    ptr_args: &[String],
+    out_ty: &MType,
+    block_dim: usize,
+    comment: Option<&str>,
+    tier: Tier,
+) {
+    if let Some(c) = comment {
+        if matches!(tier, Tier::Readable | Tier::Optimized) {
+            out.push_str("# cljrs: ");
+            out.push_str(c);
+            out.push('\n');
+        }
+    }
+    let ty_str = out_ty.as_str();
+    out.push_str("fn ");
+    out.push_str(&snake(launcher_name));
+    out.push_str("(ctx: DeviceContext");
+    for a in ptr_args {
+        out.push_str(", ");
+        out.push_str(&snake(a));
+        out.push_str(&format!(": UnsafePointer[{ty_str}]"));
+    }
+    out.push_str(", n: Int) raises:\n");
+    out.push_str(&format!("    ctx.enqueue_function[{}](", snake(kernel_name)));
+    for (i, a) in ptr_args.iter().enumerate() {
+        if i > 0 {
+            out.push_str(", ");
+        }
+        out.push_str(&snake(a));
+    }
+    if !ptr_args.is_empty() {
+        out.push_str(", ");
+    }
+    out.push_str("n, ");
+    out.push_str(&format!(
+        "grid_dim=(n + {bd} - 1) // {bd}, block_dim={bd})\n",
+        bd = block_dim
+    ));
 }
 
 fn subst_ptr_loads(body: &MExpr, ptr_names: &[String], max: bool, _dt: &str) -> MExpr {

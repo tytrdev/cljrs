@@ -55,6 +55,11 @@ pub fn optimize(m: &mut MModule) {
                     *comment = Some(short_comment(c));
                 }
             }
+            MItem::GpuLaunch { comment, .. } => {
+                if let Some(c) = comment {
+                    *comment = Some(short_comment(c));
+                }
+            }
         }
     }
 }
