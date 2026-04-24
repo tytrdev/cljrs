@@ -108,3 +108,60 @@ fn tour_max() {
     assert!(!out.contains("# cljrs:"), "max strips comments");
     assert!(out.contains("@always_inline"));
 }
+
+/// The v2 tour showcased in docs/clojo.html. Verifies every headline
+/// feature shipped in the final push emits something sensible.
+const TOUR_V2: &str = r#"
+(elementwise-mojo vector-add [^f32 a ^f32 b] ^f32 (+ a b))
+(parallel-mojo scale [^f32 x ^scalar ^f32 k] ^f32 (* x k))
+(reduce-mojo sum-sq-diff [^f32 a ^f32 b] ^f32 (* (- a b) (- a b)) 0.0)
+(elementwise-gpu-mojo vector-add-gpu [^f32 a ^f32 b] ^f32 (+ a b))
+(launch-gpu-mojo vector-add-gpu [a b out])
+(defn-mojo clamp ^f32 [^f32 x ^{:default 0.0} ^f32 lo ^{:default 1.0} ^f32 hi]
+  (max lo (min hi x)))
+(defn-mojo ^{:doc "Euclidean length of a 2-vector."} len2 ^f32
+  [^f32 x ^f32 y]
+  (sqrt (+ (* x x) (* y y))))
+(defn-mojo dump ^i32 [^List-f32 xs] (for-mojo-in [x xs] (print x)) 0)
+(defn-mojo dict-demo ^i32 [^Dict-str-f32 d]
+  (assoc-mojo d "alpha" 0.5)
+  0)
+(defn-mojo triple-of ^Tuple-f32-f32-f32 [^f32 x] (tuple x x x))
+(defn-mojo ^{:decorators [:always-inline :parameter]} hot ^f32
+  [^f32 x] (* x x))
+"#;
+
+#[test]
+fn tour_v2_readable_covers_every_new_feature() {
+    let out = emit(TOUR_V2, Tier::Readable).expect("v2 readable emit");
+    for needle in [
+        "vectorize[",                      // elementwise-mojo Max rewrite? only at Max
+        "parallelize[__kernel](n)",        // parallel-mojo
+        "reduce_add",                      // reduce-mojo Max path only at Max
+        "block_idx.x * block_dim.x",       // GPU kernel
+        "enqueue_function[vector_add_gpu]", // host launcher
+        "lo: Float32 = 0.0",              // default args
+        "hi: Float32 = 1.0",
+        "\"\"\"Euclidean length of a 2-vector.\"\"\"", // docstring
+        "for x in xs:",                    // for-mojo-in
+        "Dict[String, Float32]",            // dict type
+        "d[\"alpha\"] = 0.5",              // assoc-mojo
+        "-> Tuple[Float32, Float32, Float32]", // tuple returns
+        "Tuple(x, x, x)",                  // tuple ctor
+        "@always_inline",                  // decorator stacking
+        "@parameter",
+    ] {
+        // vectorize/reduce_add only show up at Max tier; skip those here.
+        if needle == "vectorize[" || needle == "reduce_add" {
+            continue;
+        }
+        assert!(out.contains(needle), "missing {needle:?} in:\n{out}");
+    }
+}
+
+#[test]
+fn tour_v2_max_lifts_simd() {
+    let out = emit(TOUR_V2, Tier::Max).expect("v2 max emit");
+    assert!(out.contains("vectorize[__kernel, nelts_f32](n)"), "missing vectorize:\n{out}");
+    assert!(out.contains("reduce_add"), "missing reduce_add:\n{out}");
+}

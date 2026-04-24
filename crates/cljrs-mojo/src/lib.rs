@@ -11,17 +11,23 @@
 //! - **Definitions**: `def`, `defn`, `defn-mojo`, `parameter-fn-mojo`,
 //!   `always-inline-fn-mojo`, `raises-fn-mojo`, `parametric-fn-mojo`,
 //!   `defstruct-mojo`, `deftrait-mojo`, `defn-method-mojo`, `alias-mojo`.
+//!   Arbitrary decorator stacks via `^{:decorators [:a :b]}` meta on
+//!   the fn/struct name (replaces the old sugars while keeping them
+//!   backward-compat). Docstrings via `^{:doc "..."}`.
 //! - **Primitive types**: `^i8 ^i16 ^i32 ^i64 ^u8 ^u16 ^u32 ^u64 ^f32
 //!   ^f64 ^bf16 ^bool ^str`, plus user-defined named types that start
 //!   with a capital letter.
 //! - **Composite types**: `^SIMDf32x4` → `SIMD[DType.float32, 4]`,
 //!   `^List-f32` → `List[Float32]`, `^Opt-f32` → `Optional[Float32]`,
-//!   `^Tuple-i32-f32` → `Tuple[Int32, Float32]`.
+//!   `^Tuple-i32-f32` → `Tuple[Int32, Float32]`,
+//!   `^Dict-str-f32` → `Dict[String, Float32]`.
 //! - **Argument conventions**: `^owned`, `^borrowed`, `^inout`, `^ref`
 //!   stack with a type tag: `[^inout ^i32 x]` → `inout x: Int32`.
+//! - **Default args**: `^{:default EXPR}` on a param → `name: T = EXPR`.
 //! - **Control flow**: `if`, `cond` (flat `if/elif/else`), `do`, `let`,
 //!   `loop`/`recur` (with for-range fast path), `(for-mojo [i lo hi])`
-//!   sugar, `(break)`, `(continue)`.
+//!   and iterator-protocol `(for-mojo-in [x xs] body)`, `(break)`,
+//!   `(continue)`.
 //! - **Exceptions**: `(raise (Error "msg"))`, bare `(raise)` re-raises,
 //!   `(try BODY (catch T as n HANDLER)...)`, `raises-fn-mojo` for
 //!   signatures that propagate.
@@ -29,7 +35,10 @@
 //!   (emits `fn foo[n: Int, T: AnyType]`), and `(parameter-if ...)`
 //!   inside parametric bodies.
 //! - **Collections**: `(list e1 e2 ...)` → `List[T](e1, ...)`,
-//!   `(nth xs i)` → `xs[i]`, `(len xs)` → `len(xs)`.
+//!   `(nth xs i)` → `xs[i]`, `(len xs)` → `len(xs)`,
+//!   `(tuple a b c)` → `Tuple(a, b, c)`,
+//!   `(dict-mojo ^Dict-K-V)` → `Dict[K, V]()`,
+//!   `(get-mojo d k)` / `(assoc-mojo d k v)` for dict access.
 //! - **Optional**: `(some x)` → `Optional(x)`, `(none)` → `None`,
 //!   `(unwrap o)` → `o.value()`.
 //! - **Traits & methods**: `(deftrait-mojo Shape (area ^f32 []))`,
@@ -37,15 +46,14 @@
 //!   `(defn-method-mojo Vec3 length ^f32 [] ...)` appends indented
 //!   methods inside the matching struct.
 //! - **Generic structs**: `(defstruct-mojo Vec3 [T] [^T x ^T y ^T z])` →
-//!   `struct Vec3[T: AnyType]:`. Multi-param: `[T AnyType N Int]` for
-//!   flat pairs. Call sites with a type tag auto-specialize:
-//!   `(Vec3 ^f32 1.0 2.0 3.0)` → `Vec3[Float32](1.0, 2.0, 3.0)`; without
-//!   a tag, Mojo's own inference runs. Generic methods use
-//!   `(defn-method-mojo Vec3 [T] length ...)`.
+//!   `struct Vec3[T: AnyType]:`. Multi-param via flat pairs
+//!   `[T AnyType N Int]`. Call sites with a type tag auto-specialize:
+//!   `(Vec3 ^f32 1.0 2.0 3.0)` → `Vec3[Float32](1.0, 2.0, 3.0)`.
 //! - **Assertions**: `(mojo-assert cond)` / `(mojo-assert cond msg)` →
 //!   `debug_assert(...)`.
-//! - **String helpers**: `(str-len s)`, `(str-slice s a b)`,
-//!   `(str-split s sep)`.
+//! - **String helpers**: `str-len`, `str-slice`, `str-split`,
+//!   `str-upper`, `str-lower`, `str-strip`, `str-starts-with?`,
+//!   `str-ends-with?`, `str-contains?`, `str-replace`.
 //! - **Introspection**: `(isinstance-mojo v T)` → `isinstance(v, T)`.
 //! - **I/O**: `(print x)`, `(println x)` → `print(x)`;
 //!   `(format "n={}" n)` → `"n=" + String(n)` left-folded.
@@ -53,16 +61,25 @@
 //!   exponentials (`exp expm1 log log1p log2 log10`), roots & rounding
 //!   (`sqrt cbrt floor ceil round trunc`), plus `pow`, `hypot`,
 //!   `copysign`, `abs`, `min`, `max`.
+//! - **Elementwise kernels**: `(elementwise-mojo NAME [^T a ^T b] ^T body)`
+//!   emits a scalar loop at Readable/Optimized and a
+//!   `vectorize[body, nelts](n)` kernel at Max.
+//! - **Parallel kernels**: `(parallel-mojo ...)` — same shape, emits
+//!   `parallelize[kernel](n)` instead of vectorize (embarrassingly
+//!   parallel across workers, same body across all tiers).
 //! - **Reductions**: `(reduce-mojo sum [^f32 x] ^f32 (* x x) 0.0)` emits
 //!   a scalar for-loop at Readable/Optimized and a SIMD-accumulator-plus-
-//!   `reduce_add` kernel at Max. Multi-input reductions (`dot`) take two
-//!   pointer inputs. Combining op is `+` by default; a `^mul`/`^min`/`^max`
-//!   tag on the body selects product / min / max reductions.
+//!   `reduce_add` kernel at Max. Multi-input reductions (`dot`,
+//!   `sum-sq-diff`) take two pointer inputs and fuse the elementwise
+//!   shape into one kernel pass. Combining op is `+` by default; a
+//!   `^mul`/`^min`/`^max` tag on the body selects product / min / max.
 //! - **GPU kernels**: `(elementwise-gpu-mojo NAME [^T a ^T b] ^T body)`
 //!   emits a Mojo fn that computes its thread index from
 //!   `block_idx.x * block_dim.x + thread_idx.x` and writes one output
-//!   element per thread (same body across all tiers). Caller drives
-//!   dispatch via `DeviceContext.enqueue_function`.
+//!   element per thread (same body across all tiers).
+//! - **GPU host launcher**: `(launch-gpu-mojo [^T] KERNEL [args])`
+//!   emits `fn launch_KERNEL(ctx: DeviceContext, args, n) raises:`
+//!   that enqueues the kernel with `grid_dim=ceil(n/256), block_dim=256`.
 //! - **Naming**: kebab-case identifiers (`vector-add`, `abs-max`) are
 //!   auto-rewritten to snake_case in the emitted Mojo. The original
 //!   source name is preserved in the `# cljrs:` tier-Readable comment.
@@ -74,11 +91,19 @@
 //! ### Not supported (errors on sight)
 //!
 //! - Collection literals `[1 2 3]`, `{:a 1}`, `#{:a}` in expr position —
-//!   use `(list ...)` / `(dict ...)` / `(set ...)` instead.
+//!   use `(list ...)` / `(dict-mojo ...)` / `(set ...)` instead.
 //! - Variadic params (`& rest`).
-//! - Higher-order fn refs as arguments — fn symbols must be called directly.
-//! - `loop`, `let`, `cond`, `recur`, `for-mojo`, `try`, `raise`,
-//!   `parameter-if`, `mojo-assert` in non-tail / non-stmt positions.
+//! - Higher-order fn refs as arguments / closures passed as values —
+//!   fn symbols must be called directly.
+//! - `loop`, `let`, `cond`, `recur`, `for-mojo`, `for-mojo-in`, `try`,
+//!   `raise`, `parameter-if`, `mojo-assert` in non-tail / non-stmt
+//!   positions.
+//! - Mixed-precision kernels (e.g. FP16 inputs + FP32 accumulator) —
+//!   elementwise/reduce-mojo currently require matching input and
+//!   output dtypes.
+//! - Source-level `;;` comment pass-through — the reader strips them
+//!   before the transpiler sees the form.
+//! - Multi-output kernels (a single reduce producing 2+ accumulators).
 //!
 //! Forms outside this set produce errors that quote the offending form.
 

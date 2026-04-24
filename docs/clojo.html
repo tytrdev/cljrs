@@ -66,8 +66,9 @@
     } from "./_layout.js";
     mountChrome();
 
-    const INITIAL_SOURCE = `;; A tour of what the cljrs -> Mojo transpiler supports today.
-;; Edit and watch the Mojo update. Try each tier.
+    const INITIAL_SOURCE = `;; cljrs -> Mojo tour (v2 — full feature push)
+;; Edit and watch the Mojo update. Flip Readable <-> Max to see
+;; the SIMD / always_inline rewrites kick in.
 
 ;; --- vectorized elementwise kernel (the killer demo) ---
 ;; Flip Readable <-> Max to see the SIMD rewrite kick in.
@@ -78,13 +79,17 @@
   ^f32
   (+ a b))
 
-;; --- reduction kernel: sum of squares (SIMD-lifted at Max tier) ---
-;; Readable: scalar acc += x[i]*x[i]
-;; Max:     SIMD accumulator + reduce_add() per iter + final reduce_add()
-(reduce-mojo sum-sq
-  [^f32 x]
+;; --- parallel kernel: worker-based dispatch ---
+(parallel-mojo scale
+  [^f32 x ^scalar ^f32 k]
   ^f32
-  (* x x)
+  (* x k))
+
+;; --- reduction: sum of squared differences (fused multi-input) ---
+(reduce-mojo sum-sq-diff
+  [^f32 a ^f32 b]
+  ^f32
+  (* (- a b) (- a b))
   0.0)
 
 ;; --- GPU kernel: same `vector-add` math, thread-indexed ---
@@ -94,6 +99,9 @@
   [^f32 a ^f32 b]
   ^f32
   (+ a b))
+
+;; --- GPU host launcher: one form to bind the kernel ---
+(launch-gpu-mojo vector-add-gpu [a b out])
 
 ;; --- smoothstep (shader classic) ---
 (defn-mojo smoothstep ^f32
@@ -166,6 +174,32 @@
 
 (defn-mojo maybe-pos ^Opt-f32 [^f32 x]
   (if (> x 0.0) (some x) (none)))
+
+;; --- default parameter values (keyword-style call sites) ---
+(defn-mojo clamp ^f32 [^f32 x ^{:default 0.0} ^f32 lo ^{:default 1.0} ^f32 hi]
+  (max lo (min hi x)))
+
+;; --- docstrings via ^{:doc "..."} ---
+(defn-mojo ^{:doc "Euclidean length of a 2-vector."} len2 ^f32
+  [^f32 x ^f32 y]
+  (sqrt (+ (* x x) (* y y))))
+
+;; --- iterator-protocol for-in over List[T] ---
+(defn-mojo dump ^i32 [^List-f32 xs]
+  (for-mojo-in [x xs] (print x))
+  0)
+
+;; --- Dict[str, f32] + get-mojo / assoc-mojo ---
+(defn-mojo dict-demo ^i32 [^Dict-str-f32 d]
+  (assoc-mojo d "alpha" 0.5)
+  0)
+
+;; --- Tuple returns ---
+(defn-mojo triple-of ^Tuple-f32-f32-f32 [^f32 x] (tuple x x x))
+
+;; --- decorator stacking via ^{:decorators [...]} ---
+(defn-mojo ^{:decorators [:always-inline :parameter]} hot ^f32
+  [^f32 x] (* x x))
 `;
 
     (async () => {
