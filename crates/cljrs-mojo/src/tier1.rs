@@ -644,22 +644,29 @@ fn lower_elementwise(ctx: &Ctx, list: &[Value], form: &Value, parallel: bool) ->
             pr(form)
         ));
     }
-    // Validate that every ptr_input shares the element DType (phase 1/3).
+    // Mixed-precision: inputs may have different dtypes from each other
+    // and from the output as long as the body contains at least one
+    // `(cast-mojo x ^T)` to bridge them. Without a cast, dtypes must
+    // match (preserves the old tight error for plain kernels).
     let first_ty = ptr_inputs[0].1.clone();
-    for (n, t) in ptr_inputs.iter().skip(1) {
-        if t != &first_ty {
+    let has_cast = body_contains_head(body_form, "cast-mojo");
+    if !has_cast {
+        for (n, t) in ptr_inputs.iter().skip(1) {
+            if t != &first_ty {
+                return Err(format!(
+                    "elementwise-mojo: all per-element inputs must share the same dtype; \
+                     `{n}` is {} but first input is {} in: {}",
+                    t.as_str(), first_ty.as_str(), pr(form)
+                ));
+            }
+        }
+        if ret_ty != first_ty {
             return Err(format!(
-                "elementwise-mojo: all per-element inputs must share the same dtype; \
-                 `{n}` is {} but first input is {} in: {}",
-                t.as_str(), first_ty.as_str(), pr(form)
+                "elementwise-mojo: return type must match per-element input dtype ({}); \
+                 use (cast-mojo x ^T) for mixed precision: {}",
+                first_ty.as_str(), pr(form)
             ));
         }
-    }
-    if ret_ty != first_ty {
-        return Err(format!(
-            "elementwise-mojo: return type must match per-element input dtype ({}): {}",
-            first_ty.as_str(), pr(form)
-        ));
     }
     // Lower the body under a purity check: only arithmetic, comparisons,
     // math.*, builtin abs/min/max, `if`, and references to param names are
@@ -678,6 +685,23 @@ fn lower_elementwise(ctx: &Ctx, list: &[Value], form: &Value, parallel: bool) ->
         parallel,
         comment: Some(pr(form)),
     })
+}
+
+/// Shallow walk: returns true if any sub-form in `body` is a list whose
+/// head symbol equals `head`. Used to detect `cast-mojo` in kernel bodies.
+fn body_contains_head(body: &Value, head: &str) -> bool {
+    let (_, body) = peel_tag(body);
+    match body {
+        Value::List(xs) => {
+            if let Some(h) = xs.first().and_then(sym_str) {
+                if h == head {
+                    return true;
+                }
+            }
+            xs.iter().any(|x| body_contains_head(x, head))
+        }
+        _ => false,
+    }
 }
 
 /// Peel tags for an elementwise-mojo param: recognizes `^scalar` as a
@@ -745,6 +769,17 @@ fn check_elementwise_pure(body: &Value, names: &[String], form: &Value) -> Resul
                 for a in &xs[1..] {
                     check_elementwise_pure(a, names, form)?;
                 }
+                return Ok(());
+            }
+            // `cast-mojo` is allowed — just recurse into its inner arg (the
+            // target-type tag is peeled at lowering time).
+            if head == "cast-mojo" {
+                if xs.len() != 2 {
+                    return Err(format!(
+                        "cast-mojo expects (cast-mojo x ^T) in: {}", pr(form)
+                    ));
+                }
+                check_elementwise_pure(&xs[1], names, form)?;
                 return Ok(());
             }
             let allowed = crate::runtime::binop(head).is_some()
@@ -834,20 +869,28 @@ fn lower_reduce(ctx: &Ctx, list: &[Value], form: &Value) -> Result<MItem, String
         }
         ptr_inputs.push((n, ty));
     }
+    // Mixed-precision reductions are supported: inputs may have different
+    // dtypes from each other and from the accumulator as long as the body
+    // contains at least one `(cast-mojo x ^T)` to bridge. Without a cast,
+    // dtypes must match (preserves the old tight error).
     let first_ty = ptr_inputs[0].1.clone();
-    for (n, t) in ptr_inputs.iter().skip(1) {
-        if t != &first_ty {
+    let has_cast = body_contains_head(body_form, "cast-mojo");
+    if !has_cast {
+        for (n, t) in ptr_inputs.iter().skip(1) {
+            if t != &first_ty {
+                return Err(format!(
+                    "reduce-mojo: per-element inputs must share dtype; `{n}` is {} but first is {}",
+                    t.as_str(), first_ty.as_str()
+                ));
+            }
+        }
+        if ret_ty != first_ty {
             return Err(format!(
-                "reduce-mojo: per-element inputs must share dtype; `{n}` is {} but first is {}",
-                t.as_str(), first_ty.as_str()
+                "reduce-mojo: return type must match element dtype ({}); \
+                 use (cast-mojo x ^T) for mixed precision: {}",
+                first_ty.as_str(), pr(form)
             ));
         }
-    }
-    if ret_ty != first_ty {
-        return Err(format!(
-            "reduce-mojo: return type must match element dtype ({}): {}",
-            first_ty.as_str(), pr(form)
-        ));
     }
     // Infer combiner from the wrapping expression. Two idioms are supported:
     //   (reduce-mojo sum-sq [^f32 x] ^f32 (* x x) 0.0)        ← implicit +
@@ -1976,6 +2019,43 @@ fn lower_call(ctx: &Ctx, v: &[Value]) -> Result<MExpr, String> {
         // Infer element type from first lit (Int → Int, Float → Float64, ...).
         let ty_str = infer_list_ty(&lowered);
         return Ok(MExpr::Call { callee: format!("List[{ty_str}]"), args: lowered });
+    }
+    // `(cast-mojo x ^T)` → `x.cast[DType.<T>]()`. Works for both scalar
+    // Mojo types (which are SIMD[DType, 1]) and SIMD vectors.
+    if head == "cast-mojo" {
+        if args.len() != 1 {
+            return Err(format!("cast-mojo expects (cast-mojo x ^T): {}", pr_list(v)));
+        }
+        let (ty, inner) = peel_tag(&args[0]);
+        if matches!(ty, MType::Infer) {
+            return Err(format!(
+                "cast-mojo requires a type tag on its argument: {}",
+                pr_list(v)
+            ));
+        }
+        let dt = match &ty {
+            MType::Float32 => "float32",
+            MType::Float64 => "float64",
+            MType::BFloat16 => "bfloat16",
+            MType::Int8 => "int8",
+            MType::Int16 => "int16",
+            MType::Int32 => "int32",
+            MType::Int64 => "int64",
+            MType::UInt8 => "uint8",
+            MType::UInt16 => "uint16",
+            MType::UInt32 => "uint32",
+            MType::UInt64 => "uint64",
+            MType::Bool => "bool",
+            _ => return Err(format!(
+                "cast-mojo: unsupported target type `{}` in: {}",
+                ty.as_str(), pr_list(v)
+            )),
+        };
+        let inner_expr = lower_expr(ctx, inner)?;
+        return Ok(MExpr::Call {
+            callee: format!("__method__cast[DType.{dt}]"),
+            args: vec![inner_expr],
+        });
     }
     if head == "tuple" {
         // Mojo's Tuple type accepts positional args: `Tuple[T1, T2, ...](a, b, ...)`.

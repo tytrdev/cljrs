@@ -67,7 +67,9 @@
 //!   `copysign`, `abs`, `min`, `max`.
 //! - **Elementwise kernels**: `(elementwise-mojo NAME [^T a ^T b] ^T body)`
 //!   emits a scalar loop at Readable/Optimized and a
-//!   `vectorize[body, nelts](n)` kernel at Max.
+//!   `vectorize[body, nelts](n)` kernel at Max. Mixed-precision allowed
+//!   when the body contains at least one `(cast-mojo ^T x)` — each input
+//!   loads at its own dtype, casts bridge to the accumulator/output.
 //! - **Parallel kernels**: `(parallel-mojo ...)` — same shape, emits
 //!   `parallelize[kernel](n)` instead of vectorize (embarrassingly
 //!   parallel across workers, same body across all tiers).
@@ -105,9 +107,9 @@
 //! - `loop`, `let`, `cond`, `recur`, `for-mojo`, `for-mojo-in`, `try`,
 //!   `raise`, `parameter-if`, `mojo-assert` in non-tail / non-stmt
 //!   positions.
-//! - Mixed-precision kernels (e.g. FP16 inputs + FP32 accumulator) —
-//!   elementwise/reduce-mojo currently require matching input and
-//!   output dtypes.
+//! - Mixed-precision kernels without an explicit `(cast-mojo ^T x)` in
+//!   the body still error (we use the presence of cast-mojo as the
+//!   opt-in signal).
 //! - Source-level `;;` comment pass-through — the reader strips them
 //!   before the transpiler sees the form.
 //! - Multi-output kernels (a single reduce producing 2+ accumulators).
@@ -492,16 +494,17 @@ fn print_elementwise(
     }
     let ty_str = out_ty.as_str();
     let dt = mtype_dtype_field(out_ty);
-    // Signature.
+    // Signature — each ptr input uses its OWN dtype (mixed-precision:
+    // a Float16 input can feed a Float32 output).
     out.push_str("fn ");
     out.push_str(&snake(name));
     out.push('(');
-    for (i, (n, _)) in ptr_inputs.iter().enumerate() {
+    for (i, (n, pty)) in ptr_inputs.iter().enumerate() {
         if i > 0 {
             out.push_str(", ");
         }
         out.push_str(&snake(n));
-        out.push_str(&format!(": UnsafePointer[{}]", ty_str));
+        out.push_str(&format!(": UnsafePointer[{}]", pty.as_str()));
     }
     for (n, t) in scalar_inputs {
         out.push_str(", ");
@@ -548,10 +551,11 @@ fn print_elementwise(
             //   vectorize[__kernel, nelts_<short>](n)
             out.push_str("    @parameter\n");
             out.push_str("    fn __kernel[w: Int](i: Int):\n");
-            for (n, _) in ptr_inputs {
+            for (n, pty) in ptr_inputs {
                 let sn = snake(n);
+                let pdt = mtype_dtype_field(pty);
                 out.push_str(&format!(
-                    "        var {sn}v = SIMD[DType.{dt}, w].load({sn}, i)\n"
+                    "        var {sn}v = SIMD[DType.{pdt}, w].load({sn}, i)\n"
                 ));
             }
             let ptr_names: Vec<String> = ptr_inputs.iter().map(|(n, _)| n.clone()).collect();
@@ -592,12 +596,12 @@ fn print_reduce(
     out.push_str("fn ");
     out.push_str(&snake(name));
     out.push('(');
-    for (i, (n, _)) in ptr_inputs.iter().enumerate() {
+    for (i, (n, pty)) in ptr_inputs.iter().enumerate() {
         if i > 0 {
             out.push_str(", ");
         }
         out.push_str(&snake(n));
-        out.push_str(&format!(": UnsafePointer[{ty_str}]"));
+        out.push_str(&format!(": UnsafePointer[{}]", pty.as_str()));
     }
     out.push_str(&format!(", n: Int) -> {ty_str}:\n"));
 
@@ -644,10 +648,11 @@ fn print_reduce(
             out.push_str(")\n");
             out.push_str("    @parameter\n");
             out.push_str("    fn __kernel[w: Int](i: Int):\n");
-            for (n, _) in ptr_inputs {
+            for (n, pty) in ptr_inputs {
                 let sn = snake(n);
+                let pdt = mtype_dtype_field(pty);
                 out.push_str(&format!(
-                    "        var {sn}v = SIMD[DType.{dt}, w].load({sn}, i)\n"
+                    "        var {sn}v = SIMD[DType.{pdt}, w].load({sn}, i)\n"
                 ));
             }
             let ptr_names: Vec<String> = ptr_inputs.iter().map(|(n, _)| n.clone()).collect();
@@ -1292,6 +1297,53 @@ mod closure_tests {
         // Missing params vector.
         let src = "(defn-mojo bad ^f32 [^f32 x] ((fn 1) x))";
         assert!(emit(src, Tier::Readable).is_err());
+    }
+}
+
+#[cfg(test)]
+mod mixed_precision_tests {
+    use super::{emit, Tier};
+
+    #[test]
+    fn reduce_fp16_to_fp32_emits_mixed_load_and_cast() {
+        // Sum-of-squares: BFloat16 input, Float32 accumulator.
+        let src = "(reduce-mojo sum-sq-f16 [^bf16 x] ^f32 (* (cast-mojo ^f32 x) (cast-mojo ^f32 x)) 0.0)";
+        let out = emit(src, Tier::Max).unwrap();
+        // Input pointer uses source dtype.
+        assert!(out.contains("x: UnsafePointer[BFloat16]"), "got:\n{out}");
+        // Return type is the accumulator dtype.
+        assert!(out.contains("-> Float32"), "got:\n{out}");
+        // SIMD load uses the input dtype.
+        assert!(out.contains("SIMD[DType.bfloat16"), "got:\n{out}");
+        // Cast to f32 appears.
+        assert!(out.contains("cast[DType.float32]"), "got:\n{out}");
+    }
+
+    #[test]
+    fn elementwise_fp32_to_fp16_emits_cast_store() {
+        // Takes f32, writes bf16 via cast.
+        let src = "(elementwise-mojo downcast [^f32 x] ^bf16 (cast-mojo ^bf16 x))";
+        let out = emit(src, Tier::Max).unwrap();
+        assert!(out.contains("x: UnsafePointer[Float32]"), "got:\n{out}");
+        assert!(out.contains("out: UnsafePointer[BFloat16]"), "got:\n{out}");
+        assert!(out.contains("cast[DType.bfloat16]"), "got:\n{out}");
+    }
+
+    #[test]
+    fn scalar_cast_in_plain_defn_works() {
+        // Outside a kernel: `(cast-mojo ^i32 x)` in a defn-mojo body.
+        let src = "(defn-mojo truncf ^i32 [^f32 x] (cast-mojo ^i32 x))";
+        let out = emit(src, Tier::Readable).unwrap();
+        // Scalar Mojo types also accept `.cast[DType.int32]()`.
+        assert!(out.contains("x.cast[DType.int32]()"), "got:\n{out}");
+    }
+
+    #[test]
+    fn mixed_dtypes_without_cast_still_errors() {
+        // The old error path is preserved when no cast appears.
+        let src = "(elementwise-mojo bad [^f32 a ^f64 b] ^f32 (+ a b))";
+        let err = emit(src, Tier::Max).unwrap_err();
+        assert!(err.contains("share the same dtype"), "got: {err}");
     }
 }
 
