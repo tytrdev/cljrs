@@ -20,7 +20,11 @@
 //! - **Composite types**: `^SIMDf32x4` → `SIMD[DType.float32, 4]`,
 //!   `^List-f32` → `List[Float32]`, `^Opt-f32` → `Optional[Float32]`,
 //!   `^Tuple-i32-f32` → `Tuple[Int32, Float32]`,
-//!   `^Dict-str-f32` → `Dict[String, Float32]`.
+//!   `^Dict-str-f32` → `Dict[String, Float32]`,
+//!   `^fn/f32->f32` → `fn(Float32) -> Float32`,
+//!   `^fn/f32|f32->f32` → `fn(Float32, Float32) -> Float32` (multi-arg
+//!   fn-pointer types; `|` separates params because comma is reader
+//!   whitespace).
 //! - **Argument conventions**: `^owned`, `^borrowed`, `^inout`, `^ref`
 //!   stack with a type tag: `[^inout ^i32 x]` → `inout x: Int32`.
 //! - **Default args**: `^{:default EXPR}` on a param → `name: T = EXPR`.
@@ -93,8 +97,11 @@
 //! - Collection literals `[1 2 3]`, `{:a 1}`, `#{:a}` in expr position —
 //!   use `(list ...)` / `(dict-mojo ...)` / `(set ...)` instead.
 //! - Variadic params (`& rest`).
-//! - Higher-order fn refs as arguments / closures passed as values —
-//!   fn symbols must be called directly.
+//! - Higher-order fn refs as arguments are supported via `^fn/...` typed
+//!   parameters and calling the bound symbol. Anonymous `(fn [^T x] body)`
+//!   hoists to a `__anon_fn<N>` top-level helper and yields a `Var`
+//!   reference. Captures / closures-over-locals are NOT yet supported —
+//!   the anonymous fn must be closed (only reference its own params).
 //! - `loop`, `let`, `cond`, `recur`, `for-mojo`, `for-mojo-in`, `try`,
 //!   `raise`, `parameter-if`, `mojo-assert` in non-tail / non-stmt
 //!   positions.
@@ -1232,6 +1239,59 @@ fn print_expr(out: &mut String, e: &MExpr) {
             }
             out.push('"');
         }
+    }
+}
+
+#[cfg(test)]
+mod closure_tests {
+    use super::{emit, Tier};
+
+    #[test]
+    fn fn_type_tag_parses_simple() {
+        // A defn-mojo that accepts a `^fn/f32->f32` parameter.
+        let src = "(defn-mojo apply-twice ^f32 [^fn/f32->f32 f ^f32 x] (f (f x)))";
+        let out = emit(src, Tier::Readable).unwrap();
+        assert!(
+            out.contains("f: fn(Float32) -> Float32"),
+            "expected fn-type param, got:\n{out}"
+        );
+        assert!(out.contains("f(f(x))"), "expected nested call, got:\n{out}");
+    }
+
+    #[test]
+    fn fn_type_tag_two_params() {
+        let src = "(defn-mojo zip-with ^f32 [^fn/f32|f32->f32 op ^f32 a ^f32 b] (op a b))";
+        let out = emit(src, Tier::Readable).unwrap();
+        assert!(
+            out.contains("op: fn(Float32, Float32) -> Float32"),
+            "got:\n{out}"
+        );
+        assert!(out.contains("op(a, b)"), "got:\n{out}");
+    }
+
+    #[test]
+    fn anon_fn_hoists_to_helper() {
+        // A defn-mojo that passes an anonymous fn to apply-twice.
+        let src = "\
+(defn-mojo apply-twice ^f32 [^fn/f32->f32 f ^f32 x] (f (f x)))
+(defn-mojo use-it ^f32 [^f32 x] (apply-twice (fn ^f32 [^f32 y] (+ y 1.0)) x))";
+        let out = emit(src, Tier::Readable).unwrap();
+        // The anon fn should appear as a hoisted helper.
+        assert!(
+            out.contains("fn __anon_fn0("),
+            "expected hoisted anon fn, got:\n{out}"
+        );
+        assert!(
+            out.contains("apply_twice(__anon_fn0, x)"),
+            "call site should reference hoisted name, got:\n{out}"
+        );
+    }
+
+    #[test]
+    fn anon_fn_bad_signature_errors() {
+        // Missing params vector.
+        let src = "(defn-mojo bad ^f32 [^f32 x] ((fn 1) x))";
+        assert!(emit(src, Tier::Readable).is_err());
     }
 }
 

@@ -36,6 +36,9 @@ pub enum MType {
     Dict(Box<MType>, Box<MType>),
     /// `SIMD[DType.Tdtype, N]` where N is a compile-time parameter name.
     SimdParam(String, String),
+    /// `fn(T1, T2, ...) -> R` — first-class fn-pointer type for closures.
+    /// Parsed from `^fn/T->R` or `^fn/T|U->R`.
+    Fn(Vec<MType>, Box<MType>),
     /// Unannotated. Printer will usually omit the `: T` suffix.
     Infer,
 }
@@ -66,6 +69,10 @@ impl MType {
                 format!("Tuple[{}]", parts.join(", "))
             }
             MType::Dict(k, v) => format!("Dict[{}, {}]", k.as_str(), v.as_str()),
+            MType::Fn(params, ret) => {
+                let parts: Vec<String> = params.iter().map(|t| t.as_str()).collect();
+                format!("fn({}) -> {}", parts.join(", "), ret.as_str())
+            }
             MType::Infer => String::new(),
         }
     }

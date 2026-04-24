@@ -22,6 +22,9 @@ pub struct Ctx {
     /// Whether we're currently lowering a parametric fn body (controls
     /// `(parameter-if ...)` legality).
     in_parametric: RefCell<bool>,
+    /// Anonymous fn items hoisted out of expression position. Emitted at
+    /// top level before the item that triggered their creation.
+    pub anon_fns: RefCell<Vec<MItem>>,
 }
 
 impl Ctx {
@@ -31,6 +34,7 @@ impl Ctx {
             gensym: RefCell::new(0),
             methods: RefCell::new(Vec::new()),
             in_parametric: RefCell::new(false),
+            anon_fns: RefCell::new(Vec::new()),
         }
     }
     fn need_import(&self, line: &str) {
@@ -55,7 +59,15 @@ pub fn lower_module(forms: &[Value]) -> Result<MModule, String> {
     let ctx = Ctx::new();
     let mut items = Vec::new();
     for form in forms {
-        items.extend(lower_top(&ctx, form)?);
+        let mut produced = lower_top(&ctx, form)?;
+        // Flush anonymous fns hoisted out of this top form's bodies. They
+        // appear BEFORE the item that referenced them so the Mojo compiler
+        // sees the helper before its use.
+        let anons = std::mem::take(&mut *ctx.anon_fns.borrow_mut());
+        for a in anons {
+            items.push(a);
+        }
+        items.append(&mut produced);
     }
     // Attach pending methods to their structs.
     let pending = std::mem::take(&mut *ctx.methods.borrow_mut());
@@ -204,7 +216,8 @@ fn mtype_to_tag_symbol(t: &MType) -> String {
         | MType::List(_)
         | MType::Optional(_)
         | MType::Tuple(_)
-        | MType::Dict(_, _) => "Infer".into(),
+        | MType::Dict(_, _)
+        | MType::Fn(_, _) => "Infer".into(),
     }
 }
 
@@ -1818,6 +1831,69 @@ pub fn lower_expr(ctx: &Ctx, form: &Value) -> Result<MExpr, String> {
     }
 }
 
+/// Hoist `(fn [^T x ...] body)` to a top-level helper fn with a generated
+/// name, and return an `MExpr::Var` of that name. The surrounding
+/// `lower_module` drains `ctx.anon_fns` after each top form, so call
+/// sites get the helper declared above them.
+///
+/// Shape accepted:
+///   (fn [^T x ^U y] body)              — return type inferred
+///   (fn ^R [^T x ^U y] body)           — explicit return
+///
+/// Body must be a single expression.
+fn lower_anon_fn(ctx: &Ctx, whole: &[Value], args: &[Value]) -> Result<MExpr, String> {
+    if args.is_empty() {
+        return Err(format!("fn expects at least [params] body: {}", pr_list(whole)));
+    }
+    // Optional ^RET tag can live on args[0] (wrapping the params vector
+    // itself). Peel it.
+    let (ret_ty, params_form) = peel_tag(&args[0]);
+    let params_vec = match params_form {
+        Value::Vector(pv) => pv,
+        _ => {
+            return Err(format!(
+                "fn expects a parameter vector: {}",
+                pr_list(whole)
+            ));
+        }
+    };
+    let body_forms = &args[1..];
+    if body_forms.len() != 1 {
+        return Err(format!(
+            "fn body must be a single expression (got {}): {}",
+            body_forms.len(),
+            pr_list(whole)
+        ));
+    }
+    // Parse params as [^T name ^U name ...] using peel_tag.
+    let mut params: Vec<(String, MType, ParamConv)> = Vec::new();
+    for p in params_vec.iter() {
+        let (pty, pname) = peel_tag(p);
+        let n = sym_str(pname)
+            .ok_or_else(|| format!("fn param name must be a symbol: {}", pr_list(whole)))?
+            .to_string();
+        params.push((n, pty, ParamConv::Default));
+    }
+    let body_expr = lower_expr(ctx, &body_forms[0])?;
+    let name = ctx.gensym("anon_fn");
+    let param_defaults = vec![None; params.len()];
+    let f = MFn {
+        name: name.clone(),
+        params,
+        param_defaults,
+        ret: ret_ty,
+        body: vec![MStmt::Return(body_expr)],
+        decorators: Vec::new(),
+        comment: None,
+        cparams: Vec::new(),
+        raises: false,
+        is_method: false,
+        docstring: None,
+    };
+    ctx.anon_fns.borrow_mut().push(MItem::Fn(f));
+    Ok(MExpr::Var(name))
+}
+
 fn lower_call(ctx: &Ctx, v: &[Value]) -> Result<MExpr, String> {
     if v.is_empty() {
         return Err("empty call".into());
@@ -1853,6 +1929,14 @@ fn lower_call(ctx: &Ctx, v: &[Value]) -> Result<MExpr, String> {
             return Ok(MExpr::IntLit(0));
         }
         return lower_expr(ctx, args.last().unwrap());
+    }
+    // Anonymous fn in expression position: hoist to a top-level helper
+    // and return a Var reference. Shape:
+    //   (fn ^R [^T x ^U y] body)  — ^R on the fn symbol OR the params vec
+    // Body must be a single expression. Return type is inferred from the
+    // type tag; if missing, we rely on Mojo's inference and omit it.
+    if head == "fn" {
+        return lower_anon_fn(ctx, v, args);
     }
     // Field access: (. obj field) → obj.field
     if head == "." {
@@ -2448,6 +2532,21 @@ fn decorator_to_mojo(s: &str) -> String {
 pub fn parse_type_tag(tag: &str) -> MType {
     if let Some(t) = runtime::type_hint(tag) {
         return t;
+    }
+    // `fn/T->R`, `fn/T|U->R`, `fn/->R` (nullary). `|`-separated params
+    // (comma is whitespace to the reader), `->` separates params from
+    // return type.
+    if let Some(sig) = tag.strip_prefix("fn/") {
+        if let Some(arrow_idx) = sig.find("->") {
+            let params_part = &sig[..arrow_idx];
+            let ret_part = &sig[arrow_idx + 2..];
+            let params: Vec<MType> = if params_part.is_empty() {
+                Vec::new()
+            } else {
+                params_part.split('|').map(parse_type_tag).collect()
+            };
+            return MType::Fn(params, Box::new(parse_type_tag(ret_part)));
+        }
     }
     if let Some(rest) = tag.strip_prefix("List-") {
         return MType::List(Box::new(parse_type_tag(rest)));
