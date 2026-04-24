@@ -258,6 +258,29 @@ fn capitalized_type_hint_passes_through_as_named() {
 }
 
 #[test]
+fn break_in_for_mojo_loop() {
+    let src = "(defn-mojo find ^i32 [^i32 n] (for-mojo [i 0 n] (if (hit? i) (break))) 0)";
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("for i in range(0, n):"), "got:\n{out}");
+    assert!(out.contains("break"), "got:\n{out}");
+}
+
+#[test]
+fn continue_in_for_mojo_loop() {
+    let src = "(defn-mojo go ^i32 [^i32 n] (for-mojo [i 0 n] (if (skip? i) (continue) (work i))) 0)";
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("continue"), "got:\n{out}");
+}
+
+#[test]
+fn break_outside_loop_still_emits_keyword() {
+    // We don't validate placement; print should be a `break` line.
+    let src = "(defn-mojo b ^i32 [] (break) 0)";
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("break"), "got:\n{out}");
+}
+
+#[test]
 fn for_mojo_sugar_basic() {
     let src = "(defn-mojo loop1 ^i32 [^i32 n] (for-mojo [i 0 n] (sink i)) 0)";
     let out = emit(src, Tier::Readable).unwrap();

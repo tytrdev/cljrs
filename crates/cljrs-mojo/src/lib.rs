@@ -13,7 +13,8 @@
 //!   `loop`/`recur`. Single-counter
 //!   loops auto-emit `for i in range(lo, hi):` instead of a while/break
 //!   trampoline. Sugar `(for-mojo [i lo hi] body...)` skips the loop/recur
-//!   ceremony entirely.
+//!   ceremony entirely. `(break)` and `(continue)` lower verbatim inside
+//!   loop bodies.
 //! - arithmetic, comparisons, booleans, math fns (`sin cos tan sqrt exp
 //!   log floor ceil pow`, `abs min max`)
 //! - structs: `(defstruct-mojo Vec3 [^f32 x ^f32 y ^f32 z])` emits an

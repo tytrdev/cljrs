@@ -314,6 +314,14 @@ fn lower_stmt(ctx: &Ctx, form: &Value, out: &mut Vec<MStmt>) -> Result<(), Strin
     if let Some(list) = as_list(form) {
         if let Some(head) = list.first().and_then(sym_str) {
             match head {
+                "break" => {
+                    out.push(MStmt::Break);
+                    return Ok(());
+                }
+                "continue" => {
+                    out.push(MStmt::Continue);
+                    return Ok(());
+                }
                 "for-mojo" => return lower_for_mojo_tail(ctx, list, out, TailMode::Assign("__ignore".into()))
                     .and_then(|_| {
                         // Drop the trailing assign-to-__ignore.
