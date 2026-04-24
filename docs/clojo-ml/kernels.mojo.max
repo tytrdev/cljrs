@@ -1,0 +1,65 @@
+from math import exp
+from std.memory import UnsafePointer
+from std.memory.unsafe_pointer import alloc
+from std.sys import simd_width_of
+
+alias nelts_f64 = simd_width_of[DType.float64]()
+
+fn dot(a: UnsafePointer[Float64, MutAnyOrigin], b: UnsafePointer[Float64, MutAnyOrigin], n: Int) -> Float64:
+    var acc = SIMD[DType.float64, nelts_f64](0.0)
+    var i = 0
+    while i + nelts_f64 <= n:
+        var av = a.load[width=nelts_f64](i)
+        var bv = b.load[width=nelts_f64](i)
+        acc += (av * bv)
+        i += nelts_f64
+    var tail: Float64 = acc.reduce_add()
+    while i < n:
+        tail += (a[i] * b[i])
+        i += 1
+    return tail
+
+fn sigmoid(z: UnsafePointer[Float64, MutAnyOrigin], dst: UnsafePointer[Float64, MutAnyOrigin], n: Int):
+    var i = 0
+    while i + nelts_f64 <= n:
+        var zv = z.load[width=nelts_f64](i)
+        dst.store[width=nelts_f64](i, (1.0 / (1.0 + exp(0.0 - zv))))
+        i += nelts_f64
+    while i < n:
+        dst[i] = (1.0 / (1.0 + exp(0.0 - z[i])))
+        i += 1
+
+fn vsub(a: UnsafePointer[Float64, MutAnyOrigin], b: UnsafePointer[Float64, MutAnyOrigin], dst: UnsafePointer[Float64, MutAnyOrigin], n: Int):
+    var i = 0
+    while i + nelts_f64 <= n:
+        var av = a.load[width=nelts_f64](i)
+        var bv = b.load[width=nelts_f64](i)
+        dst.store[width=nelts_f64](i, (av - bv))
+        i += nelts_f64
+    while i < n:
+        dst[i] = (a[i] - b[i])
+        i += 1
+
+fn vsum(x: UnsafePointer[Float64, MutAnyOrigin], n: Int) -> Float64:
+    var acc = SIMD[DType.float64, nelts_f64](0.0)
+    var i = 0
+    while i + nelts_f64 <= n:
+        var xv = x.load[width=nelts_f64](i)
+        acc += xv
+        i += nelts_f64
+    var tail: Float64 = acc.reduce_add()
+    while i < n:
+        tail += x[i]
+        i += 1
+    return tail
+
+fn update_weights(w: UnsafePointer[Float64, MutAnyOrigin], g: UnsafePointer[Float64, MutAnyOrigin], lr: Float64, dst: UnsafePointer[Float64, MutAnyOrigin], n: Int):
+    var i = 0
+    while i + nelts_f64 <= n:
+        var wv = w.load[width=nelts_f64](i)
+        var gv = g.load[width=nelts_f64](i)
+        dst.store[width=nelts_f64](i, (wv - lr * gv))
+        i += nelts_f64
+    while i < n:
+        dst[i] = (w[i] - lr * g[i])
+        i += 1

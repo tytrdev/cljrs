@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Clojo ML — trained on real data</title>
+  <link rel="stylesheet" href="./style.css">
+  <style>
+    .cml-stat { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 0.1rem; padding: 0.5rem 0.9rem 0.6rem 0.9rem; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 6px; min-width: 130px; }
+    .cml-stat .label { font-size: 0.72rem; color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.04em; }
+    .cml-stat .val { font-family: var(--mono); font-size: 1.3rem; color: var(--fg); }
+    .cml-stat.highlight .val { color: var(--accent); }
+    .cml-grid { display: flex; gap: 0.6rem; flex-wrap: wrap; margin: 0.6rem 0 1.4rem 0; }
+    .cml-compare { font-family: var(--mono); font-size: 0.88rem; margin: 0.6rem 0 1.6rem 0; }
+    .cml-compare th { text-align: left; padding: 0.3rem 1rem 0.3rem 0; color: var(--fg-dim); font-weight: 500; }
+    .cml-compare td { padding: 0.3rem 1rem 0.3rem 0; }
+    .cml-compare .ours { color: var(--accent); font-weight: 500; }
+    .cml-two { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 0.6rem 0 1.4rem 0; }
+    @media (max-width: 900px) { .cml-two { grid-template-columns: 1fr; } }
+    .cml-two > div { border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: var(--bg-elev); }
+    .cml-two h4 { margin: 0; padding: 0.4rem 0.8rem; font-size: 0.8rem; color: var(--fg-dim); background: #12151b; border-bottom: 1px solid var(--border); font-weight: 500; }
+    .cml-two pre { margin: 0; padding: 0.7rem 0.9rem; font-size: 0.78rem; line-height: 1.45; overflow-x: auto; max-height: 520px; }
+    .cml-weights { font-family: var(--mono); font-size: 0.8rem; margin: 0.6rem 0 1.4rem 0; }
+    .cml-weights th { text-align: left; padding: 0.2rem 0.8rem 0.2rem 0; color: var(--fg-dim); font-weight: 500; font-size: 0.72rem; }
+    .cml-weights td { padding: 0.2rem 0.8rem 0.2rem 0; border-bottom: 1px dotted var(--border); }
+    .cml-weight-bar { display: inline-block; height: 6px; vertical-align: middle; border-radius: 2px; margin-right: 0.4rem; }
+    .cml-weight-bar.pos { background: #86efac; }
+    .cml-weight-bar.neg { background: #f87171; }
+  </style>
+</head>
+<body>
+  <main>
+    <h2>Clojo trained a real model</h2>
+    <p>
+      A logistic regression classifier trained end-to-end through the
+      cljrs → Mojo pipeline. Target: <b>Wisconsin breast cancer</b>
+      (569 biopsy measurements × 30 features, binary malignant/benign).
+      Same split scikit-learn uses in its regression tutorial: 80/20
+      stratified, <code>random_state=42</code>. The kernels are
+      five cljrs forms; everything else (data load, epoch loop,
+      metrics) is plain Mojo calling into them.
+    </p>
+
+    <div class="cml-grid" id="cml-stats">loading…</div>
+
+    <h3>vs scikit-learn on the same split</h3>
+    <p>
+      scikit-learn's <code>LogisticRegression(C=1e6, max_iter=1000)</code>
+      (near-unregularized) serves as the sanity baseline. Same preprocessed
+      features, same stratified split, same target metric.
+    </p>
+    <table class="cml-compare" id="cml-compare">
+      <thead>
+        <tr><th>model</th><th>train acc</th><th>test acc</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <h3>The kernels — all five, in cljrs</h3>
+    <p>
+      Every hot path — forward dot, sigmoid, residual, reduction, weight
+      update — was written once in cljrs and transpiled to Mojo. The
+      surrounding training code is plain Mojo, about 100 lines of
+      epoch loop + data I/O that calls these five fns.
+    </p>
+    <div class="cml-two">
+      <div>
+        <h4>kernels.clj  —  cljrs-mojo DSL</h4>
+        <pre><code class="language-clj" id="cml-cljrs">loading…</code></pre>
+      </div>
+      <div>
+        <h4>kernels.mojo.max  —  transpiled (tier Max)</h4>
+        <pre><code class="language-mojo" id="cml-mojo">loading…</code></pre>
+      </div>
+    </div>
+
+    <h3>Learned feature importance</h3>
+    <p>
+      After 1000 epochs, the top weights correspond to the most
+      predictive biopsy features. Positive weights push toward benign,
+      negative toward malignant (y=1 is benign in this dataset).
+    </p>
+    <table class="cml-weights" id="cml-weights">
+      <thead>
+        <tr><th>feature</th><th>weight</th><th></th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <h3>How to reproduce</h3>
+    <pre><code class="language-bash">bench/clojo_logreg/run.sh
+# transpiles kernels.clj → kernels.mojo.{readable,optimized,max}
+# runs prepare_data.py (downloads dataset, emits f64 binaries)
+# mojo build -O3 kernels + train harness, runs
+# writes docs/clojo-ml/results.json</code></pre>
+    <p>
+      Requires the <code>mojo</code> binary on <code>PATH</code> — install
+      via <code>uv</code> and Modular's nightly wheel index (see the
+      <a href="./kernels.html">numeric kernels</a> page for setup).
+      The transpiled Mojo works on nightly <code>0.26.3</code>; the
+      transpiler follows the active syntax rather than a pinned version.
+    </p>
+
+    <h3>What this shows and what it doesn't</h3>
+    <ul>
+      <li><b>Shows</b>: cljrs-mojo generates Mojo that compiles with
+        <code>mojo build -O3</code>, links against real stdlib types
+        (<code>UnsafePointer</code>, <code>SIMD</code>), and executes a
+        real training loop that converges on real data to a model that
+        matches (or beats) a hand-written scikit-learn baseline.</li>
+      <li><b>Doesn't show</b>: deep learning. No autograd, no matmul
+        primitive, no batching. This is logistic regression because it
+        decomposes cleanly into dot + elementwise, which is exactly the
+        scope of kernels the transpiler currently supports well.</li>
+      <li><b>The path forward</b>: add matmul and conv as first-class
+        kernel forms. Once those exist, MLPs fall out naturally.</li>
+    </ul>
+  </main>
+  <script type="module">
+    import { mountChrome, highlightAll } from "./_layout.js";
+    mountChrome();
+    const r = await fetch("./clojo-ml/results.json").then(r => r.json());
+
+    // Stats bar.
+    const stats = document.querySelector("#cml-stats");
+    const pct = (x) => (100 * x).toFixed(2) + "%";
+    const stat = (label, val, cls) => {
+      const d = document.createElement("div");
+      d.className = "cml-stat" + (cls ? " " + cls : "");
+      d.innerHTML = `<span class="label">${label}</span><span class="val">${val}</span>`;
+      return d;
+    };
+    stats.innerHTML = "";
+    stats.append(
+      stat("test acc", pct(r.cljrs_mojo.test_acc), "highlight"),
+      stat("train acc", pct(r.cljrs_mojo.train_acc)),
+      stat("train time", r.train_time_ms.toFixed(1) + " ms"),
+      stat("epochs", r.model.epochs),
+      stat("features", r.n_features),
+      stat("samples", `${r.n_train}/${r.n_test}`),
+    );
+
+    // Comparison table.
+    const cmp = document.querySelector("#cml-compare tbody");
+    const row = (name, tr, te, cls) => {
+      const tr_el = document.createElement("tr");
+      tr_el.className = cls || "";
+      tr_el.innerHTML = `<td>${name}</td><td>${pct(tr)}</td><td>${pct(te)}</td>`;
+      return tr_el;
+    };
+    cmp.append(
+      row("cljrs → Mojo (this page)", r.cljrs_mojo.train_acc, r.cljrs_mojo.test_acc, "ours"),
+      row("scikit-learn LR baseline", r.sklearn_baseline.train_acc, r.sklearn_baseline.test_acc),
+    );
+
+    // Source panels.
+    const cljrs = await fetch("./clojo-ml/kernels.clj").then(r => r.text());
+    document.querySelector("#cml-cljrs").textContent = cljrs.trim();
+    const mojo = await fetch("./clojo-ml/kernels.mojo.max").then(r => r.text());
+    document.querySelector("#cml-mojo").textContent = mojo.trim();
+
+    // Weights table, sorted by |w| descending; top 15.
+    const wTbody = document.querySelector("#cml-weights tbody");
+    const weighted = r.feature_names.map((n, i) => ({ name: n, w: r.weights[i] }));
+    weighted.sort((a, b) => Math.abs(b.w) - Math.abs(a.w));
+    const maxAbs = Math.max(...weighted.map((w) => Math.abs(w.w)));
+    for (const { name, w } of weighted.slice(0, 15)) {
+      const tr = document.createElement("tr");
+      const width = Math.max(4, Math.round((Math.abs(w) / maxAbs) * 80));
+      const cls = w >= 0 ? "pos" : "neg";
+      tr.innerHTML = `
+        <td>${name}</td>
+        <td>${w.toFixed(4)}</td>
+        <td><span class="cml-weight-bar ${cls}" style="width:${width}px"></span></td>
+      `;
+      wTbody.appendChild(tr);
+    }
+
+    highlightAll().catch(() => {});
+  </script>
+</body>
+</html>

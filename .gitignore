@@ -53,3 +53,4 @@ ehthumbs.db
 .nrepl-port
 out/
 __pycache__/
+bench/clojo_logreg/data/

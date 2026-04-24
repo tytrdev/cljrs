@@ -1,0 +1,30 @@
+from math import exp
+
+# cljrs: (reduce-mojo dot [^f64 a ^f64 b] ^f64 (* a b) 0.0)
+fn dot(a: UnsafePointer[Float64, MutAnyOrigin], b: UnsafePointer[Float64, MutAnyOrigin], n: Int) -> Float64:
+    var acc: Float64 = 0.0
+    for i in range(n):
+        acc += (a[i] * b[i])
+    return acc
+
+# cljrs: (elementwise-mojo sigmoid [^f64 z] ^f64 (/ 1.0 (+ 1.0 (exp (...
+fn sigmoid(z: UnsafePointer[Float64, MutAnyOrigin], dst: UnsafePointer[Float64, MutAnyOrigin], n: Int):
+    for i in range(n):
+        dst[i] = (1.0 / (1.0 + exp(0.0 - z[i])))
+
+# cljrs: (elementwise-mojo vsub [^f64 a ^f64 b] ^f64 (- a b))
+fn vsub(a: UnsafePointer[Float64, MutAnyOrigin], b: UnsafePointer[Float64, MutAnyOrigin], dst: UnsafePointer[Float64, MutAnyOrigin], n: Int):
+    for i in range(n):
+        dst[i] = (a[i] - b[i])
+
+# cljrs: (reduce-mojo vsum [^f64 x] ^f64 x 0.0)
+fn vsum(x: UnsafePointer[Float64, MutAnyOrigin], n: Int) -> Float64:
+    var acc: Float64 = 0.0
+    for i in range(n):
+        acc += x[i]
+    return acc
+
+# cljrs: (elementwise-mojo update_weights [^f64 w ^f64 g ^scalar ^f64...
+fn update_weights(w: UnsafePointer[Float64, MutAnyOrigin], g: UnsafePointer[Float64, MutAnyOrigin], lr: Float64, dst: UnsafePointer[Float64, MutAnyOrigin], n: Int):
+    for i in range(n):
+        dst[i] = (w[i] - lr * g[i])
