@@ -1543,6 +1543,72 @@ mod multi_output_tests {
 }
 
 #[cfg(test)]
+mod docstring_tests {
+    use super::{emit, Tier};
+
+    #[test]
+    fn docstring_emits_as_triple_quoted_string() {
+        let src = r#"(defn-mojo ^{:doc "Adds two floats."} ^f32 add [^f32 x ^f32 y] (+ x y))"#;
+        for tier in [Tier::Readable, Tier::Optimized, Tier::Max] {
+            let out = emit(src, tier).unwrap();
+            assert!(
+                out.contains(r#""""Adds two floats.""""#),
+                "tier {:?} missing docstring:\n{out}",
+                tier
+            );
+        }
+    }
+
+    #[test]
+    fn docstring_with_multiline_content() {
+        let src = r#"(defn-mojo ^{:doc "Line one.\nLine two."} ^f32 f [^f32 x] x)"#;
+        let out = emit(src, Tier::Readable).unwrap();
+        // The reader unescapes \n in strings.
+        assert!(out.contains(r#""""Line one."#), "got:\n{out}");
+    }
+
+    #[test]
+    fn struct_docstring_absent_does_not_emit_quoted_string() {
+        let src = "(defn-mojo ^f32 f [^f32 x] x)";
+        let out = emit(src, Tier::Readable).unwrap();
+        assert!(!out.contains(r#"""""#), "unexpected docstring marker:\n{out}");
+    }
+}
+
+#[cfg(test)]
+mod decorator_tests {
+    use super::{emit, Tier};
+
+    #[test]
+    fn register_passable_decorator() {
+        let src = r#"(defstruct-mojo ^{:decorators [:register-passable]} Point [^f32 x ^f32 y])"#;
+        let out = emit(src, Tier::Readable).unwrap();
+        assert!(out.contains("@register_passable"), "got:\n{out}");
+        assert!(out.contains("struct Point"), "got:\n{out}");
+    }
+
+    #[test]
+    fn staticmethod_decorator_on_fn() {
+        let src = r#"(defn-mojo ^{:decorators [:staticmethod]} ^i32 clamp01 [^i32 x] x)"#;
+        let out = emit(src, Tier::Readable).unwrap();
+        assert!(out.contains("@staticmethod"), "got:\n{out}");
+    }
+
+    #[test]
+    fn multiple_decorators_stack_in_order() {
+        let src = r#"(defn-mojo ^{:decorators [:always-inline :parameter]} ^f32 f [^f32 x] x)"#;
+        let out = emit(src, Tier::Readable).unwrap();
+        assert!(out.contains("@always_inline"), "got:\n{out}");
+        assert!(out.contains("@parameter"), "got:\n{out}");
+        // Both should appear before the `fn` line.
+        let ai_pos = out.find("@always_inline").unwrap();
+        let pm_pos = out.find("@parameter").unwrap();
+        let fn_pos = out.find("fn f(").unwrap();
+        assert!(ai_pos < fn_pos && pm_pos < fn_pos, "decorators should precede fn:\n{out}");
+    }
+}
+
+#[cfg(test)]
 mod gather_scatter_tests {
     use super::{emit, Tier};
 
