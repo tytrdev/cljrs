@@ -1,0 +1,102 @@
+name: Mojo syntax check
+
+# Syntax-checks every .mojo.<tier> golden in crates/cljrs-mojo/tests/goldens/
+# against the real `mojo` binary. This is the correctness loop for the
+# transpiler — if we emit Mojo, we verify it actually parses.
+#
+# Install strategy: Modular publishes Mojo through `pixi` (conda-style).
+# The `modular` CLI tarball install path used to require a Modular
+# account token; pixi is credential-free for public channels.
+#
+# If pixi install fails on the runner (e.g. Modular changes distribution
+# again), the workflow uploads its log and the job fails loudly rather
+# than silently passing — see tools/mojo-check/BLOCKED.md for the fallback
+# procedure (run the check locally).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "crates/cljrs-mojo/**"
+      - "tools/mojo-check/**"
+      - ".github/workflows/mojo-check.yml"
+  pull_request:
+    paths:
+      - "crates/cljrs-mojo/**"
+      - "tools/mojo-check/**"
+      - ".github/workflows/mojo-check.yml"
+  workflow_dispatch:
+
+jobs:
+  check-mojo-goldens:
+    name: mojo check goldens
+    runs-on: ubuntu-latest
+    # If Mojo install goes down, we don't want the entire repo's CI
+    # gated on an external dependency. Treat this job as advisory
+    # until the install path has been stable in main for a while.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install pixi
+        run: |
+          curl -fsSL https://pixi.sh/install.sh | bash
+          echo "$HOME/.pixi/bin" >> "$GITHUB_PATH"
+
+      - name: Set up Mojo environment via pixi
+        run: |
+          mkdir -p /tmp/mojo-env
+          cd /tmp/mojo-env
+          pixi init mojo-env -c https://conda.modular.com/max-nightly -c conda-forge
+          cd mojo-env
+          pixi add modular || pixi add mojo
+          pixi run mojo --version
+
+      - name: Check all .mojo.<tier> goldens
+        id: check
+        run: |
+          set +e
+          cd /tmp/mojo-env/mojo-env
+          goldens_dir="${GITHUB_WORKSPACE}/crates/cljrs-mojo/tests/goldens"
+          fail=0
+          pass=0
+          skipped=0
+          echo "## Mojo syntax check results" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| File | Status |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|------|--------|" >> "$GITHUB_STEP_SUMMARY"
+          shopt -s nullglob
+          for f in "$goldens_dir"/*.mojo.readable "$goldens_dir"/*.mojo.optimized "$goldens_dir"/*.mojo.max; do
+            name=$(basename "$f")
+            # `mojo check` wants a .mojo extension, so stage each golden
+            # under a temp .mojo file first.
+            staged="/tmp/staged-${name}.mojo"
+            cp "$f" "$staged"
+            out=$(pixi run mojo check "$staged" 2>&1)
+            rc=$?
+            if [ $rc -eq 0 ]; then
+              echo "| $name | pass |" >> "$GITHUB_STEP_SUMMARY"
+              pass=$((pass + 1))
+            else
+              echo "| $name | FAIL |" >> "$GITHUB_STEP_SUMMARY"
+              echo "::error file=$f::mojo check failed: $(echo "$out" | head -5 | tr '\n' ' ')"
+              echo "--- $name ---"
+              echo "$out"
+              fail=$((fail + 1))
+            fi
+          done
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**$pass passed, $fail failed, $skipped skipped**" >> "$GITHUB_STEP_SUMMARY"
+          if [ $fail -gt 0 ]; then
+            exit 1
+          fi
+
+      - name: Upload install log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mojo-install-log
+          path: |
+            /tmp/mojo-env/**/*.log
+            /tmp/mojo-env/**/pixi.toml
+          if-no-files-found: ignore
