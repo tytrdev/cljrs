@@ -403,6 +403,47 @@ fn rename_user_call_callee() {
     assert!(out.contains("helper_fn(y)"), "got:\n{out}");
 }
 
+// ---------------- Feature: extra string ops ----------------
+
+#[test]
+fn str_upper_lower() {
+    let src = r#"(defn-mojo u ^str [^str s] (str-upper s))
+                 (defn-mojo l ^str [^str s] (str-lower s))"#;
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("s.upper()"), "got:\n{out}");
+    assert!(out.contains("s.lower()"), "got:\n{out}");
+}
+
+#[test]
+fn str_strip_fn() {
+    let src = r#"(defn-mojo t ^str [^str s] (str-strip s))"#;
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("s.strip()"), "got:\n{out}");
+}
+
+#[test]
+fn str_starts_ends_with() {
+    let src = r#"(defn-mojo a ^bool [^str s] (str-starts-with? s "x"))
+                 (defn-mojo b ^bool [^str s] (str-ends-with? s "y"))"#;
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains(r#"s.startswith("x")"#), "got:\n{out}");
+    assert!(out.contains(r#"s.endswith("y")"#), "got:\n{out}");
+}
+
+#[test]
+fn str_contains_fn() {
+    let src = r#"(defn-mojo a ^bool [^str s] (str-contains? s "z"))"#;
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains(r#"s.__contains__("z")"#), "got:\n{out}");
+}
+
+#[test]
+fn str_replace_fn() {
+    let src = r#"(defn-mojo a ^str [^str s] (str-replace s "a" "b"))"#;
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains(r#"s.replace("a", "b")"#), "got:\n{out}");
+}
+
 // ---------------- Feature: decorator stacking on fns ----------------
 
 #[test]

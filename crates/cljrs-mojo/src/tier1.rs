@@ -1993,6 +1993,28 @@ fn lower_call(ctx: &Ctx, v: &[Value]) -> Result<MExpr, String> {
             args: vec![s, sep],
         });
     }
+    // Extra string methods. All lower to Mojo's `s.<method>(args)` form.
+    if let Some(method) = match head {
+        "str-upper"        => Some("upper"),
+        "str-lower"        => Some("lower"),
+        "str-strip"        => Some("strip"),
+        "str-starts-with?" => Some("startswith"),
+        "str-ends-with?"   => Some("endswith"),
+        "str-contains?"    => Some("__contains__"),
+        "str-replace"      => Some("replace"),
+        _ => None,
+    } {
+        // str-replace takes 3 args; the rest are 1 (receiver-only) or 2.
+        let lowered: Result<Vec<_>, _> = args.iter().map(|a| lower_expr(ctx, a)).collect();
+        let lowered = lowered?;
+        if lowered.is_empty() {
+            return Err(format!("{head} needs the string as its first arg"));
+        }
+        return Ok(MExpr::Call {
+            callee: format!("__method__{method}"),
+            args: lowered,
+        });
+    }
     if head == "isinstance-mojo" {
         if args.len() != 2 {
             return Err("isinstance-mojo expects 2 args (value, Type)".into());
