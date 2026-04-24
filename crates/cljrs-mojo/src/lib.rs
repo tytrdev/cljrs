@@ -950,6 +950,22 @@ fn print_stmt(out: &mut String, s: &MStmt, lvl: usize) {
             out.push_str(s);
             out.push('\n');
         }
+        MStmt::ForIn { name, ty: _, iter, body } => {
+            indent(out, lvl);
+            out.push_str("for ");
+            out.push_str(&snake(name));
+            out.push_str(" in ");
+            print_expr(out, iter);
+            out.push_str(":\n");
+            if body.is_empty() {
+                indent(out, lvl + 1);
+                out.push_str("pass\n");
+            } else {
+                for s in body {
+                    print_stmt(out, s, lvl + 1);
+                }
+            }
+        }
         MStmt::ForRange { name, ty: _, lo, hi, body } => {
             indent(out, lvl);
             out.push_str("for ");

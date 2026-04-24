@@ -292,6 +292,13 @@ pub enum MStmt {
         hi: MExpr,
         body: Vec<MStmt>,
     },
+    /// `for NAME in ITER: body` — iterator-protocol loop over a List/etc.
+    ForIn {
+        name: String,
+        ty: MType,
+        iter: MExpr,
+        body: Vec<MStmt>,
+    },
     /// `break` — terminates the innermost While. Paired with setting a
     /// `__ret` var just above.
     Break,

@@ -83,6 +83,9 @@ fn count_leaf_stmts(body: &[MStmt]) -> usize {
             MStmt::ForRange { body, .. } => {
                 n += count_leaf_stmts(body);
             }
+            MStmt::ForIn { body, .. } => {
+                n += count_leaf_stmts(body);
+            }
             MStmt::Try { body, catches } => {
                 n += count_leaf_stmts(body);
                 for c in catches {
@@ -103,7 +106,7 @@ fn max_control_depth(body: &[MStmt]) -> usize {
     for s in body {
         let d = match s {
             MStmt::If { then, els, .. } => 1 + max_control_depth(then).max(max_control_depth(els)),
-            MStmt::While { body, .. } | MStmt::ForRange { body, .. } => 1 + max_control_depth(body),
+            MStmt::While { body, .. } | MStmt::ForRange { body, .. } | MStmt::ForIn { body, .. } => 1 + max_control_depth(body),
             MStmt::Try { body, catches } => {
                 let mut d = 1 + max_control_depth(body);
                 for c in catches {
@@ -126,6 +129,7 @@ fn body_has_while(body: &[MStmt]) -> bool {
         MStmt::While { .. } => true,
         MStmt::If { then, els, .. } => body_has_while(then) || body_has_while(els),
         MStmt::ForRange { body, .. } => body_has_while(body),
+        MStmt::ForIn { body, .. } => body_has_while(body),
         MStmt::Try { body, catches } => {
             body_has_while(body) || catches.iter().any(|c| body_has_while(&c.body))
         }
@@ -147,6 +151,7 @@ fn stmt_calls(s: &MStmt, name: &str) -> bool {
         MStmt::If { cond, then, els } => expr_calls(cond, name) || body_calls(then, name) || body_calls(els, name),
         MStmt::While { cond, body } => expr_calls(cond, name) || body_calls(body, name),
         MStmt::ForRange { lo, hi, body, .. } => expr_calls(lo, name) || expr_calls(hi, name) || body_calls(body, name),
+        MStmt::ForIn { iter, body, .. } => expr_calls(iter, name) || body_calls(body, name),
         MStmt::Break | MStmt::Continue | MStmt::ReRaise | MStmt::Raw(_) => false,
         MStmt::Raise(e) => expr_calls(e, name),
         MStmt::Try { body, catches } => {
@@ -176,5 +181,5 @@ fn is_simd_candidate(f: &crate::ast::MFn) -> bool {
     if !all_f32 {
         return false;
     }
-    f.body.iter().any(|s| matches!(s, MStmt::While { .. } | MStmt::ForRange { .. }))
+    f.body.iter().any(|s| matches!(s, MStmt::While { .. } | MStmt::ForRange { .. } | MStmt::ForIn { .. }))
 }

@@ -403,6 +403,48 @@ fn rename_user_call_callee() {
     assert!(out.contains("helper_fn(y)"), "got:\n{out}");
 }
 
+// ---------------- Feature: iterator-protocol for-mojo-in ----------------
+
+#[test]
+fn for_mojo_in_basic_list() {
+    let src = r#"
+(defn-mojo sum-all ^f32 [^List-f32 xs]
+  (let [acc 0.0]
+    (for-mojo-in [x xs] (+ acc x))
+    acc))
+"#;
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("for x in xs:"), "got:\n{out}");
+}
+
+#[test]
+fn for_mojo_in_body_multiple_stmts() {
+    let src = r#"
+(defn-mojo go ^i32 [^List-i32 xs]
+  (for-mojo-in [x xs]
+    (print x)
+    (print x))
+  0)
+"#;
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("for x in xs:"), "got:\n{out}");
+    // Two body expressions inside the loop.
+    let loop_idx = out.find("for x in xs:").unwrap();
+    let after = &out[loop_idx..];
+    assert_eq!(after.matches("print(x)").count(), 2, "got:\n{out}");
+}
+
+#[test]
+fn for_mojo_in_typed_binding() {
+    let src = r#"
+(defn-mojo total ^f32 [^List-f32 xs]
+  (for-mojo-in [^f32 x xs] (print x))
+  0.0)
+"#;
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("for x in xs:"), "got:\n{out}");
+}
+
 // ---------------- Feature: default parameter values ----------------
 
 #[test]

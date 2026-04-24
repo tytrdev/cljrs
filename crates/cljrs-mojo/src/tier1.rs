@@ -1079,6 +1079,9 @@ fn lower_expr_tail(
                 "loop" => {
                     return lower_loop_tail(ctx, list, out, mode);
                 }
+                "for-mojo-in" => {
+                    return lower_for_in_mojo_tail(ctx, list, out, mode);
+                }
                 "for-mojo" => {
                     return lower_for_mojo_tail(ctx, list, out, mode);
                 }
@@ -1214,6 +1217,13 @@ fn lower_stmt(ctx: &Ctx, form: &Value, out: &mut Vec<MStmt>) -> Result<(), Strin
                 "for-mojo" => return lower_for_mojo_tail(ctx, list, out, TailMode::Assign("__ignore".into()))
                     .and_then(|_| {
                         // Drop the trailing assign-to-__ignore.
+                        if matches!(out.last(), Some(MStmt::Assign { name, .. }) if name == "__ignore") {
+                            out.pop();
+                        }
+                        Ok(())
+                    }),
+                "for-mojo-in" => return lower_for_in_mojo_tail(ctx, list, out, TailMode::Assign("__ignore".into()))
+                    .and_then(|_| {
                         if matches!(out.last(), Some(MStmt::Assign { name, .. }) if name == "__ignore") {
                             out.pop();
                         }
@@ -1372,6 +1382,39 @@ fn lower_for_mojo_tail(
         body.push(MStmt::Expr(e));
     }
     out.push(MStmt::ForRange { name: cname, ty: cty, lo, hi, body });
+    out.push(finish(mode, MExpr::IntLit(0)));
+    Ok(())
+}
+
+/// `(for-mojo-in [x xs] body...)` — iterator-protocol loop. Lowers to
+/// `for x in xs: body`. Body forms become Expr stmts.
+fn lower_for_in_mojo_tail(
+    ctx: &Ctx,
+    list: &[Value],
+    out: &mut Vec<MStmt>,
+    mode: TailMode,
+) -> Result<(), String> {
+    let bindings = match list.get(1) {
+        Some(Value::Vector(v)) => v,
+        _ => return Err(format!("for-mojo-in expects [x iter] binding vec: {}", pr_list(list))),
+    };
+    if bindings.len() != 2 {
+        return Err(format!(
+            "for-mojo-in binding vec must have 2 elements [x iter]: {}",
+            pr_list(list)
+        ));
+    }
+    let (cty, name_form) = peel_tag(&bindings[0]);
+    let cname = sym_str(name_form)
+        .ok_or_else(|| format!("for-mojo-in binding name must be a symbol: {}", pr_list(list)))?
+        .to_string();
+    let iter = lower_expr(ctx, &bindings[1])?;
+    let mut body = Vec::new();
+    for f in &list[2..] {
+        let e = lower_expr(ctx, f)?;
+        body.push(MStmt::Expr(e));
+    }
+    out.push(MStmt::ForIn { name: cname, ty: cty, iter, body });
     out.push(finish(mode, MExpr::IntLit(0)));
     Ok(())
 }
@@ -1739,7 +1782,7 @@ fn lower_call(ctx: &Ctx, v: &[Value]) -> Result<MExpr, String> {
             .to_string();
         return Ok(MExpr::Field { obj: Box::new(obj), field });
     }
-    if matches!(head, "let" | "loop" | "cond" | "recur" | "for-mojo"
+    if matches!(head, "let" | "loop" | "cond" | "recur" | "for-mojo" | "for-mojo-in"
         | "try" | "raise" | "parameter-if" | "mojo-assert") {
         return Err(format!(
             "`{head}` only supported in tail position in cljrs-mojo v1: {}",

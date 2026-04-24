@@ -107,6 +107,12 @@ fn opt_stmt(s: MStmt, inlineable: &HashMap<String, InlineFn>) -> MStmt {
             hi: fold(inline_expr(hi, inlineable)),
             body: body.into_iter().map(|s| opt_stmt(s, inlineable)).collect(),
         },
+        MStmt::ForIn { name, ty, iter, body } => MStmt::ForIn {
+            name,
+            ty,
+            iter: fold(inline_expr(iter, inlineable)),
+            body: body.into_iter().map(|s| opt_stmt(s, inlineable)).collect(),
+        },
         MStmt::Raise(e) => MStmt::Raise(fold(inline_expr(e, inlineable))),
         MStmt::ReRaise => MStmt::ReRaise,
         MStmt::Try { body, catches } => MStmt::Try {
@@ -273,6 +279,12 @@ fn rewrite_stmt_vars(s: &mut MStmt, map: &HashMap<String, String>) {
         MStmt::ForRange { lo, hi, body, .. } => {
             *lo = rewrite_vars(lo.clone(), map);
             *hi = rewrite_vars(hi.clone(), map);
+            for s in body.iter_mut() {
+                rewrite_stmt_vars(s, map);
+            }
+        }
+        MStmt::ForIn { iter, body, .. } => {
+            *iter = rewrite_vars(iter.clone(), map);
             for s in body.iter_mut() {
                 rewrite_stmt_vars(s, map);
             }
