@@ -23,9 +23,9 @@ pub enum MType {
     /// `String` (Mojo's owned utf-8 string).
     Str,
     /// User-defined struct or otherwise opaque type passed through verbatim.
-    Named(&'static str),
+    Named(String),
     /// SIMD[DType.Tdtype, N] — emitted whenever the user wrote `^SIMD[t n]`.
-    Simd(&'static str, usize),
+    Simd(String, usize),
     /// Unannotated. Printer will usually omit the `: T` suffix.
     Infer,
 }
@@ -46,7 +46,7 @@ impl MType {
             MType::BFloat16 => "BFloat16".into(),
             MType::Bool => "Bool".into(),
             MType::Str => "String".into(),
-            MType::Named(s) => (*s).to_string(),
+            MType::Named(s) => s.clone(),
             MType::Simd(dt, n) => format!("SIMD[DType.{dt}, {n}]"),
             MType::Infer => String::new(),
         }
@@ -82,6 +82,12 @@ pub enum MItem {
         ty: MType,
         value: MExpr,
         /// Leading `# cljrs: ...` comment (tier 1 only).
+        comment: Option<String>,
+    },
+    /// `@value` struct with explicit init.
+    Struct {
+        name: String,
+        fields: Vec<(String, MType)>,
         comment: Option<String>,
     },
 }
@@ -158,4 +164,8 @@ pub enum MExpr {
         then: Box<MExpr>,
         els: Box<MExpr>,
     },
+    /// `obj.field` — emitted from `(. obj field)`.
+    Field { obj: Box<MExpr>, field: String },
+    /// String literal (utf-8). Printed quoted with backslash-escapes.
+    StrLit(String),
 }

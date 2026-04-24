@@ -242,11 +242,49 @@ fn bfloat16_and_uint64_round_trip() {
 }
 
 #[test]
-fn unknown_type_hint_falls_back_to_infer() {
-    // Unknown ^Whatever just becomes inferred (no annotation), shouldn't fail.
-    let src = "(defn-mojo p ^i32 [^Wibble x] 0)";
+fn unknown_lowercase_type_hint_falls_back_to_infer() {
+    // Unknown lowercase ^wibble → inferred (no annotation).
+    let src = "(defn-mojo p ^i32 [^wibble x] 0)";
     let out = emit(src, Tier::Readable).unwrap();
     assert!(out.contains("fn p(x)"), "got:\n{out}");
+}
+
+#[test]
+fn capitalized_type_hint_passes_through_as_named() {
+    // ^Custom → `x: Custom` (user-defined struct, etc.).
+    let src = "(defn-mojo p ^i32 [^Custom x] 0)";
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("x: Custom"), "got:\n{out}");
+}
+
+#[test]
+fn defstruct_basic_vec3() {
+    let src = r#"
+(defstruct-mojo Vec3 [^f32 x ^f32 y ^f32 z])
+(defn-mojo getx ^f32 [^Vec3 v] (. v x))
+"#;
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("@value"), "got:\n{out}");
+    assert!(out.contains("struct Vec3:"), "got:\n{out}");
+    assert!(out.contains("var x: Float32"), "got:\n{out}");
+    assert!(out.contains("fn __init__(out self, x: Float32, y: Float32, z: Float32)"), "got:\n{out}");
+    assert!(out.contains("self.x = x"), "got:\n{out}");
+    assert!(out.contains("v: Vec3"), "got:\n{out}");
+    assert!(out.contains("return v.x"), "got:\n{out}");
+}
+
+#[test]
+fn defstruct_empty_uses_pass() {
+    let src = "(defstruct-mojo Empty [])";
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("struct Empty:"), "got:\n{out}");
+    assert!(out.contains("pass"), "got:\n{out}");
+}
+
+#[test]
+fn dot_field_arity_errors() {
+    let src = "(defn-mojo bad ^i32 [^Foo v] (. v))";
+    assert!(emit(src, Tier::Readable).is_err());
 }
 
 #[test]

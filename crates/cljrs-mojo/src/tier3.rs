@@ -37,6 +37,9 @@ pub fn specialize(m: &mut MModule) {
             MItem::Var { comment, .. } => {
                 *comment = None;
             }
+            MItem::Struct { comment, .. } => {
+                *comment = None;
+            }
         }
     }
 }

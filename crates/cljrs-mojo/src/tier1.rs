@@ -61,11 +61,39 @@ fn lower_top(ctx: &Ctx, form: &Value) -> Result<MItem, String> {
     match head {
         "def" => lower_def(ctx, list, form),
         "defn" | "defn-mojo" => lower_defn(ctx, list, form),
+        "defstruct-mojo" => lower_defstruct(list, form),
         other => Err(format!(
             "unsupported top-level form `{other}` in: {}",
             pr(form)
         )),
     }
+}
+
+fn lower_defstruct(list: &[Value], form: &Value) -> Result<MItem, String> {
+    // (defstruct-mojo NAME [^T field ...])
+    if list.len() != 3 {
+        return Err(format!("defstruct-mojo expects (defstruct-mojo NAME [fields]): {}", pr(form)));
+    }
+    let name = sym_str(&list[1])
+        .ok_or_else(|| format!("defstruct-mojo name must be symbol: {}", pr(form)))?
+        .to_string();
+    let fields_vec = match &list[2] {
+        Value::Vector(v) => v,
+        _ => return Err(format!("defstruct-mojo fields must be a vector: {}", pr(form))),
+    };
+    let mut fields: Vec<(String, MType)> = Vec::new();
+    for f in fields_vec.iter() {
+        let (ty, nf) = peel_tag(f);
+        let fname = sym_str(nf)
+            .ok_or_else(|| format!("defstruct-mojo field name must be symbol: {}", pr(form)))?
+            .to_string();
+        fields.push((fname, ty));
+    }
+    Ok(MItem::Struct {
+        name,
+        fields,
+        comment: Some(pr(form)),
+    })
 }
 
 fn lower_def(ctx: &Ctx, list: &[Value], form: &Value) -> Result<MItem, String> {
@@ -685,7 +713,7 @@ pub fn lower_expr(ctx: &Ctx, form: &Value) -> Result<MExpr, String> {
             "collection literals not supported in cljrs-mojo v1: {}",
             pr(form)
         )),
-        Value::Str(_) => Err("string literals not supported in cljrs-mojo v1".into()),
+        Value::Str(s) => Ok(MExpr::StrLit(s.to_string())),
         _ => Err(format!("unsupported expr: {}", pr(form))),
     }
 }
@@ -725,6 +753,17 @@ fn lower_call(ctx: &Ctx, v: &[Value]) -> Result<MExpr, String> {
             return Ok(MExpr::IntLit(0));
         }
         return lower_expr(ctx, args.last().unwrap());
+    }
+    // Field access: (. obj field) → obj.field
+    if head == "." {
+        if args.len() != 2 {
+            return Err(format!("`.` expects 2 args (object, field): {}", pr_list(v)));
+        }
+        let obj = lower_expr(ctx, &args[0])?;
+        let field = sym_str(&args[1])
+            .ok_or_else(|| format!("`.` field name must be a symbol: {}", pr_list(v)))?
+            .to_string();
+        return Ok(MExpr::Field { obj: Box::new(obj), field });
     }
     if head == "let" || head == "loop" || head == "cond" || head == "recur" {
         return Err(format!(
@@ -842,7 +881,15 @@ pub fn peel_tag(v: &Value) -> (MType, &Value) {
             if let Value::Symbol(h) = &xs[0] {
                 if &**h == "__tagged__" {
                     let tag = sym_str(&xs[1]).unwrap_or("");
-                    let ty = runtime::type_hint(tag).unwrap_or(MType::Infer);
+                    let ty = runtime::type_hint(tag).unwrap_or_else(|| {
+                        // User-defined type: pass through if it looks like a
+                        // type name (starts with uppercase or contains '[').
+                        if tag.starts_with(|c: char| c.is_ascii_uppercase()) {
+                            MType::Named(tag.to_string())
+                        } else {
+                            MType::Infer
+                        }
+                    });
                     return (ty, &xs[2]);
                 }
             }

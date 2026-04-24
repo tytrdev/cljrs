@@ -15,6 +15,11 @@
 //!   trampoline.
 //! - arithmetic, comparisons, booleans, math fns (`sin cos tan sqrt exp
 //!   log floor ceil pow`, `abs min max`)
+//! - structs: `(defstruct-mojo Vec3 [^f32 x ^f32 y ^f32 z])` emits an
+//!   `@value` Mojo struct with explicit `__init__`. Field access via
+//!   `(. obj field)`. User-defined capitalized type names pass through
+//!   as named types in fn signatures.
+//! - string literals (`"hi"`) and `^str` → `String`
 //! - tier 2 const-fold + CSE + 1-stmt-fn inlining; tier 3 `@always_inline`
 //!   on small all-primitive fns
 //!
@@ -73,6 +78,50 @@ fn print_module(m: &MModule, tier: Tier) -> String {
 fn print_item(out: &mut String, item: &MItem, tier: Tier) {
     match item {
         MItem::Fn(f) => print_fn(out, f, tier),
+        MItem::Struct { name, fields, comment } => {
+            if let Some(c) = comment {
+                if matches!(tier, Tier::Readable) {
+                    out.push_str("# cljrs: ");
+                    out.push_str(c);
+                    out.push('\n');
+                }
+            }
+            out.push_str("@value\n");
+            out.push_str("struct ");
+            out.push_str(name);
+            out.push_str(":\n");
+            for (fname, fty) in fields {
+                out.push_str("    var ");
+                out.push_str(fname);
+                if !matches!(fty, MType::Infer) {
+                    out.push_str(": ");
+                    out.push_str(&fty.as_str());
+                }
+                out.push('\n');
+            }
+            // Explicit __init__ for clarity.
+            out.push_str("    fn __init__(out self");
+            for (fname, fty) in fields {
+                out.push_str(", ");
+                out.push_str(fname);
+                if !matches!(fty, MType::Infer) {
+                    out.push_str(": ");
+                    out.push_str(&fty.as_str());
+                }
+            }
+            out.push_str("):\n");
+            if fields.is_empty() {
+                out.push_str("        pass\n");
+            } else {
+                for (fname, _) in fields {
+                    out.push_str("        self.");
+                    out.push_str(fname);
+                    out.push_str(" = ");
+                    out.push_str(fname);
+                    out.push('\n');
+                }
+            }
+        }
         MItem::Var { name, ty, value, comment } => {
             if let Some(c) = comment {
                 if matches!(tier, Tier::Readable) {
@@ -308,6 +357,25 @@ fn print_expr(out: &mut String, e: &MExpr) {
             out.push_str(" else ");
             print_expr(out, els);
             out.push(')');
+        }
+        MExpr::Field { obj, field } => {
+            print_expr(out, obj);
+            out.push('.');
+            out.push_str(field);
+        }
+        MExpr::StrLit(s) => {
+            out.push('"');
+            for c in s.chars() {
+                match c {
+                    '"' => out.push_str("\\\""),
+                    '\\' => out.push_str("\\\\"),
+                    '\n' => out.push_str("\\n"),
+                    '\t' => out.push_str("\\t"),
+                    '\r' => out.push_str("\\r"),
+                    _ => out.push(c),
+                }
+            }
+            out.push('"');
         }
     }
 }

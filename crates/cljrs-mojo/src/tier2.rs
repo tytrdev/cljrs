@@ -30,6 +30,11 @@ pub fn optimize(m: &mut MModule) {
                     *comment = Some(short_comment(c));
                 }
             }
+            MItem::Struct { comment, .. } => {
+                if let Some(c) = comment {
+                    *comment = Some(short_comment(c));
+                }
+            }
         }
     }
 }
@@ -323,7 +328,8 @@ fn collect_inlineable(m: &MModule) -> HashMap<String, InlineFn> {
 
 fn is_pure_expr(e: &MExpr) -> bool {
     match e {
-        MExpr::IntLit(_) | MExpr::FloatLit(_) | MExpr::BoolLit(_) | MExpr::Var(_) => true,
+        MExpr::IntLit(_) | MExpr::FloatLit(_) | MExpr::BoolLit(_) | MExpr::Var(_) | MExpr::StrLit(_) => true,
+        MExpr::Field { obj, .. } => is_pure_expr(obj),
         MExpr::BinOp { lhs, rhs, .. } => is_pure_expr(lhs) && is_pure_expr(rhs),
         MExpr::UnOp { rhs, .. } => is_pure_expr(rhs),
         MExpr::IfExpr { cond, then, els } => {
