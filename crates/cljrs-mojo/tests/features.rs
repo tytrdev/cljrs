@@ -329,6 +329,68 @@ fn rename_alias_name() {
     assert!(out.contains("alias LANE_WIDTH: Int32 = 8"), "got:\n{out}");
 }
 
+// ---------------- Feature: generic structs ----------------
+
+#[test]
+fn generic_struct_single_param() {
+    let src = "(defstruct-mojo Vec3 [T] [^T x ^T y ^T z])";
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("struct Vec3[T: AnyType]:"), "got:\n{out}");
+    assert!(out.contains("var x: T"), "got:\n{out}");
+    assert!(out.contains("var y: T"), "got:\n{out}");
+    assert!(out.contains("var z: T"), "got:\n{out}");
+    assert!(out.contains("fn __init__(out self, x: T, y: T, z: T):"), "got:\n{out}");
+}
+
+#[test]
+fn generic_struct_multi_param() {
+    let src = "(defstruct-mojo Buffer [T AnyType N Int] [^T first])";
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("struct Buffer[T: AnyType, N: Int]:"), "got:\n{out}");
+}
+
+#[test]
+fn generic_struct_instantiation_with_type_tag() {
+    let src = r#"
+(defstruct-mojo Vec3 [T] [^T x ^T y ^T z])
+(defn-mojo make ^i32 [] (let [v (Vec3 ^f32 1.0 2.0 3.0)] 0))
+"#;
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("Vec3[Float32](1.0, 2.0, 3.0)"), "got:\n{out}");
+}
+
+#[test]
+fn generic_struct_instantiation_without_tag_infers() {
+    let src = r#"
+(defstruct-mojo Vec3 [T] [^T x ^T y ^T z])
+(defn-mojo make ^i32 [] (let [v (Vec3 1.0 2.0 3.0)] 0))
+"#;
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("Vec3(1.0, 2.0, 3.0)"), "got:\n{out}");
+}
+
+#[test]
+fn generic_struct_method() {
+    let src = r#"
+(defstruct-mojo Vec3 [T] [^T x ^T y ^T z])
+(defn-method-mojo Vec3 [T] sum ^T []
+  (+ (. self x) (+ (. self y) (. self z))))
+"#;
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("struct Vec3[T: AnyType]:"), "got:\n{out}");
+    assert!(out.contains("fn sum(self) -> T:"), "got:\n{out}");
+}
+
+#[test]
+fn generic_struct_field_access() {
+    let src = r#"
+(defstruct-mojo Box [T] [^T val])
+(defn-mojo peek ^f32 [^Box v] (. v val))
+"#;
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("v.val"), "got:\n{out}");
+}
+
 #[test]
 fn rename_user_call_callee() {
     // Caller references a kebab-named fn; both declaration and call site

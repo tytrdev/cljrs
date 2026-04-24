@@ -203,8 +203,12 @@ fn mtype_to_tag_symbol(t: &MType) -> String {
 }
 
 fn lower_defstruct(_ctx: &Ctx, list: &[Value], form: &Value) -> Result<MItem, String> {
-    // (defstruct-mojo NAME [^T field ...])
-    // Optional trait: (defstruct-mojo NAME :TraitName [^T field ...])
+    // (defstruct-mojo NAME [fields])
+    // (defstruct-mojo NAME :TraitName [fields])
+    // Generic: (defstruct-mojo Name[T] [fields]) or (defstruct-mojo Name[T AnyType N Int] [fields])
+    // The generic param vector is encoded at list[2] as Value::Vector when
+    // the user writes it; we accept either `(defstruct-mojo Name[T] [fields])`
+    // parsed as two vectors or the sugar form `(defstruct-mojo Name [T] [fields])`.
     if list.len() < 3 {
         return Err(format!("defstruct-mojo expects (defstruct-mojo NAME [fields]): {}", pr(form)));
     }
@@ -213,9 +217,49 @@ fn lower_defstruct(_ctx: &Ctx, list: &[Value], form: &Value) -> Result<MItem, St
         .to_string();
     let mut idx = 2;
     let mut trait_impl: Option<String> = None;
-    if let Value::Keyword(k) = &list[idx] {
+    if let Some(Value::Keyword(k)) = list.get(idx) {
         trait_impl = Some(k.to_string());
         idx += 1;
+    }
+    // Optional generic params vector: must be before the fields vector.
+    // We distinguish fields from cparams by peeking at the first element —
+    // fields start with either a type-tagged symbol (`^T field`) or a bare
+    // field symbol; cparams start with a bare type-param symbol followed
+    // by either another bare symbol or (in multi-param form) a type name.
+    // Simpler heuristic: if list[idx] is a Vector AND list[idx+1] exists
+    // and is also a Vector, then list[idx] is cparams and list[idx+1] is fields.
+    let mut cparams: Vec<(String, String)> = Vec::new();
+    let looks_generic = matches!(list.get(idx), Some(Value::Vector(_)))
+        && matches!(list.get(idx + 1), Some(Value::Vector(_)));
+    if looks_generic {
+        if let Some(Value::Vector(cv)) = list.get(idx) {
+            // Accept either a single `[T]` (shorthand for `[T: AnyType]`)
+            // or flat pairs `[T AnyType N Int]`.
+            if cv.len() == 1 {
+                let n = sym_str(&cv[0]).ok_or_else(|| {
+                    format!("defstruct-mojo generic param must be a symbol: {}", pr(form))
+                })?;
+                cparams.push((n.to_string(), "AnyType".to_string()));
+            } else if cv.len() % 2 == 0 {
+                let mut i = 0;
+                while i < cv.len() {
+                    let n = sym_str(&cv[i]).ok_or_else(|| {
+                        format!("defstruct-mojo generic param name must be a symbol: {}", pr(form))
+                    })?;
+                    let t = sym_str(&cv[i + 1]).ok_or_else(|| {
+                        format!("defstruct-mojo generic param bound must be a symbol: {}", pr(form))
+                    })?;
+                    cparams.push((n.to_string(), t.to_string()));
+                    i += 2;
+                }
+            } else {
+                return Err(format!(
+                    "defstruct-mojo generic params must be [T] or pairs [T Bound ...]: {}",
+                    pr(form)
+                ));
+            }
+            idx += 1;
+        }
     }
     let fields_form = list.get(idx).ok_or_else(|| {
         format!("defstruct-mojo missing fields vector: {}", pr(form))
@@ -237,6 +281,7 @@ fn lower_defstruct(_ctx: &Ctx, list: &[Value], form: &Value) -> Result<MItem, St
         fields,
         methods: Vec::new(),
         trait_impl,
+        cparams,
         comment: Some(pr(form)),
     })
 }
@@ -465,9 +510,20 @@ fn lower_defn_method(ctx: &Ctx, list: &[Value], form: &Value) -> Result<(), Stri
     let sname = sym_str(&list[1])
         .ok_or_else(|| format!("defn-method-mojo struct name must be symbol: {}", pr(form)))?
         .to_string();
+    // Optional generic marker after struct name: `(defn-method-mojo Vec3 [T] length [] ...)`
+    // The `[T]` propagates the struct's compile-time params into the
+    // method body. Inside the method, references like `^T` work because
+    // the struct's cparams are in scope on the enclosing `struct Name[T]:`.
+    let mut idx = 2;
+    if matches!(list.get(idx), Some(Value::Vector(_))) {
+        // Consume the marker vector; no need to parse it — the struct
+        // already carries the authoritative cparams. This exists for
+        // readability at the use site.
+        idx += 1;
+    }
     // Synthesize a defn with the rest.
     let mut synth: Vec<Value> = vec![Value::Symbol("defn".into())];
-    synth.extend_from_slice(&list[2..]);
+    synth.extend_from_slice(&list[idx..]);
     let synth_form = Value::List(std::sync::Arc::new(synth.clone()));
     let item = lower_defn(ctx, &synth, &synth_form, &[])?;
     if let MItem::Fn(mut f) = item {
@@ -1646,6 +1702,17 @@ fn lower_call(ctx: &Ctx, v: &[Value]) -> Result<MExpr, String> {
     if let Some(bname) = runtime::builtin_fn(head) {
         let lowered: Result<Vec<_>, _> = args.iter().map(|a| lower_expr(ctx, a)).collect();
         return Ok(MExpr::Call { callee: bname.into(), args: lowered? });
+    }
+
+    // Generic struct construction: `(Vec3 ^f32 1.0 2.0 3.0)` → `Vec3[Float32](1.0, 2.0, 3.0)`.
+    // Trigger only for CamelCase callees with a type-tagged first arg.
+    if head.starts_with(|c: char| c.is_ascii_uppercase()) && !args.is_empty() {
+        let (first_ty, _) = peel_tag(&args[0]);
+        if !matches!(first_ty, MType::Infer) {
+            let callee = format!("{head}[{}]", first_ty.as_str());
+            let lowered: Result<Vec<_>, _> = args.iter().map(|a| lower_expr(ctx, a)).collect();
+            return Ok(MExpr::Call { callee, args: lowered? });
+        }
     }
 
     // Fallback: assume the symbol names a defined fn.

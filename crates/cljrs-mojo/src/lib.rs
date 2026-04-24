@@ -36,6 +36,12 @@
 //!   `(defstruct-mojo Square :Shape [^f32 side])` → `struct Square(Shape):`,
 //!   `(defn-method-mojo Vec3 length ^f32 [] ...)` appends indented
 //!   methods inside the matching struct.
+//! - **Generic structs**: `(defstruct-mojo Vec3 [T] [^T x ^T y ^T z])` →
+//!   `struct Vec3[T: AnyType]:`. Multi-param: `[T AnyType N Int]` for
+//!   flat pairs. Call sites with a type tag auto-specialize:
+//!   `(Vec3 ^f32 1.0 2.0 3.0)` → `Vec3[Float32](1.0, 2.0, 3.0)`; without
+//!   a tag, Mojo's own inference runs. Generic methods use
+//!   `(defn-method-mojo Vec3 [T] length ...)`.
 //! - **Assertions**: `(mojo-assert cond)` / `(mojo-assert cond msg)` →
 //!   `debug_assert(...)`.
 //! - **String helpers**: `(str-len s)`, `(str-slice s a b)`,
@@ -219,7 +225,7 @@ fn print_module(m: &MModule, tier: Tier) -> String {
 fn print_item(out: &mut String, item: &MItem, tier: Tier) {
     match item {
         MItem::Fn(f) => print_fn(out, f, tier),
-        MItem::Struct { name, fields, methods, trait_impl, comment } => {
+        MItem::Struct { name, fields, methods, trait_impl, cparams, comment } => {
             if let Some(c) = comment {
                 if matches!(tier, Tier::Readable) {
                     out.push_str("# cljrs: ");
@@ -230,6 +236,18 @@ fn print_item(out: &mut String, item: &MItem, tier: Tier) {
             out.push_str("@value\n");
             out.push_str("struct ");
             out.push_str(&snake(name));
+            if !cparams.is_empty() {
+                out.push('[');
+                for (i, (n, t)) in cparams.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(", ");
+                    }
+                    out.push_str(n);
+                    out.push_str(": ");
+                    out.push_str(t);
+                }
+                out.push(']');
+            }
             if let Some(t) = trait_impl {
                 out.push('(');
                 out.push_str(&snake(t));

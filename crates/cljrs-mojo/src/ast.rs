@@ -106,6 +106,9 @@ pub enum MItem {
         methods: Vec<MFn>,
         /// Optional trait the struct implements: `struct Name(Trait):`.
         trait_impl: Option<String>,
+        /// Optional compile-time generic parameters, e.g. `[T: AnyType, N: Int]`.
+        /// Stored as (name, bound) pairs. Empty for non-generic structs.
+        cparams: Vec<(String, String)>,
         comment: Option<String>,
     },
     /// `alias NAME[: T] = VALUE` at top level.
