@@ -44,13 +44,13 @@ pub fn lower_module(forms: &[Value]) -> Result<MModule, String> {
     let ctx = Ctx::new();
     let mut items = Vec::new();
     for form in forms {
-        items.push(lower_top(&ctx, form)?);
+        items.extend(lower_top(&ctx, form)?);
     }
     let imports = ctx.take_imports();
     Ok(MModule { imports, items })
 }
 
-fn lower_top(ctx: &Ctx, form: &Value) -> Result<MItem, String> {
+fn lower_top(ctx: &Ctx, form: &Value) -> Result<Vec<MItem>, String> {
     let list = match as_list(form) {
         Some(l) => l,
         None => return Err(format!("top-level form must be a list: {}", pr(form))),
@@ -59,15 +59,107 @@ fn lower_top(ctx: &Ctx, form: &Value) -> Result<MItem, String> {
         format!("top-level form must start with a symbol: {}", pr(form))
     })?;
     match head {
-        "def" => lower_def(ctx, list, form),
-        "defn" | "defn-mojo" => lower_defn(ctx, list, form, &[]),
-        "parameter-fn-mojo" => lower_defn(ctx, list, form, &["@parameter"]),
-        "always-inline-fn-mojo" => lower_defn(ctx, list, form, &["@always_inline"]),
-        "defstruct-mojo" => lower_defstruct(list, form),
+        "def" => lower_def(ctx, list, form).map(|i| vec![i]),
+        "defn" | "defn-mojo" => lower_defn_any(ctx, list, form, &[]),
+        "parameter-fn-mojo" => lower_defn_any(ctx, list, form, &["@parameter"]),
+        "always-inline-fn-mojo" => lower_defn_any(ctx, list, form, &["@always_inline"]),
+        "defstruct-mojo" => lower_defstruct(list, form).map(|i| vec![i]),
         other => Err(format!(
             "unsupported top-level form `{other}` in: {}",
             pr(form)
         )),
+    }
+}
+
+/// Dispatcher: single-arity → `lower_defn`; multi-arity (body = list of
+/// `([args] body...)` groups) → multiple Fn items with `_N` suffixes.
+fn lower_defn_any(
+    ctx: &Ctx,
+    list: &[Value],
+    form: &Value,
+    extras: &[&str],
+) -> Result<Vec<MItem>, String> {
+    // Detect multi-arity shape: (defn NAME ([args] body) ([args2] body2) ...)
+    // i.e. none of list[2..] is a Vector (they're all lists starting with a
+    // Vector). We also allow a ^RET tag on the name in either case.
+    let arity_slice_start = 2;
+    // Peek list[arity_slice_start]: if it's a Vector, single arity; else multi.
+    let first = match list.get(arity_slice_start) {
+        Some(v) => v,
+        None => return lower_defn(ctx, list, form, extras).map(|i| vec![i]),
+    };
+    let (_, first_peeled) = peel_tag(first);
+    if matches!(first_peeled, Value::Vector(_)) {
+        return lower_defn(ctx, list, form, extras).map(|i| vec![i]);
+    }
+    // Multi-arity path.
+    let (name_tag, name_form) = peel_tag(&list[1]);
+    let name = sym_str(name_form)
+        .ok_or_else(|| format!("defn name must be a symbol: {}", pr(form)))?
+        .to_string();
+    let mut out = Vec::new();
+    // Per-arity shared return tag, if any. It may sit on the name
+    // (`(defn ^RET name ...)`) or on the first arity group
+    // (`(defn name ^RET ([args] body) ...)`). We capture whichever fires.
+    let mut shared_ret = name_tag.clone();
+    for (idx, group) in list[arity_slice_start..].iter().enumerate() {
+        let (gty, group_inner) = peel_tag(group);
+        if idx == 0 && matches!(shared_ret, MType::Infer) {
+            shared_ret = gty.clone();
+        }
+        let glist = match as_list(group_inner) {
+            Some(l) => l,
+            None => return Err(format!("multi-arity group must be a list: {}", pr(group))),
+        };
+        // Synthesize a single-arity defn call: (defn NAME ^RET [args] body...)
+        let suffixed = if idx == 0 {
+            name.clone()
+        } else {
+            format!("{name}_{}", idx + 1)
+        };
+        let name_val = if !matches!(shared_ret, MType::Infer) {
+            let tag_sym = mtype_to_tag_symbol(&shared_ret);
+            Value::List(std::sync::Arc::new(vec![
+                Value::Symbol("__tagged__".into()),
+                Value::Symbol(tag_sym.into()),
+                Value::Symbol(suffixed.into()),
+            ]))
+        } else {
+            Value::Symbol(suffixed.into())
+        };
+        let mut synth: Vec<Value> = Vec::with_capacity(glist.len() + 2);
+        synth.push(Value::Symbol("defn".into()));
+        synth.push(name_val);
+        for g in glist.iter() {
+            synth.push(g.clone());
+        }
+        let synth_form = Value::List(std::sync::Arc::new(synth));
+        let synth_list = as_list(&synth_form).unwrap().to_vec();
+        let item = lower_defn(ctx, &synth_list, &synth_form, extras)?;
+        out.push(item);
+    }
+    Ok(out)
+}
+
+/// Best-effort reverse of runtime::type_hint. Used when re-synthesizing a
+/// defn form for multi-arity lowering. Falls back to the type's pretty name.
+fn mtype_to_tag_symbol(t: &MType) -> String {
+    match t {
+        MType::Int8 => "i8".into(),
+        MType::Int16 => "i16".into(),
+        MType::Int32 => "i32".into(),
+        MType::Int64 => "i64".into(),
+        MType::UInt8 => "u8".into(),
+        MType::UInt16 => "u16".into(),
+        MType::UInt32 => "u32".into(),
+        MType::UInt64 => "u64".into(),
+        MType::Float32 => "f32".into(),
+        MType::Float64 => "f64".into(),
+        MType::BFloat16 => "bf16".into(),
+        MType::Bool => "bool".into(),
+        MType::Str => "str".into(),
+        MType::Named(s) => s.clone(),
+        MType::Simd(_, _) | MType::Infer => "Infer".into(),
     }
 }
 

@@ -258,6 +258,33 @@ fn capitalized_type_hint_passes_through_as_named() {
 }
 
 #[test]
+fn multi_arity_emits_suffixed_fns() {
+    let src = "(defn-mojo greet ^i32
+                 ([^i32 x] x)
+                 ([^i32 x ^i32 y] (+ x y)))";
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("fn greet(x: Int32) -> Int32"), "got:\n{out}");
+    assert!(out.contains("fn greet_2(x: Int32, y: Int32) -> Int32"), "got:\n{out}");
+}
+
+#[test]
+fn multi_arity_three_overloads() {
+    let src = "(defn-mojo f ^i64 ([] 0) ([^i64 a] a) ([^i64 a ^i64 b] (+ a b)))";
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("fn f()"), "got:\n{out}");
+    assert!(out.contains("fn f_2(a: Int64)"), "got:\n{out}");
+    assert!(out.contains("fn f_3(a: Int64, b: Int64)"), "got:\n{out}");
+}
+
+#[test]
+fn single_arity_unchanged_by_multiarity_path() {
+    let src = "(defn-mojo only ^i32 [^i32 x] x)";
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("fn only(x: Int32)"), "got:\n{out}");
+    assert!(!out.contains("only_"), "should not suffix single arity:\n{out}");
+}
+
+#[test]
 fn parameter_fn_mojo_decorates() {
     let src = "(parameter-fn-mojo special ^f32 [^f32 x] x)";
     let out = emit(src, Tier::Readable).unwrap();

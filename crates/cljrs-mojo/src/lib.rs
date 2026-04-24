@@ -19,6 +19,9 @@
 //!   asin acos atan atan2 sinh cosh tanh`), exponentials (`exp expm1
 //!   log log1p log2 log10`), roots & rounding (`sqrt cbrt floor ceil
 //!   round trunc`), plus `pow`, `hypot`, `copysign`, `abs`, `min`, `max`.
+//! - multi-arity defns: `(defn-mojo f ^ret ([a] …) ([a b] …))` emits
+//!   `fn f(a) …` and `fn f_2(a, b) …`. Mojo lacks Clojure's arity dispatch
+//!   so callers name the overload they want.
 //! - decorator sugars: `(parameter-fn-mojo …)` and
 //!   `(always-inline-fn-mojo …)` emit defn-mojo-equivalent fns
 //!   prefixed with `@parameter` / `@always_inline` respectively.
