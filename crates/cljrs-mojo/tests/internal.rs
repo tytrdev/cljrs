@@ -258,6 +258,27 @@ fn capitalized_type_hint_passes_through_as_named() {
 }
 
 #[test]
+fn for_mojo_sugar_basic() {
+    let src = "(defn-mojo loop1 ^i32 [^i32 n] (for-mojo [i 0 n] (sink i)) 0)";
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("for i in range(0, n):"), "got:\n{out}");
+    assert!(out.contains("sink(i)"), "got:\n{out}");
+}
+
+#[test]
+fn for_mojo_with_typed_counter() {
+    let src = "(defn-mojo loop2 ^i64 [^i64 lo ^i64 hi] (for-mojo [^i64 j lo hi] (work j)) 0)";
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("for j in range(lo, hi):"), "got:\n{out}");
+}
+
+#[test]
+fn for_mojo_arity_errors() {
+    let src = "(defn-mojo bad ^i32 [] (for-mojo [i 0] 0) 0)";
+    assert!(emit(src, Tier::Readable).is_err());
+}
+
+#[test]
 fn print_lowers_to_print_call() {
     let src = r#"(defn-mojo say ^i32 [^i32 x] (print "hello") 0)"#;
     let out = emit(src, Tier::Readable).unwrap();

@@ -204,8 +204,7 @@ fn lower_expr_tail(
                 "do" => {
                     // All but last as stmts; last in tail.
                     for f in &list[1..list.len().saturating_sub(1)] {
-                        let e = lower_expr(ctx, f)?;
-                        out.push(MStmt::Expr(e));
+                        lower_stmt(ctx, f, out)?;
                     }
                     if let Some(last) = list.last().filter(|_| list.len() > 1) {
                         return lower_expr_tail(ctx, last, out, mode);
@@ -246,6 +245,9 @@ fn lower_expr_tail(
                 }
                 "loop" => {
                     return lower_loop_tail(ctx, list, out, mode);
+                }
+                "for-mojo" => {
+                    return lower_for_mojo_tail(ctx, list, out, mode);
                 }
                 _ => {}
             }
@@ -299,10 +301,53 @@ fn lower_let_tail(
         return Ok(());
     }
     for f in &body[..body.len() - 1] {
-        let e = lower_expr(ctx, f)?;
-        out.push(MStmt::Expr(e));
+        lower_stmt(ctx, f, out)?;
     }
     lower_expr_tail(ctx, body.last().unwrap(), out, mode)
+}
+
+/// Lower a form in statement position (side-effect only, value discarded).
+/// Recognizes `for-mojo`, `loop`, nested `do`, `if` (without value), and
+/// falls back to `Expr(lower_expr(...))` for plain calls.
+fn lower_stmt(ctx: &Ctx, form: &Value, out: &mut Vec<MStmt>) -> Result<(), String> {
+    let (_, form) = peel_tag(form);
+    if let Some(list) = as_list(form) {
+        if let Some(head) = list.first().and_then(sym_str) {
+            match head {
+                "for-mojo" => return lower_for_mojo_tail(ctx, list, out, TailMode::Assign("__ignore".into()))
+                    .and_then(|_| {
+                        // Drop the trailing assign-to-__ignore.
+                        if matches!(out.last(), Some(MStmt::Assign { name, .. }) if name == "__ignore") {
+                            out.pop();
+                        }
+                        Ok(())
+                    }),
+                "do" => {
+                    for f in &list[1..] {
+                        lower_stmt(ctx, f, out)?;
+                    }
+                    return Ok(());
+                }
+                "if" => {
+                    if list.len() >= 3 && list.len() <= 4 {
+                        let cond = lower_expr(ctx, &list[1])?;
+                        let mut t = Vec::new();
+                        lower_stmt(ctx, &list[2], &mut t)?;
+                        let mut e = Vec::new();
+                        if list.len() == 4 {
+                            lower_stmt(ctx, &list[3], &mut e)?;
+                        }
+                        out.push(MStmt::If { cond, then: t, els: e });
+                        return Ok(());
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let e = lower_expr(ctx, form)?;
+    out.push(MStmt::Expr(e));
+    Ok(())
 }
 
 fn lower_cond_tail(
@@ -399,6 +444,38 @@ fn lower_loop_tail(
         body: loop_body,
     });
     out.push(finish(mode, MExpr::Var(ret_name)));
+    Ok(())
+}
+
+/// `(for-mojo [i lo hi] body...)` — sugar for the most common counting
+/// loop. Lowers to `for i in range(lo, hi): body`. Body forms become Expr
+/// stmts inside the loop; the for-form's own tail value is `0`.
+fn lower_for_mojo_tail(
+    ctx: &Ctx,
+    list: &[Value],
+    out: &mut Vec<MStmt>,
+    mode: TailMode,
+) -> Result<(), String> {
+    let bindings = match list.get(1) {
+        Some(Value::Vector(v)) => v,
+        _ => return Err(format!("for-mojo expects [i lo hi] binding vec: {}", pr_list(list))),
+    };
+    if bindings.len() != 3 {
+        return Err(format!("for-mojo binding vec must have 3 elements [i lo hi]: {}", pr_list(list)));
+    }
+    let (cty, name_form) = peel_tag(&bindings[0]);
+    let cname = sym_str(name_form)
+        .ok_or_else(|| format!("for-mojo counter must be symbol: {}", pr_list(list)))?
+        .to_string();
+    let lo = lower_expr(ctx, &bindings[1])?;
+    let hi = lower_expr(ctx, &bindings[2])?;
+    let mut body = Vec::new();
+    for f in &list[2..] {
+        let e = lower_expr(ctx, f)?;
+        body.push(MStmt::Expr(e));
+    }
+    out.push(MStmt::ForRange { name: cname, ty: cty, lo, hi, body });
+    out.push(finish(mode, MExpr::IntLit(0)));
     Ok(())
 }
 
@@ -765,7 +842,7 @@ fn lower_call(ctx: &Ctx, v: &[Value]) -> Result<MExpr, String> {
             .to_string();
         return Ok(MExpr::Field { obj: Box::new(obj), field });
     }
-    if head == "let" || head == "loop" || head == "cond" || head == "recur" {
+    if head == "let" || head == "loop" || head == "cond" || head == "recur" || head == "for-mojo" {
         return Err(format!(
             "`{head}` only supported in tail position in cljrs-mojo v1: {}",
             pr_list(v)
