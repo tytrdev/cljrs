@@ -258,6 +258,27 @@ fn capitalized_type_hint_passes_through_as_named() {
 }
 
 #[test]
+fn print_lowers_to_print_call() {
+    let src = r#"(defn-mojo say ^i32 [^i32 x] (print "hello") 0)"#;
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains(r#"print("hello")"#), "got:\n{out}");
+}
+
+#[test]
+fn format_concats_with_string_coerce() {
+    let src = r#"(defn-mojo greet ^str [^i32 n] (format "n={}" n))"#;
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains(r#""n=" + String(n)"#), "got:\n{out}");
+    assert!(out.contains("-> String"), "got:\n{out}");
+}
+
+#[test]
+fn format_arity_mismatch_errors() {
+    let src = r#"(defn-mojo bad ^str [^i32 x] (format "{} {}" x))"#;
+    assert!(emit(src, Tier::Readable).is_err());
+}
+
+#[test]
 fn simd_type_in_signature() {
     let src = "(defn-mojo dot ^SIMDf32x4 [^SIMDf32x4 a ^SIMDf32x4 b] (* a b))";
     let out = emit(src, Tier::Readable).unwrap();

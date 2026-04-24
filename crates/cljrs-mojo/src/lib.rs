@@ -22,6 +22,8 @@
 //! - SIMD types: `^SIMDf32x4` / `^SIMDi64x8` / `^SIMDbf16x16` →
 //!   `SIMD[DType.float32, 4]` etc.
 //! - string literals (`"hi"`) and `^str` → `String`
+//! - `(print x)` / `(println x)` → `print(x)`; `(format "n={}" n)` →
+//!   `"n=" + String(n)` left-folded concat
 //! - tier 2 const-fold + CSE + 1-stmt-fn inlining; tier 3 `@always_inline`
 //!   on small all-primitive fns
 //!

@@ -772,6 +772,25 @@ fn lower_call(ctx: &Ctx, v: &[Value]) -> Result<MExpr, String> {
         ));
     }
 
+    // print / println — Mojo's `print` builtin.
+    if head == "print" || head == "println" {
+        let lowered: Result<Vec<_>, _> = args.iter().map(|a| lower_expr(ctx, a)).collect();
+        return Ok(MExpr::Call { callee: "print".into(), args: lowered? });
+    }
+    // (format "x={} y={}" x y) → "x=" + String(x) + " y=" + String(y) using
+    // Mojo's `String` constructor for non-string args. Returns a String.
+    if head == "format" {
+        if args.is_empty() {
+            return Err("format expects a template string".into());
+        }
+        let template = match &args[0] {
+            Value::Str(s) => s.to_string(),
+            _ => return Err(format!("format template must be a literal string: {}", pr(&args[0]))),
+        };
+        let rest: Vec<_> = args[1..].iter().collect();
+        return build_format(ctx, &template, &rest);
+    }
+
     // Boolean and/or/not
     if head == "and" || head == "or" {
         return fold_binop(ctx, runtime::binop(head).unwrap(), args, default_for(head));
@@ -828,6 +847,48 @@ fn lower_call(ctx: &Ctx, v: &[Value]) -> Result<MExpr, String> {
     // Fallback: assume the symbol names a defined fn.
     let lowered: Result<Vec<_>, _> = args.iter().map(|a| lower_expr(ctx, a)).collect();
     Ok(MExpr::Call { callee: head.to_string(), args: lowered? })
+}
+
+/// Build the concat expression for `(format "a={} b={}" x y)`. Splits on
+/// `{}` and interleaves with `String(arg)` calls (or the raw expr when it's
+/// already a string literal).
+fn build_format(ctx: &Ctx, template: &str, args: &[&Value]) -> Result<MExpr, String> {
+    let parts: Vec<&str> = template.split("{}").collect();
+    let placeholders = parts.len().saturating_sub(1);
+    if placeholders != args.len() {
+        return Err(format!(
+            "format placeholders ({}) ≠ args ({}) for template {:?}",
+            placeholders, args.len(), template
+        ));
+    }
+    // Build left-folded string concat: "p0" + String(a0) + "p1" + String(a1) + ...
+    let mut acc: Option<MExpr> = None;
+    for (i, lit) in parts.iter().enumerate() {
+        if !lit.is_empty() {
+            let piece = MExpr::StrLit((*lit).to_string());
+            acc = Some(match acc {
+                None => piece,
+                Some(prev) => MExpr::BinOp {
+                    op: "+".into(), lhs: Box::new(prev), rhs: Box::new(piece),
+                },
+            });
+        }
+        if i < args.len() {
+            let arg_expr = lower_expr(ctx, args[i])?;
+            // Wrap non-string args in String(arg).
+            let coerced = match &arg_expr {
+                MExpr::StrLit(_) => arg_expr,
+                _ => MExpr::Call { callee: "String".into(), args: vec![arg_expr] },
+            };
+            acc = Some(match acc {
+                None => coerced,
+                Some(prev) => MExpr::BinOp {
+                    op: "+".into(), lhs: Box::new(prev), rhs: Box::new(coerced),
+                },
+            });
+        }
+    }
+    Ok(acc.unwrap_or_else(|| MExpr::StrLit(String::new())))
 }
 
 fn default_for(head: &str) -> MExpr {
