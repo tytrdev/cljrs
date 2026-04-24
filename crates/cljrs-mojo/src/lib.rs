@@ -1074,6 +1074,11 @@ fn print_stmt(out: &mut String, s: &MStmt, lvl: usize) {
     }
 }
 
+/// Public shim so tier1 can format expressions into its own buffers.
+pub(crate) fn print_expr_public(out: &mut String, e: &MExpr) {
+    print_expr(out, e);
+}
+
 fn print_expr(out: &mut String, e: &MExpr) {
     match e {
         MExpr::IntLit(i) => {

@@ -200,9 +200,11 @@ fn mtype_to_tag_symbol(t: &MType) -> String {
         MType::Str => "str".into(),
         MType::Named(s) => s.clone(),
         MType::Simd(_, _) | MType::Infer => "Infer".into(),
-        MType::SimdParam(_, _) | MType::List(_) | MType::Optional(_) | MType::Tuple(_) => {
-            "Infer".into()
-        }
+        MType::SimdParam(_, _)
+        | MType::List(_)
+        | MType::Optional(_)
+        | MType::Tuple(_)
+        | MType::Dict(_, _) => "Infer".into(),
     }
 }
 
@@ -1249,6 +1251,28 @@ fn lower_stmt(ctx: &Ctx, form: &Value, out: &mut Vec<MStmt>) -> Result<(), Strin
                     out.push(MStmt::ParameterIf { cond, then: then_s, els: els_s });
                     return Ok(());
                 }
+                "assoc-mojo" => {
+                    if list.len() != 4 {
+                        return Err(format!(
+                            "assoc-mojo expects (assoc-mojo d k v): {}", pr(form)
+                        ));
+                    }
+                    let d = lower_expr(ctx, &list[1])?;
+                    let k = lower_expr(ctx, &list[2])?;
+                    let v = lower_expr(ctx, &list[3])?;
+                    // Emit `d[k] = v` as a raw-indented line: the printer's
+                    // MStmt::Raw inserts at the current level unchanged. We
+                    // format the expression via the same printer.
+                    let mut lhs_s = String::new();
+                    crate::print_expr_public(&mut lhs_s, &MExpr::Call {
+                        callee: "__index__".into(),
+                        args: vec![d, k],
+                    });
+                    let mut rhs_s = String::new();
+                    crate::print_expr_public(&mut rhs_s, &v);
+                    out.push(MStmt::Raw(format!("{} = {}", lhs_s, rhs_s)));
+                    return Ok(());
+                }
                 "mojo-assert" => {
                     if list.len() < 2 || list.len() > 3 {
                         return Err(format!("mojo-assert expects (test [msg]): {}", pr(form)));
@@ -1861,6 +1885,27 @@ fn lower_call(ctx: &Ctx, v: &[Value]) -> Result<MExpr, String> {
         let ty_str = infer_list_ty(&lowered);
         return Ok(MExpr::Call { callee: format!("List[{ty_str}]"), args: lowered });
     }
+    if head == "dict-mojo" {
+        // `(dict-mojo ^Dict-K-V)` → `Dict[K, V]()`. The type tag is
+        // required so we know the dict's key/value types at emit time.
+        if args.len() != 1 {
+            return Err("dict-mojo expects one type-tagged arg: ^Dict-K-V".into());
+        }
+        let (ty, _) = peel_tag(&args[0]);
+        let ty_str = match &ty {
+            MType::Dict(_, _) => ty.as_str(),
+            _ => return Err("dict-mojo arg must be tagged ^Dict-K-V".into()),
+        };
+        return Ok(MExpr::Call { callee: ty_str, args: vec![] });
+    }
+    if head == "get-mojo" {
+        if args.len() != 2 {
+            return Err("get-mojo expects 2 args (d, k)".into());
+        }
+        let d = lower_expr(ctx, &args[0])?;
+        let k = lower_expr(ctx, &args[1])?;
+        return Ok(MExpr::Call { callee: "__index__".into(), args: vec![d, k] });
+    }
     if head == "nth" {
         if args.len() != 2 {
             return Err("nth expects 2 args".into());
@@ -2328,6 +2373,16 @@ pub fn parse_type_tag(tag: &str) -> MType {
     if let Some(rest) = tag.strip_prefix("Tuple-") {
         let parts: Vec<MType> = rest.split('-').map(parse_type_tag).collect();
         return MType::Tuple(parts);
+    }
+    if let Some(rest) = tag.strip_prefix("Dict-") {
+        // `Dict-str-f32` → Dict[String, Float32]. Require exactly 2 parts.
+        let parts: Vec<&str> = rest.splitn(2, '-').collect();
+        if parts.len() == 2 {
+            return MType::Dict(
+                Box::new(parse_type_tag(parts[0])),
+                Box::new(parse_type_tag(parts[1])),
+            );
+        }
     }
     if tag.starts_with(|c: char| c.is_ascii_uppercase()) {
         MType::Named(tag.to_string())

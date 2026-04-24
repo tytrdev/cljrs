@@ -32,6 +32,8 @@ pub enum MType {
     Optional(Box<MType>),
     /// `Tuple[T1, T2, ...]`.
     Tuple(Vec<MType>),
+    /// `Dict[K, V]`.
+    Dict(Box<MType>, Box<MType>),
     /// `SIMD[DType.Tdtype, N]` where N is a compile-time parameter name.
     SimdParam(String, String),
     /// Unannotated. Printer will usually omit the `: T` suffix.
@@ -63,6 +65,7 @@ impl MType {
                 let parts: Vec<String> = ts.iter().map(|t| t.as_str()).collect();
                 format!("Tuple[{}]", parts.join(", "))
             }
+            MType::Dict(k, v) => format!("Dict[{}, {}]", k.as_str(), v.as_str()),
             MType::Infer => String::new(),
         }
     }

@@ -403,6 +403,31 @@ fn rename_user_call_callee() {
     assert!(out.contains("helper_fn(y)"), "got:\n{out}");
 }
 
+// ---------------- Feature: Dict type + assoc/get ----------------
+
+#[test]
+fn dict_type_hint() {
+    let src = "(defn-mojo go ^i32 [^Dict-str-f32 d] 0)";
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("d: Dict[String, Float32]"), "got:\n{out}");
+}
+
+#[test]
+fn dict_get_mojo() {
+    let src = r#"(defn-mojo lookup ^f32 [^Dict-str-f32 d ^str k] (get-mojo d k))"#;
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("return d[k]"), "got:\n{out}");
+}
+
+#[test]
+fn dict_assoc_mojo_stmt() {
+    let src = r#"(defn-mojo put ^i32 [^Dict-str-f32 d]
+                     (assoc-mojo d "a" 1.0)
+                     0)"#;
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains(r#"d["a"] = 1.0"#), "got:\n{out}");
+}
+
 // ---------------- Feature: launch-gpu-mojo (host launcher) ----------------
 
 #[test]
