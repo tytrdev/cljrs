@@ -644,13 +644,14 @@ fn lower_elementwise(ctx: &Ctx, list: &[Value], form: &Value, parallel: bool) ->
             pr(form)
         ));
     }
-    // Mixed-precision: inputs may have different dtypes from each other
-    // and from the output as long as the body contains at least one
-    // `(cast-mojo x ^T)` to bridge them. Without a cast, dtypes must
-    // match (preserves the old tight error for plain kernels).
+    // Multi-output kernels use a `^Tuple-T1-T2` return type. Body must be
+    // `(tuple e1 e2 ...)` with arity matching the tuple. We validate dtype
+    // compatibility per-output via cast-mojo, same as the single-output
+    // mixed-precision path.
+    let is_multi = matches!(&ret_ty, MType::Tuple(_));
     let first_ty = ptr_inputs[0].1.clone();
     let has_cast = body_contains_head(body_form, "cast-mojo");
-    if !has_cast {
+    if !is_multi && !has_cast {
         for (n, t) in ptr_inputs.iter().skip(1) {
             if t != &first_ty {
                 return Err(format!(
@@ -666,6 +667,26 @@ fn lower_elementwise(ctx: &Ctx, list: &[Value], form: &Value, parallel: bool) ->
                  use (cast-mojo x ^T) for mixed precision: {}",
                 first_ty.as_str(), pr(form)
             ));
+        }
+    }
+    if is_multi {
+        // Body must be `(tuple e1 e2 ...)` with arity == tuple arity.
+        let out_arity = if let MType::Tuple(ts) = &ret_ty { ts.len() } else { 0 };
+        let body_is_tuple = matches!(body_form, Value::List(xs)
+            if xs.first().and_then(sym_str) == Some("tuple"));
+        if !body_is_tuple {
+            return Err(format!(
+                "elementwise-mojo: multi-output (^Tuple-...) requires body `(tuple ...)`: {}",
+                pr(form)
+            ));
+        }
+        if let Value::List(xs) = body_form {
+            if xs.len() != out_arity + 1 {
+                return Err(format!(
+                    "elementwise-mojo: body tuple has {} elements but return type declares {}: {}",
+                    xs.len() - 1, out_arity, pr(form)
+                ));
+            }
         }
     }
     // Lower the body under a purity check: only arithmetic, comparisons,
@@ -776,10 +797,19 @@ fn check_elementwise_pure(body: &Value, names: &[String], form: &Value) -> Resul
             if head == "cast-mojo" {
                 if xs.len() != 2 {
                     return Err(format!(
-                        "cast-mojo expects (cast-mojo x ^T) in: {}", pr(form)
+                        "cast-mojo expects (cast-mojo ^T x) in: {}", pr(form)
                     ));
                 }
                 check_elementwise_pure(&xs[1], names, form)?;
+                return Ok(());
+            }
+            // `tuple` is allowed only at the top-level body (multi-output
+            // kernel marker). We don't enforce top-levelness here — the
+            // printer only unpacks the outermost tuple.
+            if head == "tuple" {
+                for a in &xs[1..] {
+                    check_elementwise_pure(a, names, form)?;
+                }
                 return Ok(());
             }
             let allowed = crate::runtime::binop(head).is_some()

@@ -70,6 +70,9 @@
 //!   `vectorize[body, nelts](n)` kernel at Max. Mixed-precision allowed
 //!   when the body contains at least one `(cast-mojo ^T x)` — each input
 //!   loads at its own dtype, casts bridge to the accumulator/output.
+//!   Multi-output: declare `^Tuple-T1-T2-...` as the return type and write
+//!   the body as `(tuple e1 e2 ...)`; the emitter produces N output
+//!   pointers and N per-element stores.
 //! - **Parallel kernels**: `(parallel-mojo ...)` — same shape, emits
 //!   `parallelize[kernel](n)` instead of vectorize (embarrassingly
 //!   parallel across workers, same body across all tiers).
@@ -112,7 +115,9 @@
 //!   opt-in signal).
 //! - Source-level `;;` comment pass-through — the reader strips them
 //!   before the transpiler sees the form.
-//! - Multi-output kernels (a single reduce producing 2+ accumulators).
+//! - Multi-accumulator reductions (a single reduce producing 2+
+//!   accumulators). Multi-output *elementwise* kernels are supported; only
+//!   multi-output *reduce-mojo* is still TODO.
 //!
 //! Forms outside this set produce errors that quote the offending form.
 
@@ -200,12 +205,34 @@ fn add_elementwise_imports(m: &mut MModule, tier: Tier) {
     // Dedup dtypes used by SIMD-lifted kernels.
     let mut dtypes: Vec<String> = Vec::new();
     for it in &m.items {
-        let dt_opt = match it {
-            MItem::Elementwise { out_ty, .. } => Some(mtype_dtype_field(out_ty)),
-            MItem::Reduce { out_ty, .. } => Some(mtype_dtype_field(out_ty)),
-            _ => None,
+        let dt_opts: Vec<String> = match it {
+            MItem::Elementwise { out_ty, ptr_inputs, .. } => {
+                let mut ds = Vec::new();
+                // Pick up ALL relevant dtypes: each ptr input's dtype and
+                // every tuple leg's dtype (for multi-output kernels).
+                match out_ty {
+                    MType::Tuple(ts) => {
+                        for t in ts {
+                            ds.push(mtype_dtype_field(t));
+                        }
+                    }
+                    _ => ds.push(mtype_dtype_field(out_ty)),
+                }
+                for (_, pty) in ptr_inputs {
+                    ds.push(mtype_dtype_field(pty));
+                }
+                ds
+            }
+            MItem::Reduce { out_ty, ptr_inputs, .. } => {
+                let mut ds = vec![mtype_dtype_field(out_ty)];
+                for (_, pty) in ptr_inputs {
+                    ds.push(mtype_dtype_field(pty));
+                }
+                ds
+            }
+            _ => Vec::new(),
         };
-        if let Some(dt) = dt_opt {
+        for dt in dt_opts {
             if !dtypes.iter().any(|d| d == &dt) {
                 dtypes.push(dt);
             }
@@ -494,6 +521,14 @@ fn print_elementwise(
     }
     let ty_str = out_ty.as_str();
     let dt = mtype_dtype_field(out_ty);
+    // Multi-output detection: if out_ty is Tuple(...), body is a
+    // Call("Tuple", [e1, e2, ...]) and we emit out0, out1, ... pointers
+    // and N stores.
+    let out_tys: Vec<MType> = match out_ty {
+        MType::Tuple(ts) => ts.clone(),
+        _ => Vec::new(),
+    };
+    let multi = !out_tys.is_empty();
     // Signature — each ptr input uses its OWN dtype (mixed-precision:
     // a Float16 input can feed a Float32 output).
     out.push_str("fn ");
@@ -512,9 +547,25 @@ fn print_elementwise(
         out.push_str(": ");
         out.push_str(&t.as_str());
     }
-    out.push_str(", out: UnsafePointer[");
-    out.push_str(&ty_str);
-    out.push_str("], n: Int):\n");
+    if multi {
+        for (j, t) in out_tys.iter().enumerate() {
+            out.push_str(&format!(", out{j}: UnsafePointer[{}]", t.as_str()));
+        }
+    } else {
+        out.push_str(", out: UnsafePointer[");
+        out.push_str(&ty_str);
+        out.push_str("]");
+    }
+    out.push_str(", n: Int):\n");
+    // For multi-output, extract the tuple element exprs from the body.
+    let multi_bodies: Vec<MExpr> = if multi {
+        match body {
+            MExpr::Call { callee, args } if callee == "Tuple" => args.clone(),
+            _ => Vec::new(), // shouldn't reach — validated upstream
+        }
+    } else {
+        Vec::new()
+    };
     if parallel {
         // Emit: a nested @parameter fn(i) that does one element, and a
         // top-level `parallelize[__kernel](n)` dispatch. Workers default
@@ -522,33 +573,43 @@ fn print_elementwise(
         out.push_str("    @parameter\n");
         out.push_str("    fn __kernel(i: Int):\n");
         let ptr_names: Vec<String> = ptr_inputs.iter().map(|(n, _)| n.clone()).collect();
-        let subst_body = subst_ptr_loads(body, &ptr_names, /*max=*/ false, &dt);
-        out.push_str("        out[i] = ");
-        print_expr(out, &subst_body);
-        out.push('\n');
+        if multi {
+            for (j, e) in multi_bodies.iter().enumerate() {
+                let subst = subst_ptr_loads(e, &ptr_names, false, &dt);
+                out.push_str(&format!("        out{j}[i] = "));
+                print_expr(out, &subst);
+                out.push('\n');
+            }
+        } else {
+            let subst_body = subst_ptr_loads(body, &ptr_names, false, &dt);
+            out.push_str("        out[i] = ");
+            print_expr(out, &subst_body);
+            out.push('\n');
+        }
         out.push_str("    parallelize[__kernel](n)\n");
         return;
     }
     match tier {
         Tier::Readable | Tier::Optimized => {
-            // Scalar loop:
-            //   for i in range(n):
-            //       out[i] = <body with a→a[i], b→b[i], ...>
+            // Scalar loop.
             out.push_str("    for i in range(n):\n");
             let ptr_names: Vec<String> = ptr_inputs.iter().map(|(n, _)| n.clone()).collect();
-            let subst_body = subst_ptr_loads(body, &ptr_names, /*max=*/ false, &dt);
-            out.push_str("        out[i] = ");
-            print_expr(out, &subst_body);
-            out.push('\n');
+            if multi {
+                for (j, e) in multi_bodies.iter().enumerate() {
+                    let subst = subst_ptr_loads(e, &ptr_names, false, &dt);
+                    out.push_str(&format!("        out{j}[i] = "));
+                    print_expr(out, &subst);
+                    out.push('\n');
+                }
+            } else {
+                let subst_body = subst_ptr_loads(body, &ptr_names, false, &dt);
+                out.push_str("        out[i] = ");
+                print_expr(out, &subst_body);
+                out.push('\n');
+            }
         }
         Tier::Max => {
-            // Vectorized:
-            //   @parameter
-            //   fn __kernel[w: Int](i: Int):
-            //       var av = SIMD[DType.<dt>, w].load(a, i)
-            //       ...
-            //       (<body>).store(out, i)
-            //   vectorize[__kernel, nelts_<short>](n)
+            // Vectorized (single-output) / vectorized-multi-store (multi-output).
             out.push_str("    @parameter\n");
             out.push_str("    fn __kernel[w: Int](i: Int):\n");
             for (n, pty) in ptr_inputs {
@@ -559,12 +620,25 @@ fn print_elementwise(
                 ));
             }
             let ptr_names: Vec<String> = ptr_inputs.iter().map(|(n, _)| n.clone()).collect();
-            let subst_body = subst_ptr_loads(body, &ptr_names, /*max=*/ true, &dt);
-            out.push_str("        ");
-            print_expr_grouped(out, &subst_body);
-            out.push_str(".store(out, i)\n");
-            let short = dtype_short(&dt);
-            out.push_str(&format!("    vectorize[__kernel, nelts_{short}](n)\n"));
+            if multi {
+                for (j, e) in multi_bodies.iter().enumerate() {
+                    let subst = subst_ptr_loads(e, &ptr_names, true, &dt);
+                    out.push_str("        ");
+                    print_expr_grouped(out, &subst);
+                    out.push_str(&format!(".store(out{j}, i)\n"));
+                }
+                // Use the FIRST output dtype's nelts for the vectorize width.
+                let first_dt = mtype_dtype_field(&out_tys[0]);
+                let short = dtype_short(&first_dt);
+                out.push_str(&format!("    vectorize[__kernel, nelts_{short}](n)\n"));
+            } else {
+                let subst_body = subst_ptr_loads(body, &ptr_names, true, &dt);
+                out.push_str("        ");
+                print_expr_grouped(out, &subst_body);
+                out.push_str(".store(out, i)\n");
+                let short = dtype_short(&dt);
+                out.push_str(&format!("    vectorize[__kernel, nelts_{short}](n)\n"));
+            }
         }
     }
 }
@@ -1344,6 +1418,48 @@ mod mixed_precision_tests {
         let src = "(elementwise-mojo bad [^f32 a ^f64 b] ^f32 (+ a b))";
         let err = emit(src, Tier::Max).unwrap_err();
         assert!(err.contains("share the same dtype"), "got: {err}");
+    }
+}
+
+#[cfg(test)]
+mod multi_output_tests {
+    use super::{emit, Tier};
+
+    #[test]
+    fn two_output_kernel_emits_two_pointers_and_stores() {
+        // Split each input into (2x, 2x+1).
+        let src = "(elementwise-mojo split-even-odd [^i32 x] ^Tuple-i32-i32 (tuple (* x 2) (+ (* x 2) 1)))";
+        for tier in [Tier::Readable, Tier::Optimized, Tier::Max] {
+            let out = emit(src, tier).unwrap();
+            assert!(out.contains("out0: UnsafePointer[Int32]"), "tier {:?}:\n{out}", tier);
+            assert!(out.contains("out1: UnsafePointer[Int32]"), "tier {:?}:\n{out}", tier);
+            assert!(out.contains("out0") && out.contains("out1"),
+                "expected two stores, tier {:?}:\n{out}", tier);
+        }
+    }
+
+    #[test]
+    fn three_output_kernel_works() {
+        // (x, x*x, x+1)
+        let src = "(elementwise-mojo triple [^f32 x] ^Tuple-f32-f32-f32 (tuple x (* x x) (+ x 1.0)))";
+        let out = emit(src, Tier::Readable).unwrap();
+        assert!(out.contains("out0: UnsafePointer[Float32]"), "got:\n{out}");
+        assert!(out.contains("out1: UnsafePointer[Float32]"), "got:\n{out}");
+        assert!(out.contains("out2: UnsafePointer[Float32]"), "got:\n{out}");
+    }
+
+    #[test]
+    fn multi_output_without_tuple_body_errors() {
+        let src = "(elementwise-mojo bad [^i32 x] ^Tuple-i32-i32 (+ x 1))";
+        let err = emit(src, Tier::Readable).unwrap_err();
+        assert!(err.contains("requires body `(tuple ...)`"), "got: {err}");
+    }
+
+    #[test]
+    fn multi_output_tuple_arity_mismatch_errors() {
+        let src = "(elementwise-mojo bad [^i32 x] ^Tuple-i32-i32 (tuple x x x))";
+        let err = emit(src, Tier::Readable).unwrap_err();
+        assert!(err.contains("body tuple has 3 elements"), "got: {err}");
     }
 }
 
