@@ -544,9 +544,9 @@ fn launch_gpu_mojo_default_float32() {
     let out = emit(src, Tier::Readable).unwrap();
     assert!(out.contains("from gpu.host import DeviceContext"), "got:\n{out}");
     assert!(out.contains("fn launch_vector_add_kernel(ctx: DeviceContext"), "got:\n{out}");
-    assert!(out.contains("a: UnsafePointer[Float32]"), "got:\n{out}");
-    assert!(out.contains("b: UnsafePointer[Float32]"), "got:\n{out}");
-    assert!(out.contains("out: UnsafePointer[Float32]"), "got:\n{out}");
+    assert!(out.contains("a: UnsafePointer[Float32, MutAnyOrigin]"), "got:\n{out}");
+    assert!(out.contains("b: UnsafePointer[Float32, MutAnyOrigin]"), "got:\n{out}");
+    assert!(out.contains("dst: UnsafePointer[Float32, MutAnyOrigin]"), "got:\n{out}");
     assert!(out.contains(", n: Int) raises:"), "got:\n{out}");
     assert!(
         out.contains("ctx.enqueue_function[vector_add_kernel](a, b, out, n, grid_dim=(n + 256 - 1) // 256, block_dim=256)"),
@@ -561,8 +561,8 @@ fn launch_gpu_mojo_dtype_tag() {
 (launch-gpu-mojo ^f64 scale-kernel [x out])
 "#;
     let out = emit(src, Tier::Readable).unwrap();
-    assert!(out.contains("x: UnsafePointer[Float64]"), "got:\n{out}");
-    assert!(out.contains("out: UnsafePointer[Float64]"), "got:\n{out}");
+    assert!(out.contains("x: UnsafePointer[Float64, MutAnyOrigin]"), "got:\n{out}");
+    assert!(out.contains("dst: UnsafePointer[Float64, MutAnyOrigin]"), "got:\n{out}");
 }
 
 // ---------------- Feature: parallel-mojo (parallelize) ----------------
@@ -572,10 +572,10 @@ fn parallel_mojo_emits_parallelize_kernel() {
     let src = "(parallel-mojo vector-add [^f32 a ^f32 b] ^f32 (+ a b))";
     let out = emit(src, Tier::Readable).unwrap();
     assert!(out.contains("from algorithm import parallelize"), "got:\n{out}");
-    assert!(out.contains("fn vector_add(a: UnsafePointer[Float32], b: UnsafePointer[Float32]"), "got:\n{out}");
+    assert!(out.contains("fn vector_add(a: UnsafePointer[Float32, MutAnyOrigin], b: UnsafePointer[Float32, MutAnyOrigin]"), "got:\n{out}");
     assert!(out.contains("@parameter"), "got:\n{out}");
     assert!(out.contains("fn __kernel(i: Int):"), "got:\n{out}");
-    assert!(out.contains("out[i] = (a[i] + b[i])"), "got:\n{out}");
+    assert!(out.contains("dst[i] = (a[i] + b[i])"), "got:\n{out}");
     assert!(out.contains("parallelize[__kernel](n)"), "got:\n{out}");
 }
 
@@ -603,16 +603,17 @@ fn reduce_fused_elementwise_sum_sq_diff() {
     // be a pure expression), so we inline as `(* (- a b) (- a b))`.
     let src = "(reduce-mojo sum-sq-diff [^f32 a ^f32 b] ^f32 (* (- a b) (- a b)) 0.0)";
     let out_read = emit(src, Tier::Readable).unwrap();
-    assert!(out_read.contains("fn sum_sq_diff(a: UnsafePointer[Float32], b: UnsafePointer[Float32]"), "got:\n{out_read}");
+    assert!(out_read.contains("fn sum_sq_diff(a: UnsafePointer[Float32, MutAnyOrigin], b: UnsafePointer[Float32, MutAnyOrigin]"), "got:\n{out_read}");
     assert!(out_read.contains("for i in range(n):"), "got:\n{out_read}");
     assert!(out_read.contains("acc += (((a[i] - b[i]) * (a[i] - b[i])))") ||
             out_read.contains("acc += ((a[i] - b[i]) * (a[i] - b[i]))"),
             "got:\n{out_read}");
     let out_max = emit(src, Tier::Max).unwrap();
-    assert!(out_max.contains("vectorize[__kernel, nelts_f32](n)"), "got:\n{out_max}");
-    // Both av and bv SIMD loads must appear.
-    assert!(out_max.contains("av = SIMD[DType.float32, w].load(a, i)"), "got:\n{out_max}");
-    assert!(out_max.contains("bv = SIMD[DType.float32, w].load(b, i)"), "got:\n{out_max}");
+    // Max tier uses a manual SIMD-chunked loop with scalar tail. Both
+    // av and bv loads appear via pointer-method .load[width=W](i).
+    assert!(out_max.contains("while i + nelts_f32 <= n:"), "got:\n{out_max}");
+    assert!(out_max.contains("av = a.load[width=nelts_f32](i)"), "got:\n{out_max}");
+    assert!(out_max.contains("bv = b.load[width=nelts_f32](i)"), "got:\n{out_max}");
     assert!(out_max.contains(".reduce_add()"), "got:\n{out_max}");
 }
 

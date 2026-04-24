@@ -60,8 +60,16 @@ fi
 if [ -n "$MOJO_BIN" ]; then
   echo "bench/kernels.sh: running mojo via $MOJO_BIN..." >&2
   MOJO_OUT="$(mktemp -d)"
-  if "$MOJO_BIN" build -O3 bench/kernels_mojo/run.mojo -o "$MOJO_OUT/run-mojo" 2>&1 >/dev/null; then
-    MOJO_JSON="$("$MOJO_OUT/run-mojo")"
+  # Concatenate the transpiled tier=Max kernels with the driver main()
+  # so we're timing the transpiler's real output, not hand-written Mojo.
+  # The imports from both files merge; Mojo dedupes them.
+  cat bench/kernels_mojo/src.mojo.max bench/kernels_mojo/driver.mojo > "$MOJO_OUT/bench.mojo"
+  if "$MOJO_BIN" build -O3 "$MOJO_OUT/bench.mojo" -o "$MOJO_OUT/run-mojo" 2>&1 | tee "$MOJO_OUT/build.log" >&2; then
+    if [ -x "$MOJO_OUT/run-mojo" ]; then
+      MOJO_JSON="$("$MOJO_OUT/run-mojo")"
+    else
+      echo "bench/kernels.sh: mojo build produced warnings but no binary; skipping" >&2
+    fi
   else
     echo "bench/kernels.sh: mojo build failed; skipping" >&2
   fi

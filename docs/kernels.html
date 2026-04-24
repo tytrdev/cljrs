@@ -73,11 +73,27 @@
     </table>
 
     <div class="kb-callout">
-      <b>Read the numbers honestly.</b>
+      <b>The pipeline is end-to-end.</b> <code>bench/kernels_mojo/src.clj</code> is
+      Clojure-like source, <code>cljrs-mojo</code> transpiles it at tier Max to
+      <code>src.mojo.max</code>, and the bench harness concatenates that with a
+      tiny driver and runs <code>mojo build -O3</code> on it. No hand-written
+      Mojo. The numbers below are the transpiler's actual output, compiled and
+      timed on this machine.
       <ul style="margin:0.4rem 0 0 1.1rem;padding:0">
-        <li><b>cljrs MLIR JIT</b> lands within 70–95% of a <code>rustc -O3</code> loop on the three memory-bound kernels. Clojure compiling to native is not a novelty here — it's competitive.</li>
-        <li><b>numpy's <code>dot</code></b> is ~20× faster than everything else because it calls Apple Accelerate's BLAS: hand-tuned SIMD with blocking. The other numpy kernels are 2–3× faster than Rust via SIMD ufuncs.</li>
-        <li><b>mojo</b> numbers below are from a compiled <code>mojo build -O3</code> binary on nightly 0.26.3 using scalar loops over <code>List[Float64]</code>. It's slower than the Rust baseline because <code>List</code> does bounds-checking and the transpiler's <code>vectorize[]</code>+<code>UnsafePointer</code> output <em>doesn't compile on the current nightly</em> — the stable APIs cljrs-mojo targeted were renamed. We kept the transpiler's golden output intact and adapted the harness. Updating the transpiler to emit current-nightly syntax is the obvious next commit.</li>
+        <li><b>mojo (transpiled)</b> beats <code>rustc -O3</code> on vector_add,
+          saxpy, and sum_sq — same f64 semantics, but Mojo's LLVM backend
+          auto-vectorizes the SIMD-chunked loop the transpiler emits
+          (<code>ptr.load[width=nelts]</code> / <code>ptr.store[width=nelts]</code>)
+          into full-width NEON ops.</li>
+        <li><b>cljrs MLIR JIT</b> still drives per-element scalar through a
+          function-call boundary every iteration, so it lands at 70–95% of Rust
+          on memory-bound kernels. That's the <code>defn-native</code> story;
+          <code>cljrs-mojo</code> is the compile-the-whole-loop alternative.</li>
+        <li><b>numpy's <code>dot</code></b> wins by ~15× because it calls Apple
+          Accelerate's BLAS — hand-tuned SIMD with blocking. Closing that gap
+          needs more than auto-vectorization; it needs cache-blocked reductions
+          or explicit SIMD accumulation with multiple partial sums. Future work
+          for the transpiler.</li>
       </ul>
     </div>
 

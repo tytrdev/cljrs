@@ -162,6 +162,10 @@ fn tour_v2_readable_covers_every_new_feature() {
 #[test]
 fn tour_v2_max_lifts_simd() {
     let out = emit(TOUR_V2, Tier::Max).expect("v2 max emit");
-    assert!(out.contains("vectorize[__kernel, nelts_f32](n)"), "missing vectorize:\n{out}");
+    // tier=Max now emits a manual SIMD-chunked loop (vectorize[] was
+    // dropped because the current Mojo nightly rejects capturing
+    // closures). The SIMD width still comes from `nelts_<dt>`.
+    assert!(out.contains("while i + nelts_f32 <= n:"), "missing SIMD main loop:\n{out}");
+    assert!(out.contains(".load[width=nelts_f32](i)"), "missing SIMD load:\n{out}");
     assert!(out.contains("reduce_add"), "missing reduce_add:\n{out}");
 }

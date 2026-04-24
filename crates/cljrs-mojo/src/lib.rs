@@ -83,7 +83,7 @@
 //!   shape into one kernel pass. Combining op is `+` by default; a
 //!   `^mul`/`^min`/`^max` tag on the body selects product / min / max.
 //! - **Gather/scatter**: `(gather-mojo NAME [^T values ^I indices])` emits
-//!   `out[i] = values[Int(indices[i])]`; `(scatter-mojo NAME [^I indices
+//!   `dst[i] = values[Int(indices[i])]`; `(scatter-mojo NAME [^I indices
 //!   ^T values])` emits `out[Int(indices[i])] = values[i]`. Scalar loop
 //!   at every tier — SIMD-gather/scatter spellings in Mojo are still
 //!   API-uncertain so we leave that to future work.
@@ -265,10 +265,15 @@ fn add_elementwise_imports(m: &mut MModule, tier: Tier) {
             }
         }
     }
+    // Imports for the elementwise / reduce / gather / scatter kernels.
+    // `vectorize` was removed — the tier=Max path emits a manual
+    // SIMD-chunked loop with a scalar tail because the current Mojo
+    // signature for `vectorize[func, simd_width](n, closure)` rejects
+    // capturing closures, which every cljrs-transpiled kernel is.
     let needed_imports = [
-        "from algorithm import vectorize",
-        "from memory import UnsafePointer",
-        "from sys import simd_width_of",
+        "from std.memory import UnsafePointer",
+        "from std.memory.unsafe_pointer import alloc",
+        "from std.sys import simd_width_of",
     ];
     for imp in needed_imports {
         if !m.imports.iter().any(|s| s == imp) {
@@ -572,7 +577,7 @@ fn print_elementwise(
             out.push_str(", ");
         }
         out.push_str(&snake(n));
-        out.push_str(&format!(": UnsafePointer[{}]", pty.as_str()));
+        out.push_str(&format!(": UnsafePointer[{}, MutAnyOrigin]", pty.as_str()));
     }
     for (n, t) in scalar_inputs {
         out.push_str(", ");
@@ -582,12 +587,12 @@ fn print_elementwise(
     }
     if multi {
         for (j, t) in out_tys.iter().enumerate() {
-            out.push_str(&format!(", out{j}: UnsafePointer[{}]", t.as_str()));
+            out.push_str(&format!(", dst{j}: UnsafePointer[{}, MutAnyOrigin]", t.as_str()));
         }
     } else {
-        out.push_str(", out: UnsafePointer[");
+        out.push_str(", dst: UnsafePointer[");
         out.push_str(&ty_str);
-        out.push_str("]");
+        out.push_str(", MutAnyOrigin]");
     }
     out.push_str(", n: Int):\n");
     // For multi-output, extract the tuple element exprs from the body.
@@ -609,13 +614,13 @@ fn print_elementwise(
         if multi {
             for (j, e) in multi_bodies.iter().enumerate() {
                 let subst = subst_ptr_loads(e, &ptr_names, false, &dt);
-                out.push_str(&format!("        out{j}[i] = "));
+                out.push_str(&format!("        dst{j}[i] = "));
                 print_expr(out, &subst);
                 out.push('\n');
             }
         } else {
             let subst_body = subst_ptr_loads(body, &ptr_names, false, &dt);
-            out.push_str("        out[i] = ");
+            out.push_str("        dst[i] = ");
             print_expr(out, &subst_body);
             out.push('\n');
         }
@@ -630,48 +635,73 @@ fn print_elementwise(
             if multi {
                 for (j, e) in multi_bodies.iter().enumerate() {
                     let subst = subst_ptr_loads(e, &ptr_names, false, &dt);
-                    out.push_str(&format!("        out{j}[i] = "));
+                    out.push_str(&format!("        dst{j}[i] = "));
                     print_expr(out, &subst);
                     out.push('\n');
                 }
             } else {
                 let subst_body = subst_ptr_loads(body, &ptr_names, false, &dt);
-                out.push_str("        out[i] = ");
+                out.push_str("        dst[i] = ");
                 print_expr(out, &subst_body);
                 out.push('\n');
             }
         }
         Tier::Max => {
-            // Vectorized (single-output) / vectorized-multi-store (multi-output).
-            out.push_str("    @parameter\n");
-            out.push_str("    fn __kernel[w: Int](i: Int):\n");
+            // Manual SIMD-chunked loop with scalar tail. The tier-Readable
+            // version is the scalar fallback; this is the vectorized form
+            // a compiler would produce if you wrote the loop by hand with
+            // intrinsics. Equivalent to `vectorize[...](n, closure)` but
+            // doesn't require a non-capturing closure, which the cljrs
+            // elementwise form can't express.
+            let first_dt = if multi {
+                mtype_dtype_field(&out_tys[0])
+            } else {
+                dt.clone()
+            };
+            let short = dtype_short(&first_dt);
+            let w = format!("nelts_{short}");
+            let ptr_names: Vec<String> = ptr_inputs.iter().map(|(n, _)| n.clone()).collect();
+            // ---- SIMD main loop ----
+            out.push_str("    var i = 0\n");
+            out.push_str(&format!("    while i + {w} <= n:\n"));
             for (n, pty) in ptr_inputs {
                 let sn = snake(n);
                 let pdt = mtype_dtype_field(pty);
+                let _ = pdt;
                 out.push_str(&format!(
-                    "        var {sn}v = SIMD[DType.{pdt}, w].load({sn}, i)\n"
+                    "        var {sn}v = {sn}.load[width={w}](i)\n"
                 ));
             }
-            let ptr_names: Vec<String> = ptr_inputs.iter().map(|(n, _)| n.clone()).collect();
             if multi {
                 for (j, e) in multi_bodies.iter().enumerate() {
                     let subst = subst_ptr_loads(e, &ptr_names, true, &dt);
-                    out.push_str("        ");
-                    print_expr_grouped(out, &subst);
-                    out.push_str(&format!(".store(out{j}, i)\n"));
+                    out.push_str(&format!("        dst{j}.store[width={w}](i, "));
+                    print_expr(out, &subst);
+                    out.push_str(")\n");
                 }
-                // Use the FIRST output dtype's nelts for the vectorize width.
-                let first_dt = mtype_dtype_field(&out_tys[0]);
-                let short = dtype_short(&first_dt);
-                out.push_str(&format!("    vectorize[__kernel, nelts_{short}](n)\n"));
             } else {
                 let subst_body = subst_ptr_loads(body, &ptr_names, true, &dt);
-                out.push_str("        ");
-                print_expr_grouped(out, &subst_body);
-                out.push_str(".store(out, i)\n");
-                let short = dtype_short(&dt);
-                out.push_str(&format!("    vectorize[__kernel, nelts_{short}](n)\n"));
+                out.push_str(&format!("        dst.store[width={w}](i, "));
+                print_expr(out, &subst_body);
+                out.push_str(")\n");
             }
+            out.push_str(&format!("        i += {w}\n"));
+            // ---- scalar tail ----
+            out.push_str("    while i < n:\n");
+            if multi {
+                for (j, e) in multi_bodies.iter().enumerate() {
+                    let subst = subst_ptr_loads(e, &ptr_names, false, &dt);
+                    out.push_str(&format!("        dst{j}[i] = "));
+                    print_expr(out, &subst);
+                    out.push('\n');
+                }
+            } else {
+                let subst_body = subst_ptr_loads(body, &ptr_names, false, &dt);
+                out.push_str("        dst[i] = ");
+                print_expr(out, &subst_body);
+                out.push('\n');
+            }
+            out.push_str("        i += 1\n");
         }
     }
 }
@@ -708,7 +738,7 @@ fn print_reduce(
             out.push_str(", ");
         }
         out.push_str(&snake(n));
-        out.push_str(&format!(": UnsafePointer[{}]", pty.as_str()));
+        out.push_str(&format!(": UnsafePointer[{}, MutAnyOrigin]", pty.as_str()));
     }
     out.push_str(&format!(", n: Int) -> {ty_str}:\n"));
 
@@ -746,54 +776,81 @@ fn print_reduce(
             out.push_str("    return acc\n");
         }
         Tier::Max => {
-            // SIMD-lifted accumulator using vectorize.
+            // Manual SIMD-chunked reduction with scalar tail. Same shape
+            // as the elementwise Max path — the accumulator is a full-
+            // width SIMD vector; each chunk combines elementwise; tail
+            // runs scalar. Final reduce_* folds the SIMD accumulator into
+            // the scalar return.
             let short = dtype_short(&dt);
+            let w = format!("nelts_{short}");
             out.push_str(&format!(
-                "    var acc = SIMD[DType.{dt}, nelts_{short}](",
+                "    var acc = SIMD[DType.{dt}, {w}]("
             ));
             print_expr(out, init);
             out.push_str(")\n");
-            out.push_str("    @parameter\n");
-            out.push_str("    fn __kernel[w: Int](i: Int):\n");
-            for (n, pty) in ptr_inputs {
-                let sn = snake(n);
-                let pdt = mtype_dtype_field(pty);
-                out.push_str(&format!(
-                    "        var {sn}v = SIMD[DType.{pdt}, w].load({sn}, i)\n"
-                ));
-            }
             let ptr_names: Vec<String> = ptr_inputs.iter().map(|(n, _)| n.clone()).collect();
             let subst_body = subst_ptr_loads(body, &ptr_names, /*max=*/ true, &dt);
-            // Per-iter SIMD combine into acc. The vectorize parameter `w` may
-            // differ from nelts_<short> on tail iterations, so we fold the
-            // iteration's SIMD value through its own reduce_* before combining
-            // into the outer nelts-wide accumulator's lane 0. This is the
-            // safest shape across tail widths.
             let reduce_method = combiner.simd_reduce_method();
+            // ---- SIMD main loop ----
+            out.push_str("    var i = 0\n");
+            out.push_str(&format!("    while i + {w} <= n:\n"));
+            for (n, _pty) in ptr_inputs {
+                let sn = snake(n);
+                out.push_str(&format!(
+                    "        var {sn}v = {sn}.load[width={w}](i)\n"
+                ));
+            }
             match combiner {
                 ReduceOp::Add => {
-                    out.push_str("        acc[0] += ");
-                    print_expr_grouped(out, &subst_body);
-                    out.push_str(&format!(".{reduce_method}()\n"));
+                    out.push_str("        acc += ");
+                    print_expr(out, &subst_body);
+                    out.push('\n');
                 }
                 ReduceOp::Mul => {
-                    out.push_str("        acc[0] *= ");
-                    print_expr_grouped(out, &subst_body);
-                    out.push_str(&format!(".{reduce_method}()\n"));
+                    out.push_str("        acc *= ");
+                    print_expr(out, &subst_body);
+                    out.push('\n');
                 }
                 ReduceOp::Min => {
-                    out.push_str("        acc[0] = min(acc[0], ");
-                    print_expr_grouped(out, &subst_body);
-                    out.push_str(&format!(".{reduce_method}())\n"));
+                    out.push_str("        acc = min(acc, ");
+                    print_expr(out, &subst_body);
+                    out.push_str(")\n");
                 }
                 ReduceOp::Max => {
-                    out.push_str("        acc[0] = max(acc[0], ");
-                    print_expr_grouped(out, &subst_body);
-                    out.push_str(&format!(".{reduce_method}())\n"));
+                    out.push_str("        acc = max(acc, ");
+                    print_expr(out, &subst_body);
+                    out.push_str(")\n");
                 }
             }
-            out.push_str(&format!("    vectorize[__kernel, nelts_{short}](n)\n"));
-            out.push_str(&format!("    return acc.{reduce_method}()\n"));
+            out.push_str(&format!("        i += {w}\n"));
+            // ---- scalar tail, kept in a lane-0 scratch slot ----
+            out.push_str(&format!("    var tail: {ty_str} = acc.{reduce_method}()\n"));
+            out.push_str("    while i < n:\n");
+            let subst_scalar = subst_ptr_loads(body, &ptr_names, /*max=*/ false, &dt);
+            match combiner {
+                ReduceOp::Add => {
+                    out.push_str("        tail += ");
+                    print_expr(out, &subst_scalar);
+                    out.push('\n');
+                }
+                ReduceOp::Mul => {
+                    out.push_str("        tail *= ");
+                    print_expr(out, &subst_scalar);
+                    out.push('\n');
+                }
+                ReduceOp::Min => {
+                    out.push_str("        tail = min(tail, ");
+                    print_expr(out, &subst_scalar);
+                    out.push_str(")\n");
+                }
+                ReduceOp::Max => {
+                    out.push_str("        tail = max(tail, ");
+                    print_expr(out, &subst_scalar);
+                    out.push_str(")\n");
+                }
+            }
+            out.push_str("        i += 1\n");
+            out.push_str("    return tail\n");
         }
     }
 }
@@ -821,11 +878,11 @@ fn print_gather(
     out.push_str("fn ");
     out.push_str(&snake(name));
     out.push_str(&format!(
-        "({v}: UnsafePointer[{}], {idx}: UnsafePointer[{}], out: UnsafePointer[{}], n: Int):\n",
+        "({v}: UnsafePointer[{}, MutAnyOrigin], {idx}: UnsafePointer[{}, MutAnyOrigin], dst: UnsafePointer[{}, MutAnyOrigin], n: Int):\n",
         values_ty.as_str(), indices_ty.as_str(), out_ty.as_str()
     ));
     out.push_str("    for i in range(n):\n");
-    out.push_str(&format!("        out[i] = {v}[Int({idx}[i])]\n"));
+    out.push_str(&format!("        dst[i] = {v}[Int({idx}[i])]\n"));
 }
 
 fn print_scatter(
@@ -851,7 +908,7 @@ fn print_scatter(
     out.push_str("fn ");
     out.push_str(&snake(name));
     out.push_str(&format!(
-        "({idx}: UnsafePointer[{}], {v}: UnsafePointer[{}], out: UnsafePointer[{}], n: Int):\n",
+        "({idx}: UnsafePointer[{}, MutAnyOrigin], {v}: UnsafePointer[{}, MutAnyOrigin], dst: UnsafePointer[{}, MutAnyOrigin], n: Int):\n",
         indices_ty.as_str(), values_ty.as_str(), out_ty.as_str()
     ));
     out.push_str("    for i in range(n):\n");
@@ -882,14 +939,14 @@ fn print_gpu_elementwise(
     out.push('(');
     for (n, _) in ptr_inputs {
         out.push_str(&snake(n));
-        out.push_str(&format!(": UnsafePointer[{ty_str}], "));
+        out.push_str(&format!(": UnsafePointer[{ty_str}, MutAnyOrigin], "));
     }
-    out.push_str(&format!("out: UnsafePointer[{ty_str}], n: Int):\n"));
+    out.push_str(&format!("dst: UnsafePointer[{ty_str}, MutAnyOrigin], n: Int):\n"));
     out.push_str("    var i = block_idx.x * block_dim.x + thread_idx.x\n");
     out.push_str("    if i < n:\n");
     let ptr_names: Vec<String> = ptr_inputs.iter().map(|(n, _)| n.clone()).collect();
     let subst_body = subst_ptr_loads(body, &ptr_names, /*max=*/ false, &mtype_dtype_field(out_ty));
-    out.push_str("        out[i] = ");
+    out.push_str("        dst[i] = ");
     print_expr(out, &subst_body);
     out.push('\n');
 }
@@ -919,7 +976,7 @@ fn print_gpu_launch(
     for a in ptr_args {
         out.push_str(", ");
         out.push_str(&snake(a));
-        out.push_str(&format!(": UnsafePointer[{ty_str}]"));
+        out.push_str(&format!(": UnsafePointer[{ty_str}, MutAnyOrigin]"));
     }
     out.push_str(", n: Int) raises:\n");
     out.push_str(&format!("    ctx.enqueue_function[{}](", snake(kernel_name)));
@@ -1554,11 +1611,11 @@ mod mixed_precision_tests {
         let src = "(reduce-mojo sum-sq-f16 [^bf16 x] ^f32 (* (cast-mojo ^f32 x) (cast-mojo ^f32 x)) 0.0)";
         let out = emit(src, Tier::Max).unwrap();
         // Input pointer uses source dtype.
-        assert!(out.contains("x: UnsafePointer[BFloat16]"), "got:\n{out}");
+        assert!(out.contains("x: UnsafePointer[BFloat16, MutAnyOrigin]"), "got:\n{out}");
         // Return type is the accumulator dtype.
         assert!(out.contains("-> Float32"), "got:\n{out}");
-        // SIMD load uses the input dtype.
-        assert!(out.contains("SIMD[DType.bfloat16"), "got:\n{out}");
+        // SIMD load uses pointer-method form with the input dtype implicit.
+        assert!(out.contains("x.load[width=nelts_"), "got:\n{out}");
         // Cast to f32 appears.
         assert!(out.contains("cast[DType.float32]"), "got:\n{out}");
     }
@@ -1568,8 +1625,8 @@ mod mixed_precision_tests {
         // Takes f32, writes bf16 via cast.
         let src = "(elementwise-mojo downcast [^f32 x] ^bf16 (cast-mojo ^bf16 x))";
         let out = emit(src, Tier::Max).unwrap();
-        assert!(out.contains("x: UnsafePointer[Float32]"), "got:\n{out}");
-        assert!(out.contains("out: UnsafePointer[BFloat16]"), "got:\n{out}");
+        assert!(out.contains("x: UnsafePointer[Float32, MutAnyOrigin]"), "got:\n{out}");
+        assert!(out.contains("dst: UnsafePointer[BFloat16, MutAnyOrigin]"), "got:\n{out}");
         assert!(out.contains("cast[DType.bfloat16]"), "got:\n{out}");
     }
 
@@ -1601,9 +1658,9 @@ mod multi_output_tests {
         let src = "(elementwise-mojo split-even-odd [^i32 x] ^Tuple-i32-i32 (tuple (* x 2) (+ (* x 2) 1)))";
         for tier in [Tier::Readable, Tier::Optimized, Tier::Max] {
             let out = emit(src, tier).unwrap();
-            assert!(out.contains("out0: UnsafePointer[Int32]"), "tier {:?}:\n{out}", tier);
-            assert!(out.contains("out1: UnsafePointer[Int32]"), "tier {:?}:\n{out}", tier);
-            assert!(out.contains("out0") && out.contains("out1"),
+            assert!(out.contains("dst0: UnsafePointer[Int32, MutAnyOrigin]"), "tier {:?}:\n{out}", tier);
+            assert!(out.contains("dst1: UnsafePointer[Int32, MutAnyOrigin]"), "tier {:?}:\n{out}", tier);
+            assert!(out.contains("dst0") && out.contains("dst1"),
                 "expected two stores, tier {:?}:\n{out}", tier);
         }
     }
@@ -1613,9 +1670,9 @@ mod multi_output_tests {
         // (x, x*x, x+1)
         let src = "(elementwise-mojo triple [^f32 x] ^Tuple-f32-f32-f32 (tuple x (* x x) (+ x 1.0)))";
         let out = emit(src, Tier::Readable).unwrap();
-        assert!(out.contains("out0: UnsafePointer[Float32]"), "got:\n{out}");
-        assert!(out.contains("out1: UnsafePointer[Float32]"), "got:\n{out}");
-        assert!(out.contains("out2: UnsafePointer[Float32]"), "got:\n{out}");
+        assert!(out.contains("dst0: UnsafePointer[Float32, MutAnyOrigin]"), "got:\n{out}");
+        assert!(out.contains("dst1: UnsafePointer[Float32, MutAnyOrigin]"), "got:\n{out}");
+        assert!(out.contains("dst2: UnsafePointer[Float32, MutAnyOrigin]"), "got:\n{out}");
     }
 
     #[test]
@@ -1709,9 +1766,9 @@ mod gather_scatter_tests {
         for tier in [Tier::Readable, Tier::Optimized, Tier::Max] {
             let out = emit(src, tier).unwrap();
             assert!(out.contains("fn gf32("), "tier {:?}:\n{out}", tier);
-            assert!(out.contains("values: UnsafePointer[Float32]"), "tier {:?}:\n{out}", tier);
-            assert!(out.contains("indices: UnsafePointer[Int32]"), "tier {:?}:\n{out}", tier);
-            assert!(out.contains("out[i] = values[Int(indices[i])]"),
+            assert!(out.contains("values: UnsafePointer[Float32, MutAnyOrigin]"), "tier {:?}:\n{out}", tier);
+            assert!(out.contains("indices: UnsafePointer[Int32, MutAnyOrigin]"), "tier {:?}:\n{out}", tier);
+            assert!(out.contains("dst[i] = values[Int(indices[i])]"),
                 "tier {:?}:\n{out}", tier);
         }
     }
@@ -1734,9 +1791,9 @@ mod gather_scatter_tests {
     fn scatter_integer_dtype_works() {
         let src = "(scatter-mojo si32 [^i32 indices ^i32 values])";
         let out = emit(src, Tier::Max).unwrap();
-        assert!(out.contains("indices: UnsafePointer[Int32]"), "got:\n{out}");
-        assert!(out.contains("values: UnsafePointer[Int32]"), "got:\n{out}");
-        assert!(out.contains("out: UnsafePointer[Int32]"), "got:\n{out}");
+        assert!(out.contains("indices: UnsafePointer[Int32, MutAnyOrigin]"), "got:\n{out}");
+        assert!(out.contains("values: UnsafePointer[Int32, MutAnyOrigin]"), "got:\n{out}");
+        assert!(out.contains("dst: UnsafePointer[Int32, MutAnyOrigin]"), "got:\n{out}");
     }
 }
 
