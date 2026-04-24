@@ -403,6 +403,24 @@ fn rename_user_call_callee() {
     assert!(out.contains("helper_fn(y)"), "got:\n{out}");
 }
 
+// ---------------- Feature: Tuple returns + (tuple a b c) ----------------
+
+#[test]
+fn tuple_return_type() {
+    let src = "(defn-mojo triple ^Tuple-f32-f32-f32 [^f32 x] (tuple x x x))";
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("-> Tuple[Float32, Float32, Float32]"), "got:\n{out}");
+    assert!(out.contains("return Tuple(x, x, x)"), "got:\n{out}");
+}
+
+#[test]
+fn tuple_mixed_types() {
+    let src = "(defn-mojo pair ^Tuple-i32-f32 [^i32 a ^f32 b] (tuple a b))";
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("-> Tuple[Int32, Float32]"), "got:\n{out}");
+    assert!(out.contains("return Tuple(a, b)"), "got:\n{out}");
+}
+
 // ---------------- Feature: Dict type + assoc/get ----------------
 
 #[test]

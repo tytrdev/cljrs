@@ -1885,6 +1885,14 @@ fn lower_call(ctx: &Ctx, v: &[Value]) -> Result<MExpr, String> {
         let ty_str = infer_list_ty(&lowered);
         return Ok(MExpr::Call { callee: format!("List[{ty_str}]"), args: lowered });
     }
+    if head == "tuple" {
+        // Mojo's Tuple type accepts positional args: `Tuple[T1, T2, ...](a, b, ...)`.
+        // We don't need to spell the parameter list here — Mojo infers
+        // it from the argument expressions. Emit bare `(a, b, ...)`
+        // wrapped in a `Tuple(...)` call which Mojo parses as ctor sugar.
+        let lowered: Result<Vec<_>, _> = args.iter().map(|a| lower_expr(ctx, a)).collect();
+        return Ok(MExpr::Call { callee: "Tuple".into(), args: lowered? });
+    }
     if head == "dict-mojo" {
         // `(dict-mojo ^Dict-K-V)` → `Dict[K, V]()`. The type tag is
         // required so we know the dict's key/value types at emit time.
