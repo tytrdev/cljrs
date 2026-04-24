@@ -15,6 +15,7 @@
     .kb-bar.slow { background: #c084fc; }
     .kb-bar.rust { background: #86efac; }
     .kb-bar.numpy { background: #fbbf24; }
+    .kb-bar.mojo { background: #f87171; }
     .kb-two { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 0.6rem 0 1.4rem 0; }
     @media (max-width: 900px) { .kb-two { grid-template-columns: 1fr; } }
     .kb-two > div { border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: var(--bg-elev); }
@@ -49,9 +50,10 @@
 
     <h3>Results</h3>
     <p class="kb-legend">
-      <span><span class="sw" style="background:#c084fc"></span>cljrs MLIR JIT</span>
+      <span><span class="sw" style="background:#c084fc"></span>cljrs MLIR JIT (defn-native)</span>
       <span><span class="sw" style="background:#86efac"></span>rust inline (rustc -O3)</span>
       <span><span class="sw" style="background:#fbbf24"></span>numpy (ufuncs + Accelerate BLAS)</span>
+      <span><span class="sw" style="background:#f87171"></span>mojo (mojo build -O3)</span>
     </p>
     <table class="kb-table" id="kb-table">
       <thead>
@@ -60,24 +62,23 @@
           <th>cljrs ns</th>
           <th>rust ns</th>
           <th>numpy ns</th>
+          <th>mojo ns</th>
           <th>cljrs GFLOPs</th>
           <th>rust GFLOPs</th>
           <th>numpy GFLOPs</th>
+          <th>mojo GFLOPs</th>
         </tr>
       </thead>
       <tbody></tbody>
     </table>
 
     <div class="kb-callout">
-      <b>Read the numbers honestly.</b> cljrs lands within 70–95% of a
-      <code>rustc -O3</code> loop on the three memory-bound kernels.
-      NumPy's <code>dot</code> is ~20× faster than both because it calls
-      into Apple Accelerate's BLAS — hand-tuned SIMD with blocking and
-      multi-threading. That's the gap cljrs-mojo is designed to close:
-      the same source, transpiled at tier Max, emits a
-      <code>vectorize[body, nelts](n)</code> SIMD kernel that targets
-      the same register file BLAS does. We can show the emitted code;
-      we can't compile it here without Modular's toolchain.
+      <b>Read the numbers honestly.</b>
+      <ul style="margin:0.4rem 0 0 1.1rem;padding:0">
+        <li><b>cljrs MLIR JIT</b> lands within 70–95% of a <code>rustc -O3</code> loop on the three memory-bound kernels. Clojure compiling to native is not a novelty here — it's competitive.</li>
+        <li><b>numpy's <code>dot</code></b> is ~20× faster than everything else because it calls Apple Accelerate's BLAS: hand-tuned SIMD with blocking. The other numpy kernels are 2–3× faster than Rust via SIMD ufuncs.</li>
+        <li><b>mojo</b> numbers below are from a compiled <code>mojo build -O3</code> binary on nightly 0.26.3 using scalar loops over <code>List[Float64]</code>. It's slower than the Rust baseline because <code>List</code> does bounds-checking and the transpiler's <code>vectorize[]</code>+<code>UnsafePointer</code> output <em>doesn't compile on the current nightly</em> — the stable APIs cljrs-mojo targeted were renamed. We kept the transpiler's golden output intact and adapted the harness. Updating the transpiler to emit current-nightly syntax is the obvious next commit.</li>
+      </ul>
     </div>
 
     <h3>Source — cljrs (one kernel)</h3>
@@ -126,12 +127,12 @@
 
     const r = await fetch("./bench-kernels/results.json").then(r => r.json());
     machineEl.textContent =
-      `N = ${r.n.toLocaleString()} · iters = ${r.iters} · ${r.machine.os} ${r.machine.arch} · numpy ${r.numpy_version || "n/a"}`;
+      `N = ${r.n.toLocaleString()} · iters = ${r.iters} · ${r.machine.os} ${r.machine.arch} · numpy ${r.numpy_version || "n/a"} · mojo ${r.mojo_version || "n/a"}${r.mojo_strategy ? " (" + r.mojo_strategy + ")" : ""}`;
 
     // Find max per-col for bar scaling.
     const maxGflops = Math.max(
       ...r.kernels.flatMap(k =>
-        [k.cljrs_native_gflops, k.rust_inline_gflops, k.numpy_gflops].filter(Boolean)
+        [k.cljrs_native_gflops, k.rust_inline_gflops, k.numpy_gflops, k.mojo_gflops].filter(Boolean)
       )
     );
     const bar = (g, cls) => {
@@ -147,9 +148,11 @@
         <td>${k.cljrs_native_ns?.toLocaleString() ?? "—"}</td>
         <td>${k.rust_inline_ns?.toLocaleString() ?? "—"}</td>
         <td>${k.numpy_ns?.toLocaleString() ?? "—"}</td>
+        <td>${k.mojo_ns?.toLocaleString() ?? "—"}</td>
         <td>${bar(k.cljrs_native_gflops, "slow")}${k.cljrs_native_gflops?.toFixed(2) ?? "—"}</td>
         <td>${bar(k.rust_inline_gflops, "rust")}${k.rust_inline_gflops?.toFixed(2) ?? "—"}</td>
         <td>${bar(k.numpy_gflops, "numpy")}${k.numpy_gflops?.toFixed(2) ?? "—"}</td>
+        <td>${bar(k.mojo_gflops, "mojo")}${k.mojo_gflops?.toFixed(2) ?? "—"}</td>
       `;
       tbody.appendChild(tr);
     }

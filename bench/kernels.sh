@@ -45,29 +45,66 @@ fi
 echo "bench/kernels.sh: emitting transpiled Mojo alongside .clj sources..." >&2
 cargo run --release -p cljrs-mojo --bin emit_mojo -- bench/kernels_mojo/src.clj --all >&2 || true
 
+# ---- mojo (if installed) ----
+MOJO_JSON=""
+MOJO_BIN=""
+# Prefer any on-PATH mojo; fall back to the uv-managed venv the README
+# docs recommend. Scalar-loop harness compiles cleanly on 0.26.3+.
+if command -v mojo >/dev/null 2>&1; then
+  MOJO_BIN="mojo"
+elif [ -x "$HOME/.mojo/bin/mojo" ]; then
+  MOJO_BIN="$HOME/.mojo/bin/mojo"
+elif [ -x "/tmp/mojo-bench/.venv/bin/mojo" ]; then
+  MOJO_BIN="/tmp/mojo-bench/.venv/bin/mojo"
+fi
+if [ -n "$MOJO_BIN" ]; then
+  echo "bench/kernels.sh: running mojo via $MOJO_BIN..." >&2
+  MOJO_OUT="$(mktemp -d)"
+  if "$MOJO_BIN" build -O3 bench/kernels_mojo/run.mojo -o "$MOJO_OUT/run-mojo" 2>&1 >/dev/null; then
+    MOJO_JSON="$("$MOJO_OUT/run-mojo")"
+  else
+    echo "bench/kernels.sh: mojo build failed; skipping" >&2
+  fi
+  rm -rf "$MOJO_OUT"
+else
+  echo "bench/kernels.sh: mojo not found on PATH; skipping mojo backend" >&2
+fi
+
 # ---- merge JSON ----
 # Produce a single object keyed by kernel name with per-backend fields.
-python3 - "$CLJRS_JSON" "$NUMPY_JSON" > "$OUT_DIR/results.json" <<'PY'
+python3 - "$CLJRS_JSON" "$NUMPY_JSON" "$MOJO_JSON" > "$OUT_DIR/results.json" <<'PY'
 import json, sys, pathlib
 cljrs = json.loads(sys.argv[1]) if sys.argv[1] else {"kernels": []}
 numpy = json.loads(sys.argv[2]) if sys.argv[2] else {"kernels": []}
+mojo  = json.loads(sys.argv[3]) if sys.argv[3] else {"kernels": []}
 
 by_name = {}
 for k in cljrs.get("kernels", []):
     by_name[k["name"]] = dict(k)
 for k in numpy.get("kernels", []):
     by_name.setdefault(k["name"], {"name": k["name"]}).update(k)
+for k in mojo.get("kernels", []):
+    by_name.setdefault(k["name"], {"name": k["name"]}).update(k)
 
 merged = {
-    "n": cljrs.get("n") or numpy.get("n"),
-    "iters": cljrs.get("iters") or numpy.get("iters"),
+    "n": cljrs.get("n") or numpy.get("n") or mojo.get("n"),
+    "iters": cljrs.get("iters") or numpy.get("iters") or mojo.get("iters"),
     "numpy_version": numpy.get("numpy_version"),
+    "mojo_version": mojo.get("mojo_version"),
+    "mojo_strategy": mojo.get("strategy"),
     "machine": {
         "os": None, "arch": None,
     },
     "kernels": [by_name[k] for k in ["vector_add", "saxpy", "dot", "sum_sq"]
                 if k in by_name],
 }
+# Fold per-kernel gflops for mojo at merge time since the mojo driver
+# only reports raw ns (matches numpy's shape; the flops count comes
+# from cljrs_native which is always present).
+for k in merged["kernels"]:
+    if "mojo_ns" in k and k["mojo_ns"] > 0 and "flops" in k:
+        k["mojo_gflops"] = round(k["flops"] / k["mojo_ns"], 3)
+        k["mojo_gibs"] = round(k["bytes"] / k["mojo_ns"], 3)
 # Best-effort machine info
 try:
     import platform
