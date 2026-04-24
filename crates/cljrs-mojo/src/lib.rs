@@ -29,7 +29,7 @@
 //! - `(print x)` / `(println x)` → `print(x)`; `(format "n={}" n)` →
 //!   `"n=" + String(n)` left-folded concat
 //! - tier 2 const-fold + CSE + 1-stmt-fn inlining; tier 3 `@always_inline`
-//!   on small all-primitive fns
+//!   on pure, non-recursive, ≤10-stmt fns with control depth ≤ 2
 //!
 //! Forms outside this set produce errors that quote the offending form.
 

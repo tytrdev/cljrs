@@ -1,12 +1,17 @@
 //! Tier 3: SIMD / parameter specialization + comment stripping.
 //!
-//! This pass is conservative: it only adds `@always_inline` to small fns
-//! (≤3 stmts, all-float signature) and strips comments. The full
-//! `@parameter fn[nelts]` + `SIMD[DType.float32, nelts]` rewrite is
-//! deferred behind a detection hook — we keep the infrastructure so the
-//! printer can emit decorators for the simple case.
+//! `@always_inline` is applied when ALL of the following hold for a fn:
+//!   - declared return and all param types are non-Infer (primitive, named,
+//!     SIMD, or String all count)
+//!   - body has ≤ 10 leaf statements
+//!   - no self-recursion (no Call to its own name anywhere in the body)
+//!   - nested control flow never exceeds depth 2 (if-inside-if-inside-if
+//!     disqualifies)
+//!   - no While loop (break-trampolined loops are too heavyweight to inline)
+//! ForRange loops are allowed because Mojo unrolls them well at the inline
+//! site when the bounds are compile-time.
 
-use crate::ast::{MItem, MModule, MStmt, MType};
+use crate::ast::{MExpr, MItem, MModule, MStmt, MType};
 
 pub fn specialize(m: &mut MModule) {
     // Run tier2 opts first.
@@ -17,12 +22,16 @@ pub fn specialize(m: &mut MModule) {
             MItem::Fn(f) => {
                 // Strip source comments.
                 f.comment = None;
-                // `@always_inline` on small, all-primitive-typed fns.
-                let small = count_leaf_stmts(&f.body) <= 3;
-                let primitive_sig =
+                let sized = count_leaf_stmts(&f.body) <= 10;
+                let typed_sig =
                     f.params.iter().all(|(_, t)| !matches!(t, MType::Infer))
                         && !matches!(f.ret, MType::Infer);
-                if small && primitive_sig && !f.decorators.iter().any(|d| d.contains("always_inline")) {
+                let depth_ok = max_control_depth(&f.body) <= 2;
+                let non_recursive = !body_calls(&f.body, &f.name);
+                let no_while = !body_has_while(&f.body);
+                if sized && typed_sig && depth_ok && non_recursive && no_while
+                    && !f.decorators.iter().any(|d| d.contains("always_inline"))
+                {
                     f.decorators.insert(0, "@always_inline".to_string());
                 }
                 // If the fn is a tight loop over a Float32 range, tag it
@@ -61,6 +70,56 @@ fn count_leaf_stmts(body: &[MStmt]) -> usize {
         }
     }
     n
+}
+
+fn max_control_depth(body: &[MStmt]) -> usize {
+    let mut best = 0usize;
+    for s in body {
+        let d = match s {
+            MStmt::If { then, els, .. } => 1 + max_control_depth(then).max(max_control_depth(els)),
+            MStmt::While { body, .. } | MStmt::ForRange { body, .. } => 1 + max_control_depth(body),
+            _ => 0,
+        };
+        if d > best { best = d; }
+    }
+    best
+}
+
+fn body_has_while(body: &[MStmt]) -> bool {
+    body.iter().any(|s| match s {
+        MStmt::While { .. } => true,
+        MStmt::If { then, els, .. } => body_has_while(then) || body_has_while(els),
+        MStmt::ForRange { body, .. } => body_has_while(body),
+        _ => false,
+    })
+}
+
+fn body_calls(body: &[MStmt], name: &str) -> bool {
+    body.iter().any(|s| stmt_calls(s, name))
+}
+
+fn stmt_calls(s: &MStmt, name: &str) -> bool {
+    match s {
+        MStmt::Let { value, .. }
+        | MStmt::Assign { value, .. }
+        | MStmt::Return(value)
+        | MStmt::Expr(value) => expr_calls(value, name),
+        MStmt::If { cond, then, els } => expr_calls(cond, name) || body_calls(then, name) || body_calls(els, name),
+        MStmt::While { cond, body } => expr_calls(cond, name) || body_calls(body, name),
+        MStmt::ForRange { lo, hi, body, .. } => expr_calls(lo, name) || expr_calls(hi, name) || body_calls(body, name),
+        MStmt::Break | MStmt::Continue => false,
+    }
+}
+
+fn expr_calls(e: &MExpr, name: &str) -> bool {
+    match e {
+        MExpr::Call { callee, args } => callee == name || args.iter().any(|a| expr_calls(a, name)),
+        MExpr::BinOp { lhs, rhs, .. } => expr_calls(lhs, name) || expr_calls(rhs, name),
+        MExpr::UnOp { rhs, .. } => expr_calls(rhs, name),
+        MExpr::IfExpr { cond, then, els } => expr_calls(cond, name) || expr_calls(then, name) || expr_calls(els, name),
+        MExpr::Field { obj, .. } => expr_calls(obj, name),
+        _ => false,
+    }
 }
 
 fn is_simd_candidate(f: &crate::ast::MFn) -> bool {

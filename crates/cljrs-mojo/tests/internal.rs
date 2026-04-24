@@ -258,6 +258,29 @@ fn capitalized_type_hint_passes_through_as_named() {
 }
 
 #[test]
+fn always_inline_applied_to_small_pure_fn() {
+    let src = "(defn-mojo sq ^f32 [^f32 x] (* x x))";
+    let out = emit(src, Tier::Max).unwrap();
+    assert!(out.contains("@always_inline"), "got:\n{out}");
+}
+
+#[test]
+fn always_inline_skipped_on_recursive_fn() {
+    let src = "(defn-mojo rec ^i64 [^i64 n] (if (< n 2) n (+ (rec (- n 1)) (rec (- n 2)))))";
+    let out = emit(src, Tier::Max).unwrap();
+    assert!(!out.contains("@always_inline"), "should skip recursive:\n{out}");
+}
+
+#[test]
+fn always_inline_skipped_on_while_loop() {
+    let src = "(defn-mojo fact ^i64 [^i64 n]
+                 (loop [^i64 i 1 ^i64 acc 1]
+                   (if (> i n) acc (recur (+ i 1) (* acc i)))))";
+    let out = emit(src, Tier::Max).unwrap();
+    assert!(!out.contains("@always_inline"), "should skip while:\n{out}");
+}
+
+#[test]
 fn extended_math_fns() {
     let src = "(defn-mojo m ^f32 [^f32 x ^f32 y]
                  (+ (tanh x) (+ (atan2 y x) (+ (log2 x) (hypot x y)))))";
