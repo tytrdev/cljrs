@@ -403,6 +403,31 @@ fn rename_user_call_callee() {
     assert!(out.contains("helper_fn(y)"), "got:\n{out}");
 }
 
+// ---------------- Feature: elementwise+reduce fusion ----------------
+
+#[test]
+fn reduce_fused_elementwise_sum_sq_diff() {
+    // Multi-input reduce whose body is an elementwise-shaped expression
+    // `(d * d)` where `d` is a let-binding of `(- a b)`. This is the
+    // classic fused sum-of-squared-differences kernel.
+    //
+    // The `(let ...)` form isn't legal in reduce-mojo bodies (body must
+    // be a pure expression), so we inline as `(* (- a b) (- a b))`.
+    let src = "(reduce-mojo sum-sq-diff [^f32 a ^f32 b] ^f32 (* (- a b) (- a b)) 0.0)";
+    let out_read = emit(src, Tier::Readable).unwrap();
+    assert!(out_read.contains("fn sum_sq_diff(a: UnsafePointer[Float32], b: UnsafePointer[Float32]"), "got:\n{out_read}");
+    assert!(out_read.contains("for i in range(n):"), "got:\n{out_read}");
+    assert!(out_read.contains("acc += (((a[i] - b[i]) * (a[i] - b[i])))") ||
+            out_read.contains("acc += ((a[i] - b[i]) * (a[i] - b[i]))"),
+            "got:\n{out_read}");
+    let out_max = emit(src, Tier::Max).unwrap();
+    assert!(out_max.contains("vectorize[__kernel, nelts_f32](n)"), "got:\n{out_max}");
+    // Both av and bv SIMD loads must appear.
+    assert!(out_max.contains("av = SIMD[DType.float32, w].load(a, i)"), "got:\n{out_max}");
+    assert!(out_max.contains("bv = SIMD[DType.float32, w].load(b, i)"), "got:\n{out_max}");
+    assert!(out_max.contains(".reduce_add()"), "got:\n{out_max}");
+}
+
 // ---------------- Feature: iterator-protocol for-mojo-in ----------------
 
 #[test]
