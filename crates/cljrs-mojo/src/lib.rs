@@ -549,9 +549,9 @@ fn print_elementwise(
             }
             let ptr_names: Vec<String> = ptr_inputs.iter().map(|(n, _)| n.clone()).collect();
             let subst_body = subst_ptr_loads(body, &ptr_names, /*max=*/ true, &dt);
-            out.push_str("        (");
-            print_expr(out, &subst_body);
-            out.push_str(").store(out, i)\n");
+            out.push_str("        ");
+            print_expr_grouped(out, &subst_body);
+            out.push_str(".store(out, i)\n");
             let short = dtype_short(&dt);
             out.push_str(&format!("    vectorize[__kernel, nelts_{short}](n)\n"));
         }
@@ -653,24 +653,24 @@ fn print_reduce(
             let reduce_method = combiner.simd_reduce_method();
             match combiner {
                 ReduceOp::Add => {
-                    out.push_str("        acc[0] += (");
-                    print_expr(out, &subst_body);
-                    out.push_str(&format!(").{reduce_method}()\n"));
+                    out.push_str("        acc[0] += ");
+                    print_expr_grouped(out, &subst_body);
+                    out.push_str(&format!(".{reduce_method}()\n"));
                 }
                 ReduceOp::Mul => {
-                    out.push_str("        acc[0] *= (");
-                    print_expr(out, &subst_body);
-                    out.push_str(&format!(").{reduce_method}()\n"));
+                    out.push_str("        acc[0] *= ");
+                    print_expr_grouped(out, &subst_body);
+                    out.push_str(&format!(".{reduce_method}()\n"));
                 }
                 ReduceOp::Min => {
-                    out.push_str("        acc[0] = min(acc[0], (");
-                    print_expr(out, &subst_body);
-                    out.push_str(&format!(").{reduce_method}())\n"));
+                    out.push_str("        acc[0] = min(acc[0], ");
+                    print_expr_grouped(out, &subst_body);
+                    out.push_str(&format!(".{reduce_method}())\n"));
                 }
                 ReduceOp::Max => {
-                    out.push_str("        acc[0] = max(acc[0], (");
-                    print_expr(out, &subst_body);
-                    out.push_str(&format!(").{reduce_method}())\n"));
+                    out.push_str("        acc[0] = max(acc[0], ");
+                    print_expr_grouped(out, &subst_body);
+                    out.push_str(&format!(".{reduce_method}())\n"));
                 }
             }
             out.push_str(&format!("    vectorize[__kernel, nelts_{short}](n)\n"));
@@ -1104,6 +1104,26 @@ pub(crate) fn print_expr_public(out: &mut String, e: &MExpr) {
     print_expr(out, e);
 }
 
+/// Like `print_expr`, but if the outermost expression is a BinOp / UnOp /
+/// IfExpr (which self-wrap with parentheses), emit it without adding a
+/// caller-side extra set. Used at sites like `(body).store(out, i)` where
+/// a redundant outer pair would produce `((a + b)).store(...)`.
+fn print_expr_grouped(out: &mut String, e: &MExpr) {
+    match e {
+        MExpr::BinOp { .. } | MExpr::UnOp { .. } | MExpr::IfExpr { .. } => {
+            // These already emit surrounding parens.
+            print_expr(out, e);
+        }
+        _ => {
+            // Everything else (literal, var, call, field) has no outer paren
+            // — add one to keep `.store(...)` / `.reduce_add()` legal.
+            out.push('(');
+            print_expr(out, e);
+            out.push(')');
+        }
+    }
+}
+
 fn print_expr(out: &mut String, e: &MExpr) {
     match e {
         MExpr::IntLit(i) => {
@@ -1212,6 +1232,46 @@ fn print_expr(out: &mut String, e: &MExpr) {
             }
             out.push('"');
         }
+    }
+}
+
+#[cfg(test)]
+mod paren_tests {
+    use super::{emit, Tier};
+
+    fn assert_no_double_parens(src: &str) {
+        for tier in [Tier::Readable, Tier::Optimized, Tier::Max] {
+            let out = emit(src, tier).expect("emit");
+            assert!(!out.contains("(("), "doubled parens in tier {:?}:\n{out}", tier);
+        }
+    }
+
+    #[test]
+    fn elementwise_vector_add_has_no_double_parens() {
+        assert_no_double_parens(
+            "(elementwise-mojo vector-add [^f32 a ^f32 b] ^f32 (+ a b))",
+        );
+    }
+
+    #[test]
+    fn reduce_sum_sq_has_no_double_parens() {
+        assert_no_double_parens(
+            "(reduce-mojo sum-sq [^f32 x] ^f32 (* x x) 0.0)",
+        );
+    }
+
+    #[test]
+    fn reduce_dot_has_no_double_parens() {
+        assert_no_double_parens(
+            "(reduce-mojo dot [^f32 a ^f32 b] ^f32 (* a b) 0.0)",
+        );
+    }
+
+    #[test]
+    fn defn_expr_body_has_no_double_parens() {
+        assert_no_double_parens(
+            "(defn ^f32 f [^f32 a ^f32 b ^f32 c] (+ a (* b c)))",
+        );
     }
 }
 
