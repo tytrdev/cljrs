@@ -31,7 +31,7 @@ fn try_single_catch() {
                          (catch ValueError as e (handle e)))
                     0)"#;
     let out = emit(src, Tier::Readable).unwrap();
-    assert_has(&out, &["try:", "do-stuff(x)",
+    assert_has(&out, &["try:", "do_stuff(x)",
                       "except ValueError as e:", "handle(e)"]);
 }
 
@@ -275,4 +275,68 @@ fn isinstance_mojo_lowers_to_builtin() {
     let src = "(defn-mojo chk ^bool [^Shape x] (isinstance-mojo x Square))";
     let out = emit(src, Tier::Readable).unwrap();
     assert!(out.contains("isinstance(x, Square)"), "got:\n{out}");
+}
+
+// ---------------- Feature: kebab → snake_case auto-rename ----------------
+
+#[test]
+fn rename_fn_name() {
+    let src = "(defn-mojo vector-add ^f32 [^f32 a ^f32 b] (+ a b))";
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("fn vector_add("), "got:\n{out}");
+    // Original name preserved in the trace comment.
+    assert!(out.contains("# cljrs: (defn-mojo vector-add"), "trace comment lost:\n{out}");
+}
+
+#[test]
+fn rename_param_and_let() {
+    let src = "(defn-mojo compute ^f32 [^f32 a-in ^f32 b-in]
+                 (let [^f32 sum-val (+ a-in b-in)] sum-val))";
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("a_in: Float32"), "got:\n{out}");
+    assert!(out.contains("b_in: Float32"), "got:\n{out}");
+    assert!(out.contains("var sum_val: Float32 = (a_in + b_in)"), "got:\n{out}");
+    assert!(out.contains("return sum_val"), "got:\n{out}");
+}
+
+#[test]
+fn rename_struct_and_fields() {
+    let src = "(defstruct-mojo Bounding-Box [^f32 min-x ^f32 max-x])";
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("struct Bounding_Box:"), "got:\n{out}");
+    assert!(out.contains("var min_x: Float32"), "got:\n{out}");
+    assert!(out.contains("var max_x: Float32"), "got:\n{out}");
+    assert!(out.contains("self.min_x = min_x"), "got:\n{out}");
+}
+
+#[test]
+fn rename_method_name_and_field_access() {
+    let src = r#"
+(defstruct-mojo Vec3 [^f32 x ^f32 y ^f32 z])
+(defn-method-mojo Vec3 length-sq ^f32 []
+  (+ (* (. self x) (. self x))
+     (+ (* (. self y) (. self y))
+        (* (. self z) (. self z)))))
+"#;
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("fn length_sq(self)"), "got:\n{out}");
+}
+
+#[test]
+fn rename_alias_name() {
+    let src = "(alias-mojo ^i32 LANE-WIDTH 8)";
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("alias LANE_WIDTH: Int32 = 8"), "got:\n{out}");
+}
+
+#[test]
+fn rename_user_call_callee() {
+    // Caller references a kebab-named fn; both declaration and call site
+    // should be rewritten in sync.
+    let src = "(defn-mojo helper-fn ^f32 [^f32 x] (* x 2.0))
+               (defn-mojo use-helper ^f32 [^f32 y] (helper-fn y))";
+    let out = emit(src, Tier::Readable).unwrap();
+    assert!(out.contains("fn helper_fn("), "got:\n{out}");
+    assert!(out.contains("fn use_helper("), "got:\n{out}");
+    assert!(out.contains("helper_fn(y)"), "got:\n{out}");
 }

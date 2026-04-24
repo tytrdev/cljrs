@@ -71,7 +71,7 @@ fn sphere_sdf_sqrt() {
                  (- (sqrt (+ (* x x) (+ (* y y) (* z z)))) r))";
     let out = emit(src, Tier::Readable).unwrap();
     assert!(out.contains("from math import sqrt"));
-    assert!(out.contains("fn sphere-sdf("), "got:\n{out}");
+    assert!(out.contains("fn sphere_sdf("), "got:\n{out}");
 }
 
 #[test]
@@ -121,7 +121,7 @@ fn tier_max_strips_comments_and_inlines() {
     let out = emit(src, Tier::Max).unwrap();
     assert!(!out.contains("# cljrs:"), "max should strip comments:\n{out}");
     // sq is a 1-stmt return fn; use-sq should inline it to (x * x).
-    assert!(out.contains("fn use-sq"), "got:\n{out}");
+    assert!(out.contains("fn use_sq"), "got:\n{out}");
 }
 
 #[test]

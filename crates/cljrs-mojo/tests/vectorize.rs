@@ -23,7 +23,7 @@ fn elementwise_vector_add_max_emits_vectorize() {
     must(&out, "from memory import UnsafePointer");
     must(&out, "from sys import simd_width_of");
     must(&out, "alias nelts_f32 = simd_width_of[DType.float32]()");
-    must(&out, "fn vector-add(a: UnsafePointer[Float32], b: UnsafePointer[Float32], out: UnsafePointer[Float32], n: Int):");
+    must(&out, "fn vector_add(a: UnsafePointer[Float32], b: UnsafePointer[Float32], out: UnsafePointer[Float32], n: Int):");
     must(&out, "@parameter");
     must(&out, "fn __kernel[w: Int](i: Int):");
     must(&out, "var av = SIMD[DType.float32, w].load(a, i)");

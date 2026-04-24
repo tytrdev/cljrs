@@ -90,7 +90,7 @@ fn tour_readable() {
         "inout x: Int32",
         "List[Int](10, 20, 30)",
         "Optional(x)",
-        "fn length-method(self)",
+        "fn length_method(self)",
     ] {
         assert!(out.contains(needle), "missing {needle} in:\n{out}");
     }

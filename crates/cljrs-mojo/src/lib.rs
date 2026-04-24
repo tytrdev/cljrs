@@ -47,6 +47,9 @@
 //!   exponentials (`exp expm1 log log1p log2 log10`), roots & rounding
 //!   (`sqrt cbrt floor ceil round trunc`), plus `pow`, `hypot`,
 //!   `copysign`, `abs`, `min`, `max`.
+//! - **Naming**: kebab-case identifiers (`vector-add`, `abs-max`) are
+//!   auto-rewritten to snake_case in the emitted Mojo. The original
+//!   source name is preserved in the `# cljrs:` tier-Readable comment.
 //! - **Tiers**: Readable (keeps `# cljrs:` comments), Optimized
 //!   (const-fold + CSE + inline 1-stmt return fns), Max (adds
 //!   `@always_inline` to pure, non-recursive, ≤10-stmt fns with
@@ -183,6 +186,18 @@ fn dtype_short(dt: &str) -> &str {
 
 // ---------------- printer ----------------
 
+/// Rewrite a single identifier: kebab-case → snake_case. Applied at
+/// emission sites only; the cljrs AST keeps the original names so the
+/// `# cljrs:` trace comment is faithful to the source.
+pub(crate) fn snake(s: &str) -> String {
+    if !s.contains('-') {
+        return s.to_string();
+    }
+    // Leave literal strings / quoted content alone — this helper is only
+    // called on identifier positions.
+    s.replace('-', "_")
+}
+
 fn print_module(m: &MModule, tier: Tier) -> String {
     let mut out = String::new();
     for imp in &m.imports {
@@ -214,16 +229,16 @@ fn print_item(out: &mut String, item: &MItem, tier: Tier) {
             }
             out.push_str("@value\n");
             out.push_str("struct ");
-            out.push_str(name);
+            out.push_str(&snake(name));
             if let Some(t) = trait_impl {
                 out.push('(');
-                out.push_str(t);
+                out.push_str(&snake(t));
                 out.push(')');
             }
             out.push_str(":\n");
             for (fname, fty) in fields {
                 out.push_str("    var ");
-                out.push_str(fname);
+                out.push_str(&snake(fname));
                 if !matches!(fty, MType::Infer) {
                     out.push_str(": ");
                     out.push_str(&fty.as_str());
@@ -234,7 +249,7 @@ fn print_item(out: &mut String, item: &MItem, tier: Tier) {
             out.push_str("    fn __init__(out self");
             for (fname, fty) in fields {
                 out.push_str(", ");
-                out.push_str(fname);
+                out.push_str(&snake(fname));
                 if !matches!(fty, MType::Infer) {
                     out.push_str(": ");
                     out.push_str(&fty.as_str());
@@ -247,10 +262,11 @@ fn print_item(out: &mut String, item: &MItem, tier: Tier) {
                 out.push_str("        pass\n");
             } else {
                 for (fname, _) in fields {
+                    let n = snake(fname);
                     out.push_str("        self.");
-                    out.push_str(fname);
+                    out.push_str(&n);
                     out.push_str(" = ");
-                    out.push_str(fname);
+                    out.push_str(&n);
                     out.push('\n');
                 }
             }
@@ -269,7 +285,7 @@ fn print_item(out: &mut String, item: &MItem, tier: Tier) {
                 }
             }
             out.push_str("alias ");
-            out.push_str(name);
+            out.push_str(&snake(name));
             if !matches!(ty, MType::Infer) {
                 out.push_str(": ");
                 out.push_str(&ty.as_str());
@@ -287,19 +303,19 @@ fn print_item(out: &mut String, item: &MItem, tier: Tier) {
                 }
             }
             out.push_str("trait ");
-            out.push_str(name);
+            out.push_str(&snake(name));
             out.push_str(":\n");
             if methods.is_empty() {
                 out.push_str("    pass\n");
             } else {
                 for m in methods {
                     out.push_str("    fn ");
-                    out.push_str(&m.name);
+                    out.push_str(&snake(&m.name));
                     out.push_str("(self");
                     for (n, t, c) in &m.params {
                         out.push_str(", ");
                         out.push_str(c.as_prefix());
-                        out.push_str(n);
+                        out.push_str(&snake(n));
                         if !matches!(t, MType::Infer) {
                             out.push_str(": ");
                             out.push_str(&t.as_str());
@@ -326,7 +342,7 @@ fn print_item(out: &mut String, item: &MItem, tier: Tier) {
                 }
             }
             out.push_str("var ");
-            out.push_str(name);
+            out.push_str(&snake(name));
             if !matches!(ty, MType::Infer) {
                 out.push_str(": ");
                 out.push_str(&ty.as_str());
@@ -359,18 +375,18 @@ fn print_elementwise(
     let dt = mtype_dtype_field(out_ty);
     // Signature.
     out.push_str("fn ");
-    out.push_str(name);
+    out.push_str(&snake(name));
     out.push('(');
     for (i, (n, _)) in ptr_inputs.iter().enumerate() {
         if i > 0 {
             out.push_str(", ");
         }
-        out.push_str(n);
+        out.push_str(&snake(n));
         out.push_str(&format!(": UnsafePointer[{}]", ty_str));
     }
     for (n, t) in scalar_inputs {
         out.push_str(", ");
-        out.push_str(n);
+        out.push_str(&snake(n));
         out.push_str(": ");
         out.push_str(&t.as_str());
     }
@@ -400,8 +416,9 @@ fn print_elementwise(
             out.push_str("    @parameter\n");
             out.push_str("    fn __kernel[w: Int](i: Int):\n");
             for (n, _) in ptr_inputs {
+                let sn = snake(n);
                 out.push_str(&format!(
-                    "        var {n}v = SIMD[DType.{dt}, w].load({n}, i)\n"
+                    "        var {sn}v = SIMD[DType.{dt}, w].load({sn}, i)\n"
                 ));
             }
             let ptr_names: Vec<String> = ptr_inputs.iter().map(|(n, _)| n.clone()).collect();
@@ -480,7 +497,7 @@ fn print_fn_indented(out: &mut String, f: &MFn, tier: Tier, base: usize) {
     }
     indent(out, base);
     out.push_str("fn ");
-    out.push_str(&f.name);
+    out.push_str(&snake(&f.name));
     if !f.cparams.is_empty() {
         out.push('[');
         for (i, (n, t)) in f.cparams.iter().enumerate() {
@@ -505,7 +522,7 @@ fn print_fn_indented(out: &mut String, f: &MFn, tier: Tier, base: usize) {
         }
         idx += 1;
         out.push_str(c.as_prefix());
-        out.push_str(n);
+        out.push_str(&snake(n));
         if !matches!(t, MType::Infer) {
             out.push_str(": ");
             out.push_str(&t.as_str());
@@ -541,7 +558,7 @@ fn print_stmt(out: &mut String, s: &MStmt, lvl: usize) {
         MStmt::Let { name, ty, value } => {
             indent(out, lvl);
             out.push_str("var ");
-            out.push_str(name);
+            out.push_str(&snake(name));
             if !matches!(ty, MType::Infer) {
                 out.push_str(": ");
                 out.push_str(&ty.as_str());
@@ -552,7 +569,7 @@ fn print_stmt(out: &mut String, s: &MStmt, lvl: usize) {
         }
         MStmt::Assign { name, value } => {
             indent(out, lvl);
-            out.push_str(name);
+            out.push_str(&snake(name));
             out.push_str(" = ");
             print_expr(out, value);
             out.push('\n');
@@ -709,7 +726,7 @@ fn print_stmt(out: &mut String, s: &MStmt, lvl: usize) {
         MStmt::ForRange { name, ty: _, lo, hi, body } => {
             indent(out, lvl);
             out.push_str("for ");
-            out.push_str(name);
+            out.push_str(&snake(name));
             out.push_str(" in range(");
             print_expr(out, lo);
             out.push_str(", ");
@@ -737,7 +754,7 @@ fn print_expr(out: &mut String, e: &MExpr) {
             out.push_str(&s);
         }
         MExpr::BoolLit(b) => out.push_str(if *b { "True" } else { "False" }),
-        MExpr::Var(n) => out.push_str(n),
+        MExpr::Var(n) => out.push_str(&snake(n)),
         MExpr::BinOp { op, lhs, rhs } => {
             out.push('(');
             print_expr(out, lhs);
@@ -779,7 +796,7 @@ fn print_expr(out: &mut String, e: &MExpr) {
                 if !args.is_empty() {
                     print_expr(out, &args[0]);
                     out.push('.');
-                    out.push_str(method);
+                    out.push_str(&snake(method));
                     out.push('(');
                     for (i, a) in args[1..].iter().enumerate() {
                         if i > 0 {
@@ -791,7 +808,13 @@ fn print_expr(out: &mut String, e: &MExpr) {
                     return;
                 }
             }
-            out.push_str(callee);
+            // Don't mangle callees that carry Mojo-level syntax (brackets,
+            // dots, double-underscore sentinels) — those are already valid.
+            if callee.contains('[') || callee.contains('.') || callee.starts_with("__") {
+                out.push_str(callee);
+            } else {
+                out.push_str(&snake(callee));
+            }
             out.push('(');
             for (i, a) in args.iter().enumerate() {
                 if i > 0 {
@@ -813,7 +836,7 @@ fn print_expr(out: &mut String, e: &MExpr) {
         MExpr::Field { obj, field } => {
             print_expr(out, obj);
             out.push('.');
-            out.push_str(field);
+            out.push_str(&snake(field));
         }
         MExpr::StrLit(s) => {
             out.push('"');
