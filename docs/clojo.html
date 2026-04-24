@@ -66,12 +66,48 @@
     } from "./_layout.js";
     mountChrome();
 
-    const INITIAL_SOURCE = `;; Smoothstep — classic shader util.
+    const INITIAL_SOURCE = `;; A tour of what the cljrs -> Mojo transpiler supports today.
 ;; Edit and watch the Mojo update. Try each tier.
+
+;; --- smoothstep (shader classic) ---
 (defn-mojo smoothstep ^f32
   [^f32 edge0 ^f32 edge1 ^f32 x]
   (let [t (max 0.0 (min 1.0 (/ (- x edge0) (- edge1 edge0))))]
     (* t (* t (- 3.0 (* 2.0 t))))))
+
+;; --- extended numeric types + extended math ---
+(defn-mojo mix-shape ^bf16 [^bf16 x ^u32 n]
+  (+ x (tanh (atan2 x (log2 (+ 1.0 x))))))
+
+;; --- structs + field access ---
+(defstruct-mojo Vec3 [^f32 x ^f32 y ^f32 z])
+
+(defn-mojo length ^f32 [^Vec3 v]
+  (sqrt (+ (* (. v x) (. v x))
+        (+ (* (. v y) (. v y))
+           (* (. v z) (. v z))))))
+
+;; --- counting loops: for-mojo sugar + break ---
+(defn-mojo first-hit ^i32 [^i32 n]
+  (for-mojo [i 0 n]
+    (if (hit? i) (break)))
+  0)
+
+;; --- cond -> flat if/elif/else ---
+(defn-mojo classify ^i32 [^f32 x]
+  (cond (< x 0.0) -1
+        (= x 0.0)  0
+        (< x 1.0)  1
+        :else      2))
+
+;; --- multi-arity -> greet, greet_2 ---
+(defn-mojo greet ^str
+  ([^str name] (format "hi {}" name))
+  ([^str name ^i32 age] (format "hi {} (age {})" name age)))
+
+;; --- compile-time decorator sugar ---
+(always-inline-fn-mojo sq ^f32 [^f32 x] (* x x))
+(parameter-fn-mojo specialized ^i32 [^i32 n] n)
 `;
 
     (async () => {
