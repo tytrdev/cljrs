@@ -1,4 +1,4 @@
-# cljrs: (defn-mojo factorial (__tagged__ i64 [(__tagged__ i64 n)]) (loop [i 1 acc 1] (if (> i n) acc (recur (+ i 1) (* acc i)))))
+# cljrs: (defn-mojo factorial ^i64 [^i64 n] (loop [i 1 acc 1] (if (> i n) acc (recur (+ i 1) (* acc i)))))
 fn factorial(n: Int64) -> Int64:
     var i = 1
     var acc = 1
